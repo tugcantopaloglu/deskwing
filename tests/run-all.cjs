@@ -23,6 +23,7 @@ const suites=[
   {name:'media-sessions',group:'core',project:'tests/media-sessions/MediaSessionTests.csproj'},
   {name:'readiness-backend',group:'core',project:'tests/readiness-backend/ReadinessBackendTests.csproj'},
   {name:'ink-backend',group:'core',project:'tests/ink-backend/InkBackendTests.csproj'},
+  {name:'pen-preview-backend',group:'core',project:'tests/pen-preview/PenPreviewTests.csproj'},
   {name:'shortcut-migration',group:'core',project:'tests/shortcut-migration/ShortcutMigrationTests.csproj'},
   {name:'integration-api',group:'core',integration:true},
   ...['layout','copilot-ui','soundpad-sync-ui','media-touchbar-ui','live-soundpad-board','live-sync','desktop-rendered','editor-workflow','macro-editor','pen-ui','workspace-rendered','ink-rendered'].map(name=>({name,group:'ui',script:name+'.cjs',browser:true,timeout:name==='desktop-rendered'?240000:180000})),

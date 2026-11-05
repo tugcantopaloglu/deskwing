@@ -9,6 +9,7 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
     private let pin: String
     private let token: String
     private let waitsForConnectivity: Bool
+    private let penPreviewOnly: Bool
     private let lock = NSLock()
     private var receivedPin = ""
     private var pending: [Int: Pending] = [:]
@@ -22,19 +23,21 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
         var bodyStarted = false
         var failure: Error?
     }
-    private static let maximumReply = 6 * 1024 * 1024
+    private var maximumReply: Int { (penPreviewOnly ? 3 : 6) * 1024 * 1024 }
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil; configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil
         configuration.httpShouldSetCookies = false; configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 65; configuration.timeoutIntervalForResource = 70
+        configuration.timeoutIntervalForRequest = penPreviewOnly ? 4 : 65
+        configuration.timeoutIntervalForResource = penPreviewOnly ? 4 : 70
         configuration.waitsForConnectivity = waitsForConnectivity; configuration.allowsCellularAccess = false
-        configuration.httpMaximumConnectionsPerHost = 4; configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
+        configuration.httpMaximumConnectionsPerHost = penPreviewOnly ? 1 : 4; configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
         let callbacks = OperationQueue(); callbacks.maxConcurrentOperationCount = 1
         return URLSession(configuration: configuration, delegate: self, delegateQueue: callbacks)
     }()
-    init(host: String, port: Int, pin: String, token: String = "", waitsForConnectivity: Bool = false) {
+    init(host: String, port: Int, pin: String, token: String = "", waitsForConnectivity: Bool = false, penPreviewOnly: Bool = false) {
         self.host = host; self.port = port; self.pin = pin; self.token = token; self.waitsForConnectivity = waitsForConnectivity
+        self.penPreviewOnly = penPreviewOnly
         super.init()
     }
     var verifiedFingerprint: String { lock.lock(); defer { lock.unlock() }; return receivedPin }
@@ -42,6 +45,7 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
     @discardableResult
     func send(path: String, method: String, body: [String: Any], pairing: Bool = false, reply: @escaping Reply) throws -> URLSessionDataTask {
         guard HostPolicy.validHost(host), (1...65535).contains(port), HostPolicy.normalizedPin(pin) == pin,
+              penPreviewOnly == (path == "/api/pen/frame"),
               (pairing && path == "/api/pair" && method == "POST" && token.isEmpty) ||
                 (!pairing && pin.count == 64 && !token.isEmpty && HostPolicy.allowed(path, method: method)) else {
             throw DeskError.message("This PC request is not allowed.")
@@ -61,10 +65,10 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
             request.httpBody = data
         }
         if pairing { request.timeoutInterval = 12 }
-        if path.hasSuffix("/frame") { request.timeoutInterval = 8 }
+        if path.hasSuffix("/frame") { request.timeoutInterval = penPreviewOnly ? 4 : 8 }
         let task = session.dataTask(with: request)
         lock.lock()
-        guard pending.count < 16 else { lock.unlock(); throw DeskError.message("The PC is busy. Wait for the current action before trying again.") }
+        guard pending.count < (penPreviewOnly ? 1 : 16) else { lock.unlock(); throw DeskError.message("The PC is busy. Wait for the current request before trying again.") }
         pending[task.taskIdentifier] = Pending(task: task, path: path,
             release: HostPolicy.allowedInBackground(path, body: body), reply: reply)
         lock.unlock()
@@ -119,7 +123,7 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         lock.lock()
         guard var item = pending[dataTask.taskIdentifier], let http = response as? HTTPURLResponse,
-              response.expectedContentLength <= Int64(Self.maximumReply), http.url?.host == host else {
+              response.expectedContentLength <= Int64(maximumReply), http.url?.host == host else {
             lock.unlock(); completionHandler(.cancel); return
         }
         item.status = http.statusCode; pending[dataTask.taskIdentifier] = item
@@ -128,7 +132,7 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         lock.lock()
         guard var item = pending[dataTask.taskIdentifier] else { lock.unlock(); return }
-        if data.count > Self.maximumReply - item.data.count {
+        if data.count > maximumReply - item.data.count {
             item.failure = DeskError.message("The PC response is too large. Reduce the board or library and retry.")
             pending[dataTask.taskIdentifier] = item; lock.unlock(); dataTask.cancel(); return
         }

@@ -49,6 +49,7 @@
     "test:ink-api": "node ink-api.cjs",
     "test:pen-api": "node pen-api.cjs",
     "test:ink-backend": "dotnet run --project ink-backend/InkBackendTests.csproj -c Release",
+    "test:pen-preview-backend": "dotnet run --project pen-preview/PenPreviewTests.csproj -c Release",
     "test:shortcut-migration": "dotnet run --project shortcut-migration/ShortcutMigrationTests.csproj -c Release"
   },
   "keywords": [],

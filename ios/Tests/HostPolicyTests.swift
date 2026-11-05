@@ -98,6 +98,42 @@ final class HostPolicyTests: XCTestCase {
         XCTAssertFalse(HostPolicy.allowed("/local/fullscreen", method: "POST"))
         XCTAssertEqual(HostPolicy.maximumBridgeBytes("/local/fullscreen"), 16384)
     }
+    func testPenPreviewRouteAndBodyStayBounded() throws {
+        XCTAssertTrue(HostPolicy.allowed("/api/pen/frame", method: "POST"))
+        XCTAssertFalse(HostPolicy.allowed("/api/pen/frame", method: "GET"))
+        XCTAssertFalse(HostPolicy.allowed("/api/pen/frame?lease=secret", method: "POST"))
+        XCTAssertFalse(HostPolicy.allowed("/api/pen/frame/", method: "POST"))
+        XCTAssertFalse(HostPolicy.allowedInBackground("/api/pen/frame", body: ["operation":"cancel"]))
+        XCTAssertFalse(HostPolicy.needsDispatchDeadline("/api/pen/frame", method: "POST", body: [:]))
+        XCTAssertEqual(HostPolicy.maximumBodyBytes("/api/pen/frame"), 1024)
+        XCTAssertEqual(try HostPolicy.penFrameLease(["lease":"active"]), "active")
+        for width in [160, 1280, 1600] { XCTAssertEqual(try HostPolicy.penFrameLease(["lease":"active", "width":width]), "active") }
+        let invalidWidths: [Any] = [159, 1601, 160.5, true, "1280", NSNull(), Double.infinity]
+        for width in invalidWidths {
+            XCTAssertThrowsError(try HostPolicy.penFrameLease(["lease":"active", "width":width]))
+        }
+        let invalidBodies: [[String: Any]] = [[:], ["lease":""], ["lease":String(repeating: "x", count: 129)], ["lease":"active", "targetId":"other"]]
+        for body in invalidBodies {
+            XCTAssertThrowsError(try HostPolicy.penFrameLease(body))
+        }
+    }
+    func testPenPreviewDoesNotQueueOrReuseAnOldLease() throws {
+        var preview = PenPreviewRequests()
+        XCTAssertThrowsError(try preview.begin("old"))
+        preview.activate("old")
+        let old = try preview.begin("old")
+        XCTAssertThrowsError(try preview.begin("old"))
+        preview.reset()
+        XCTAssertThrowsError(try preview.begin("old"))
+        preview.activate("new")
+        let current = try preview.begin("new")
+        XCTAssertFalse(preview.finish(old))
+        XCTAssertThrowsError(try preview.begin("new"))
+        XCTAssertTrue(preview.finish(current))
+        XCTAssertThrowsError(try preview.begin("old"))
+        let next = try preview.begin("new")
+        XCTAssertTrue(preview.finish(next))
+    }
     func testPNGAndFilenameValidation() {
         XCTAssertEqual(PNGExport.safeName("../private.png"), "DeskWing-sketch.png")
         XCTAssertEqual(PNGExport.safeName("My note-2.png"), "My note-2.png")

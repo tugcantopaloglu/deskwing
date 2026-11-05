@@ -21,11 +21,16 @@ body.desktop-console .pen-tablet-workspace{grid-column:2;grid-row:2}
 .pen-tablet-admin p{flex-basis:100%;margin:0;max-width:75ch;line-height:1.6;font-size:13px}
 .pen-tablet-target{min-width:0;flex:1 1 220px}
 .pen-tablet-target strong{display:block;font-size:15px;overflow-wrap:anywhere}
-.pen-tablet-status{font-size:13px;color:var(--secondary);line-height:1.6;margin:5px 0 0;min-height:21px;max-width:75ch}
+.pen-tablet-status{font-size:13px;color:var(--secondary);line-height:1.6;margin:5px 0 0;height:3.2em;min-height:3.2em;overflow:auto;max-width:75ch}
 .pen-tablet-error{color:var(--amber)}
-.pen-tablet-stage{display:flex;align-items:center;justify-content:center;flex:1 0 260px;min-height:260px;height:100%;max-height:65vh;overflow:hidden;background:#131922;border-radius:12px}
-.pen-tablet-pad{position:relative;flex-shrink:0;overflow:hidden;background:var(--surface);border:1px solid var(--outline);border-radius:12px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:crosshair}
-.pen-tablet-connected .pen-tablet-pad{border-color:var(--cyan)}
+.pen-tablet-stage{display:flex;align-items:center;justify-content:center;flex:0 0 auto;min-height:260px;height:clamp(260px,50vh,520px);overflow:hidden;background:#131922;border-radius:12px}
+.pen-tablet-pad{position:relative;flex-shrink:0;overflow:hidden;background:var(--surface);border:0;outline:1px solid var(--outline);outline-offset:-1px;border-radius:12px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:crosshair}
+.pen-tablet-connected .pen-tablet-pad{outline-color:var(--cyan)}
+.pen-tablet-preview{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:fill;pointer-events:none;user-select:none;-webkit-user-select:none}
+.pen-tablet-preview[hidden],.pen-tablet-hint[hidden]{display:none!important}
+.pen-tablet-preview-status{font-size:13px;line-height:1.6;margin:5px 0 0;height:3.2em;min-height:3.2em;overflow:auto;color:var(--secondary)}
+.pen-tablet-connection .pen-tablet-actions button.primary{min-width:170px}
+.pen-tablet-preview-status.pen-tablet-error{color:var(--amber)}
 .pen-tablet-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:28px;margin:0;text-align:center;color:var(--secondary);line-height:1.6;pointer-events:none;font-size:clamp(14px,1.5vw,18px)}
 .pen-tablet-cursor{position:absolute;width:18px;height:18px;border:2px solid var(--cyan);border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
 .pen-tablet-cursor[hidden]{display:none}
@@ -37,15 +42,16 @@ body.desktop-console .pen-tablet-workspace{grid-column:2;grid-row:2}
 .pen-tablet-workspace.pen-tablet-fullscreen,.pen-tablet-workspace:fullscreen{position:fixed;inset:0;z-index:1100;width:100%;height:100%;max-height:none;padding:0;display:block;overflow:hidden}
 .pen-tablet-fullscreen .pen-tablet-heading,.pen-tablet-fullscreen .pen-tablet-admin,.pen-tablet-fullscreen .pen-tablet-footer,.pen-tablet-fullscreen .pen-tablet-hint,.pen-tablet-fullscreen .pen-tablet-connection{display:none}
 .pen-tablet-fullscreen .pen-tablet-stage{position:absolute;inset:0;width:100%;height:100%;min-height:0;max-height:none;border-radius:0}
-.pen-tablet-fullscreen .pen-tablet-pad{border:0;border-radius:0}
+.pen-tablet-fullscreen .pen-tablet-pad{border:0;outline:0;border-radius:0}
 .pen-tablet-floating-controls{position:absolute;z-index:3;top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));display:flex;align-items:center;gap:6px;max-width:calc(100% - 24px)}
 .pen-tablet-floating-controls button{min-width:44px;min-height:44px;padding:10px 12px;font-size:12px;white-space:nowrap;box-shadow:0 4px 16px #0005}
 .pen-tablet-fullscreen.pen-tablet-tools-open .pen-tablet-connection{position:absolute;z-index:2;display:flex;align-items:flex-start;gap:16px;top:calc(max(12px,env(safe-area-inset-top)) + 56px);right:max(12px,env(safe-area-inset-right));width:min(440px,calc(100% - 24px));max-height:calc(100% - max(12px,env(safe-area-inset-top)) - max(12px,env(safe-area-inset-bottom)) - 56px);overflow:auto;padding:16px;background:var(--canvas);border:1px solid var(--outline);border-radius:12px}
 .pen-tablet-fullscreen .pen-tablet-target{flex-basis:100%}
+.pen-tablet-fullscreen .pen-tablet-status,.pen-tablet-fullscreen .pen-tablet-preview-status{height:auto;min-height:0;overflow:visible}
 .pen-tablet-fullscreen .pen-tablet-mapping{display:flex;flex-direction:column;gap:7px;flex-basis:100%;font-size:13px;font-weight:700;margin:0}
 .pen-tablet-mapping select{min-height:44px;width:100%;background:var(--surface);border:1px solid var(--outline);border-radius:10px;color:var(--ink);font-size:14px;padding:10px 12px}
 .pen-tablet-fullscreen .pen-tablet-mapping-help{display:block;flex-basis:100%;margin:0;font-size:13px;line-height:1.6}
-@media(max-width:1050px){.pen-tablet-workspace{padding:16px}.pen-tablet-stage{min-height:240px;flex-basis:240px}.pen-tablet-heading{gap:12px}.pen-tablet-heading p{font-size:14px}.pen-tablet-connection{gap:12px}}
+@media(max-width:1050px){.pen-tablet-workspace{padding:16px}.pen-tablet-stage{min-height:240px;height:clamp(240px,50vh,520px)}.pen-tablet-heading{gap:12px}.pen-tablet-heading p{font-size:14px}.pen-tablet-connection{gap:12px}}
 @media(max-width:580px){.pen-tablet-workspace{padding:12px;gap:12px}.pen-tablet-heading{align-items:flex-start}.pen-tablet-heading p{font-size:13px}.pen-tablet-workspace button{padding:10px 12px}.pen-tablet-admin label{flex-basis:100%}.pen-tablet-stage{min-height:220px;flex-basis:220px}.pen-tablet-footer output{min-width:0}.pen-tablet-fullscreen .pen-tablet-heading{flex-wrap:nowrap}.pen-tablet-fullscreen .pen-tablet-heading h2{font-size:18px}.pen-tablet-fullscreen .pen-tablet-heading .pen-tablet-actions{flex-wrap:nowrap}.pen-tablet-fullscreen .pen-tablet-heading button{font-size:12px;padding:9px}.pen-tablet-fullscreen .pen-tablet-connection{gap:8px}.pen-tablet-fullscreen .pen-tablet-status{font-size:12px}.pen-tablet-fullscreen .pen-tablet-stage{min-height:100px}}
 @media(prefers-reduced-motion:reduce){.pen-tablet-workspace *{scroll-behavior:auto}}
-.pen-tablet-fullscreen .pen-tablet-stage{min-height:0}
+.pen-tablet-fullscreen .pen-tablet-stage{min-height:0;height:100%;flex-basis:auto}

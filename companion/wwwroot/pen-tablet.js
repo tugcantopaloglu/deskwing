@@ -2,6 +2,7 @@
 // Windows Ink is opt-in. An expired, interrupted, or disconnected lease never resumes itself.
 (function () {
   const MAX_BATCH = 32, MAX_PENDING = 96, MAX_AGE = 500, TICK = 8, RENEW = 350, REQUEST_TIMEOUT = 850;
+  const FRAME_INTERVAL = 84, FRAME_SOFT_TIMEOUT = 1500, FRAME_TIMEOUT = 5000, MAX_FRAME_BYTES = 2*1024*1024;
   const finite = value => typeof value === 'number' && Number.isFinite(value);
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const phases = new Set(['hover','down','move','up','leave']);
@@ -14,6 +15,51 @@
     return normalizeSample({phase,x:(event.clientX-rect.left)/rect.width,y:(event.clientY-rect.top)/rect.height,pressure:finite(event.pressure) ? event.pressure : 0.5,tiltX:finite(event.tiltX) ? event.tiltX : 0,tiltY:finite(event.tiltY) ? event.tiltY : 0,barrel:(event.buttons & 2) !== 0,eraser:event.button === 5 || (event.buttons & 32) !== 0});
   }
   function isContact(event) { return event.pointerType === 'pen' && ((event.buttons & 33) !== 0 || event.pressure > 0); }
+  function normalizeFrame(value,target,requestedWidth,lastSequence=0) {
+    if(!value || value.targetId!==target.id || value.targetWidth!==target.width || value.targetHeight!==target.height)throw new Error('The PC view no longer matches the selected target.');
+    if(!Number.isInteger(value.width) || !Number.isInteger(value.height) || value.width<1 || value.height<1 || value.width>Math.min(1600,requestedWidth) || value.height>1600 || Math.abs(value.width*target.height-value.height*target.width)>Math.max(target.width,target.height))throw new Error('The PC returned an invalid view size.');
+    if(!Number.isSafeInteger(value.sequence) || value.sequence<=lastSequence || typeof value.capturedAt!=='string' || value.capturedAt.length>40 || !Number.isFinite(Date.parse(value.capturedAt)))throw new Error('The PC returned an outdated view.');
+    if(typeof value.image!=='string' || value.image.length>MAX_FRAME_BYTES || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(value.image) || (value.image.length-23)%4!==0)throw new Error('The PC returned an invalid image.');
+    return {image:value.image,width:value.width,height:value.height,targetId:value.targetId,targetWidth:value.targetWidth,targetHeight:value.targetHeight,sequence:value.sequence,capturedAt:value.capturedAt};
+  }
+  function createPreview(options) {
+    const now=options.now || (()=>performance.now()),schedule=options.schedule || setTimeout,unschedule=options.unschedule || clearTimeout;
+    let generation=0,session=null,timer=null,inFlight=false,state='idle',sequence=0,failures=0;
+    function emit(next,message=''){state=next;options.onState?.({state,message});}
+    function clear(){options.onClear?.();}
+    function arm(delay){if(!session)return;if(timer!==null)unschedule(timer);timer=schedule(()=>{timer=null;void capture();},Math.max(0,delay));}
+    function stop(){generation++;session=null;sequence=0;failures=0;if(timer!==null)unschedule(timer);timer=null;clear();emit('idle');}
+    function start(lease,target){
+      if(session?.lease===lease && session.target.id===target.id && session.target.width===target.width && session.target.height===target.height)return;
+      stop();session={lease,target:{id:target.id,width:target.width,height:target.height}};emit('loading','Loading the live PC view…');if(!inFlight)arm(0);
+    }
+    async function capture(){
+      if(!session || inFlight)return;
+      const token=generation,current=session,started=now();let expired=false,success=false;
+      const currentRequest=()=>token===generation && session===current && !expired;
+      const desired=typeof options.width==='function'?options.width():1280,width=Math.max(160,Math.min(1600,Number.isFinite(desired)?Math.round(desired):1280));
+      inFlight=true;
+      const softDeadline=schedule(()=>{expired=true;if(token===generation && session===current){clear();emit('error','The PC view is taking too long. Check the PC connection.');}},FRAME_SOFT_TIMEOUT);
+      try{
+        // Keep this slot until the transport and image decoder settle, even after a soft timeout or stop.
+        const response=await options.request({lease:current.lease,width},FRAME_TIMEOUT);
+        if(!currentRequest())return;
+        const frame=normalizeFrame(response,current.target,width,sequence);
+        await options.onFrame(frame,currentRequest);
+        if(!currentRequest())return;
+        sequence=frame.sequence;success=true;failures=0;emit('live','Live PC view');
+      }catch(error){if(currentRequest()){clear();const reason=typeof error?.message==='string'?error.message.replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,240):'';emit('error',`PC view unavailable.${reason?' '+reason:''} Reconnect, or choose a screen instead of an app window in DeskWing on your PC.`);}}
+      finally{
+        unschedule(softDeadline);inFlight=false;
+        if(session){
+          if(token!==generation)arm(0);
+          else if(success){const elapsed=now()-started,interval=Math.max(FRAME_INTERVAL,Math.min(1000,Math.ceil(elapsed*1.25)));arm(Math.max(0,interval-elapsed));}
+          else{failures++;arm(Math.min(2000,500*Math.min(failures,4)));}
+        }
+      }
+    }
+    return Object.freeze({start,stop,snapshot:()=>({state,inFlight,hasSession:!!session,sequence})});
+  }
   function createClient(options) {
     const request = options.request, now = options.now || (() => performance.now()), schedule = options.schedule || setTimeout, unschedule = options.unschedule || clearTimeout, changed = options.onChange || (() => {});
     let state = 'idle', message = 'Start a pen session when your Windows app is ready.', generation = 0, lease = null, sequence = 0, startedAt = 0, sentAt = 0, lastPacketAt = -Infinity, timer = null, timerDue = Infinity, inFlight = false, queue = [], lastSample = null, batchLimit = MAX_BATCH;
@@ -61,7 +107,7 @@
         lease=result.lease; sequence=0; batchLimit=Math.max(1,Math.min(MAX_BATCH,Number.isInteger(result.maxBatch) ? result.maxBatch : MAX_BATCH));
         startedAt=now(); sentAt=startedAt;lastPacketAt=-Infinity;inFlight=false;
         // The begin reply is authoritative: apply its current window bounds before input can start.
-        if(typeof options.onLease==='function')options.onLease(result.target);
+        if(typeof options.onLease==='function')options.onLease(result.target,result.lease);
         if(token!==generation)return false;
         state='active'; message='Pen connected. Draw in the Windows app on your PC.'; emit(); arm(RENEW); return true;
       } catch (error) {
@@ -106,23 +152,41 @@
     }
     return Object.freeze({start,stop,enqueue,tick,snapshot,get active(){return state === 'active';},get busy(){return state === 'active' || state === 'starting';}});
   }
-  const core=Object.freeze({createClient,makeSample,normalizeSample,isContact,constants:Object.freeze({MAX_BATCH,MAX_PENDING,MAX_AGE,TICK,RENEW,REQUEST_TIMEOUT})});
+  const core=Object.freeze({createClient,createPreview,normalizeFrame,makeSample,normalizeSample,isContact,constants:Object.freeze({MAX_BATCH,MAX_PENDING,MAX_AGE,TICK,RENEW,REQUEST_TIMEOUT,FRAME_INTERVAL,FRAME_SOFT_TIMEOUT,FRAME_TIMEOUT,MAX_FRAME_BYTES})});
   if (typeof module === 'object' && module.exports) module.exports=core;
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   window.DeskPenTabletCore=core;
 
-  let host, statusLine, targetLine, pad, stage, cursor, coordinates, hint, startButton, stopButton, fullscreenButton, exitButton, adminControls, targetSelect, enableButton, disableButton, refreshButton, floatingControls, toolsButton, floatingSessionButton, mappingSelect, mappingHelp;
+  let host, statusLine, targetLine, pad, stage, cursor, coordinates, hint, startButton, stopButton, fullscreenButton, exitButton, adminControls, targetSelect, enableButton, disableButton, refreshButton, floatingControls, toolsButton, floatingSessionButton, mappingSelect, mappingHelp, previewImage, previewStatus;
   let active=false, suspended=false, status=null, statusError='', statusTimer=null, refreshing=false, configBusy=false, targetEdited=false, targetStamp='', pointerId=null, fullscreen=false, fullscreenPending=false, toolsOpen=false, fillTablet=true, fullscreenError='', applyingLeaseTarget=false, pollingGeneration=0, layoutGeneration=0, resizeObserver;
+  let previewSession=null,previewState='idle',previewMessage='',previewHasImage=false,cancelPreviewDecode=null;
   const element=(tag,className,text) => {const node=document.createElement(tag);if(className)node.className=className;if(text !== undefined)node.textContent=text;return node;};
   const button=(text,handler,className='quiet') => {const node=element('button',className,text);node.type='button';node.addEventListener('click',handler);return node;};
   const desktop=() => typeof desktopConsole !== 'undefined' && desktopConsole === true;
   const nativeHost=() => typeof native !== 'undefined' && native === true && typeof nativeRequest === 'function';
   const request=(path,body,timeout=REQUEST_TIMEOUT) => {if(typeof api !== 'function')return Promise.reject(new Error('The PC connection is unavailable.'));return api(path,body,timeout);};
-  const client=createClient({request:(body,timeout)=>request('/api/pen',body,timeout),onLease:target=>{
+  const client=createClient({request:(body,timeout)=>request('/api/pen',body,timeout),onLease:(target,lease)=>{
     if(!target || typeof target.id!=='string' || typeof target.label!=='string' || !finite(target.width) || !finite(target.height) || target.width<=0 || target.height<=0)throw new Error('The PC did not return the current pen target. Refresh the PC connection and try again.');
     applyingLeaseTarget=true;
-    try{status={...status,active:true,target:{id:target.id,label:target.label,kind:target.kind,width:target.width,height:target.height}};resizePad();}finally{applyingLeaseTarget=false;}
-  },onChange:()=>{if (!client.active) releasePointer();if(fullscreen && client.snapshot().state==='error')toolsOpen=true;render();}});
+    try{status={...status,active:true,target:{id:target.id,label:target.label,kind:target.kind,width:target.width,height:target.height}};previewSession={lease,target:status.target};resizePad();}finally{applyingLeaseTarget=false;}
+  },onChange:()=>{if (!client.active){releasePointer();previewSession=null;preview.stop();}else if(previewSession)preview.start(previewSession.lease,previewSession.target);if(fullscreen && client.snapshot().state==='error')toolsOpen=true;render();}});
+  const preview=createPreview({request:(body,timeout)=>request('/api/pen/frame',body,timeout),width:()=>Math.min(1600,Math.max(640,Math.round((pad?.clientWidth || 1280)*(window.devicePixelRatio || 1)))),onClear:clearPreview,onFrame:presentPreview,onState:info=>{previewState=info.state;previewMessage=info.message;if(info.state==='error' && fullscreen)toolsOpen=true;render();}});
+  function clearPreview(){
+    if(cancelPreviewDecode){const cancel=cancelPreviewDecode;cancelPreviewDecode=null;cancel();}
+    previewHasImage=false;
+    if(previewImage){previewImage.removeAttribute('src');previewImage.hidden=true;}
+  }
+  function presentPreview(frame,isCurrent){
+    return new Promise((resolve,reject)=>{
+      const decoder=document.createElement('img');let finished=false;
+      const finish=error=>{if(finished)return;finished=true;clearTimeout(timeout);decoder.onload=null;decoder.onerror=null;decoder.removeAttribute('src');if(cancelPreviewDecode===cancel)cancelPreviewDecode=null;error?reject(error):resolve();};
+      const cancel=()=>finish();cancelPreviewDecode=cancel;
+      const timeout=setTimeout(()=>finish(new Error('The PC image could not be decoded in time.')),FRAME_SOFT_TIMEOUT);
+      decoder.width=frame.width;decoder.height=frame.height;decoder.decoding='async';
+      decoder.onload=()=>{if(decoder.naturalWidth!==frame.width || decoder.naturalHeight!==frame.height){finish(new Error('The decoded PC image size does not match.'));return;}if(isCurrent() && previewImage){previewImage.src=frame.image;previewImage.hidden=false;previewHasImage=true;}finish();};
+      decoder.onerror=()=>finish(new Error('The PC image could not be decoded.'));decoder.src=frame.image;
+    });
+  }
   function releasePointer() {
     const captured=pointerId;pointerId=null;
     if(captured !== null) {try {if(pad?.hasPointerCapture(captured))pad.releasePointerCapture(captured);}catch{}}
@@ -144,13 +208,16 @@
     startButton.disabled=!ready() || client.busy || refreshing || configBusy || fullscreenPending;
     startButton.textContent=info.state === 'starting' ? 'Connecting…' : 'Start pen session';
     stopButton.disabled=!client.busy;
-    statusLine.textContent=info.state === 'error' || client.busy ? info.message : statusError || status?.error || (status?.supported === false ? 'Windows pen input is unavailable on this PC.' : !status?.enabled ? 'Enable pen input in DeskWing on your PC, then refresh.' : status?.active ? 'Another pen session is using this PC. Stop it before starting here.' : info.message);
+    statusLine.textContent=info.state === 'error' || client.busy ? info.message : statusError || status?.error || (status?.supported === false ? 'Windows pen input is unavailable on this PC.' : !status?.enabled ? 'Enable pen & live view in DeskWing on your PC, then refresh.' : status?.active ? 'Another pen session is using this PC. Stop it before starting here.' : info.message);
     statusLine.classList.toggle('pen-tablet-error',info.state === 'error' || !!statusError || !!status?.error);
     targetLine.textContent=status?.target ? `${status.target.label} · ${status.target.width} × ${status.target.height}` : 'No Windows target selected';
     targetLine.title=targetLine.textContent;
     host.classList.toggle('pen-tablet-connected',running);
     pad.setAttribute('aria-label',`Windows pen tablet surface. ${running ? 'Active. Pen only; fingers are ignored.' : 'Stopped. Start a pen session to use your stylus.'}`);
     hint.textContent=running ? 'Look at your PC and draw here. Your palm is ignored.' : 'Your pen controls the selected Windows screen or window.';
+    if(running)hint.textContent=previewState==='error' ? 'PC view unavailable. Open tools to check the connection.' : 'Loading the live PC view…';
+    hint.hidden=previewHasImage;
+    previewStatus.textContent=previewMessage || 'The live PC view appears after you start a pen session.';previewStatus.classList.toggle('pen-tablet-error',previewState==='error');
     fullscreenButton.textContent=fullscreen ? 'Exit fullscreen' : 'Fullscreen';
     fullscreenButton.setAttribute('aria-pressed',String(fullscreen));
     floatingControls.hidden=!fullscreen;
@@ -162,7 +229,7 @@
     mappingHelp.textContent=fullscreenError || (fillTablet ? 'The whole tablet maps to your PC target. Shapes can stretch when the screen proportions differ.' : 'The active area keeps the PC target’s proportions. Unused edges do not control the pen.');
     mappingHelp.classList.toggle('pen-tablet-error',!!fullscreenError);
     refreshButton.disabled=refreshing || configBusy || info.state === 'starting';
-    if(adminControls){enableButton.disabled=configBusy || refreshing || !targetSelect.value || status?.supported !== true;disableButton.disabled=configBusy || !status?.enabled;targetSelect.disabled=configBusy || client.busy;enableButton.textContent=configBusy ? 'Applying…' : status?.enabled ? 'Use this target' : 'Enable pen input';}
+    if(adminControls){enableButton.disabled=configBusy || refreshing || !targetSelect.value || status?.supported !== true;disableButton.disabled=configBusy || !status?.enabled;targetSelect.disabled=configBusy || client.busy;enableButton.textContent=configBusy ? 'Applying…' : status?.enabled ? 'Use this target' : 'Enable pen & live view';}
     resizePad();
   }
   function updateTargets(targets) {
@@ -285,15 +352,15 @@
     const actions=element('div','pen-tablet-actions');fullscreenButton=button('Fullscreen',()=>void setFullscreen(!fullscreen));exitButton=button('Back to controls',()=>{void stop('Pen session stopped.');if(typeof setWorkspaceMode==='function')void setWorkspaceMode('studio');else setActive(false);});actions.append(fullscreenButton,exitButton);heading.append(title,actions);
     host.append(heading);
     if(desktop()){
-      adminControls=element('div','pen-tablet-admin');const label=element('label','','Windows target');targetSelect=element('select');targetSelect.setAttribute('aria-label','Windows target');targetSelect.addEventListener('change',()=>{targetEdited=true;render();});label.append(targetSelect);enableButton=button('Enable pen input',()=>void configure(true),'primary');disableButton=button('Disable pen input',()=>void configure(false),'danger');
-      adminControls.append(label,enableButton,disableButton,element('p','help','Choose a screen, or keep a selected app window in the foreground. Permission resets when DeskWing closes. Paired tablets can start one pen session at a time.'));host.append(adminControls);
+      adminControls=element('div','pen-tablet-admin');const label=element('label','','Windows target');targetSelect=element('select');targetSelect.setAttribute('aria-label','Windows target');targetSelect.addEventListener('change',()=>{targetEdited=true;render();});label.append(targetSelect);enableButton=button('Enable pen & live view',()=>void configure(true),'primary');disableButton=button('Disable pen & live view',()=>void configure(false),'danger');
+      adminControls.append(label,enableButton,disableButton,element('p','help','The selected screen or window is shown on a paired tablet only during its active pen session. Keep a selected app window in the foreground. Permission resets when DeskWing closes.'));host.append(adminControls);
     }
-    const connection=element('div','pen-tablet-connection'), details=element('div','pen-tablet-target');targetLine=element('strong','','No Windows target selected');statusLine=element('p','pen-tablet-status','Checking the PC connection…');statusLine.setAttribute('role','status');details.append(targetLine,statusLine);
+    const connection=element('div','pen-tablet-connection'), details=element('div','pen-tablet-target');targetLine=element('strong','','No Windows target selected');statusLine=element('p','pen-tablet-status','Checking the PC connection…');statusLine.setAttribute('role','status');previewStatus=element('p','pen-tablet-preview-status');previewStatus.setAttribute('role','status');details.append(targetLine,statusLine,previewStatus);
     const sessionActions=element('div','pen-tablet-actions');refreshButton=button('Refresh',()=>void refresh());startButton=button('Start pen session',()=>void start(),'primary');stopButton=button('Stop pen',()=>void stop('Pen session stopped. Your Windows app is no longer controlled by this tablet.'),'danger');sessionActions.append(refreshButton,startButton,stopButton);connection.append(details,sessionActions);host.append(connection);
     connection.id='pen-tablet-fullscreen-tools';
     const mapping=element('label','pen-tablet-mapping','Surface mapping');mappingSelect=element('select');mappingSelect.setAttribute('aria-label','Surface mapping');for(const [value,label]of[['fill','Fill tablet'],['match','Match PC proportions']]){const option=element('option','',label);option.value=value;mappingSelect.append(option);}mappingSelect.addEventListener('change',()=>{const nextFill=mappingSelect.value!=='match';if(client.busy)void stop('Pen session stopped for the new mapping. Start again when you are ready.');fillTablet=nextFill;render();});mapping.append(mappingSelect);mappingHelp=element('p','help pen-tablet-mapping-help');connection.append(mapping,mappingHelp);
-    stage=element('div','pen-tablet-stage');pad=element('div','pen-tablet-pad');pad.tabIndex=0;pad.setAttribute('role','application');hint=element('p','pen-tablet-hint');cursor=element('span','pen-tablet-cursor');cursor.hidden=true;cursor.setAttribute('aria-hidden','true');pad.append(hint,cursor);stage.append(pad);host.append(stage);
-    const footer=element('div','pen-tablet-footer');coordinates=element('output','','Pen only · palm touches ignored');footer.append(coordinates,element('p','help','This surface maps to your chosen PC target. Artwork stays in the Windows app. Use Windows Ink in apps that offer a pen input setting.'));host.append(footer);
+    stage=element('div','pen-tablet-stage');pad=element('div','pen-tablet-pad');pad.tabIndex=0;pad.setAttribute('role','application');previewImage=element('img','pen-tablet-preview');previewImage.id='pen-tablet-preview';previewImage.alt='';previewImage.draggable=false;previewImage.hidden=true;previewImage.setAttribute('aria-hidden','true');hint=element('p','pen-tablet-hint');cursor=element('span','pen-tablet-cursor');cursor.hidden=true;cursor.setAttribute('aria-hidden','true');pad.append(previewImage,hint,cursor);stage.append(pad);host.append(stage);
+    const footer=element('div','pen-tablet-footer');coordinates=element('output','','Pen only · palm touches ignored');footer.append(coordinates,element('p','help','The live view shows your selected PC target while the pen session is active. Artwork stays in the Windows app. Use Windows Ink in apps that offer a pen input setting.'));host.append(footer);
     floatingControls=element('div','pen-tablet-floating-controls');floatingControls.setAttribute('aria-label','Fullscreen pen controls');toolsButton=button('Show tools',()=>{toolsOpen=!toolsOpen;render();});toolsButton.setAttribute('aria-controls','pen-tablet-fullscreen-tools');floatingSessionButton=button('Start pen',()=>client.busy?void stop('Pen session stopped. Your Windows app is no longer controlled by this tablet.'):void start(),'primary');const floatingExit=button('Exit fullscreen',()=>void setFullscreen(false));floatingControls.append(toolsButton,floatingSessionButton,floatingExit);host.append(floatingControls);
     pad.addEventListener('pointerdown',pointerDown);pad.addEventListener('pointermove',pointerMove);pad.addEventListener('pointerup',pointerUp);pad.addEventListener('pointercancel',event=>{if(event.pointerType==='pen' && client.active && (pointerId===null || pointerId===event.pointerId))void stop('Pen contact was interrupted. Start a new pen session.');});pad.addEventListener('lostpointercapture',pointerInterrupted);pad.addEventListener('pointerleave',event=>{if(event.pointerType==='pen' && pointerId===null && client.active)sample(event,'leave');});pad.addEventListener('contextmenu',event=>event.preventDefault());
     if(typeof ResizeObserver==='function'){resizeObserver=new ResizeObserver(resizePad);resizeObserver.observe(stage);}

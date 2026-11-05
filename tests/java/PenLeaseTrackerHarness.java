@@ -32,6 +32,26 @@ public final class PenLeaseTrackerHarness {
             try{tracker.accepted(invalid,"PC-A",3,3,true);throw new AssertionError("invalid lease accepted");}catch(IllegalArgumentException expected){passed++;}
         }
         check(tracker.take()==null,"invalid responses do not create an active lease");
+        PenLeaseTracker<String> preview=new PenLeaseTracker<>();
+        check(!preview.canDeliverPreview("preview",10,10,20,20,true),"preview is rejected before any lease is active");
+        preview.accepted("preview","PC-A",10,10,true);
+        check(preview.canDeliverPreview("preview",10,10,20,20,true),"fresh frame for the exact active lease is deliverable");
+        check(!preview.canDeliverPreview(null,10,10,20,20,true),"frame without a lease is rejected");
+        check(!preview.canDeliverPreview("old",10,10,20,20,true),"frame for another lease is rejected");
+        check(!preview.canDeliverPreview("preview",10,10,20,20,false),"frame is rejected while the activity is backgrounded");
+        check(!preview.canDeliverPreview("preview",10,11,20,20,true),"pre-pause frame stays rejected after foreground resume");
+        check(!preview.canDeliverPreview("preview",10,10,20,21,true),"pending new begin intent invalidates the previous frame before its reply");
+        check(!preview.canDeliverPreview("preview",10,10,21,22,true),"pending end intent invalidates the frame before its acknowledgement");
+        check(!preview.canDeliverPreview("preview",10,10,22,23,true),"pending cancel intent invalidates the frame before its acknowledgement");
+        check(preview.canDeliverPreview("preview",10,10,20,20,true),"rejected delivery checks do not consume the current lease");
+        preview.accepted("replacement-preview","PC-A",10,10,true);
+        check(!preview.canDeliverPreview("preview",10,10,23,23,true),"replacement lease rejects an old frame even when both generations match");
+        check(preview.canDeliverPreview("replacement-preview",10,10,23,23,true),"replacement lease accepts its own current frame");
+        check(!preview.canDeliverPreview("replacement-preview",Long.MAX_VALUE,Long.MIN_VALUE,23,23,true),"lifecycle generation wrap does not revive an old frame");
+        preview.ended("replacement-preview");
+        check(!preview.canDeliverPreview("replacement-preview",10,10,23,23,true),"acknowledged end prevents subsequent frame delivery");
+        preview.accepted("detached-preview","PC-A",10,10,true);preview.take();
+        check(!preview.canDeliverPreview("detached-preview",10,10,24,24,true),"detached lease prevents subsequent frame delivery");
         System.out.println(passed+" native pen lease checks passed; no PC input was sent.");
     }
 }

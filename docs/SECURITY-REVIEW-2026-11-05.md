@@ -1,6 +1,6 @@
 # DeskWing security review — 2026-11-05
 
-Status: all integrated, expanded, and fullscreen/window follow-up scans and required remediations are complete. The final actual `snyk_code_scan` reports no new findings: seven pre-existing Low findings, zero Medium, and zero High. No scanner suppressions were added. Dependency inputs remain identical to the completed clean dependency audits.
+Status: integrated, fullscreen/window, pen-feedback, and lease-gated live-preview scans and required remediations are complete for `F:/streamer-board`. The latest actual `snyk_code_scan` reports no new findings: seven pre-existing Low findings, zero Medium, and zero High. No scanner suppressions were added. Dependency inputs remain identical to the completed clean dependency audits. The separate `F:/streamer-board-high-refresh` worktree is outside this scan scope.
 
 ## Scanner availability and method
 
@@ -39,6 +39,10 @@ A shutdown runtime check exposed an admission gap during HTTP graceful shutdown.
 
 The final pen-responsiveness/resize follow-up preserves these boundaries. Idle target-size refresh cannot start or renew input, begin returns the exact resolved lease dimensions, and resizing an active target still invalidates the lease before additional samples and requires an explicit restart. The frontend applies target geometry before activating the session and sends first contact promptly without expanding authorization or payload limits. Independent source review found no new lease/security issue. The temporary native latency profiler only enumerates/resolves targets and measures elapsed time; it does not create or inject input. Because the normal scan excludes `.test-output`, its directory received a separate explicit scanner call.
 
+The new live-preview source uses an authenticated, bounded `POST /api/pen/frame` route with exact active-owner/lease snapshots checked before and after capture. Capturing does not renew input or run under the pen/input gate. Window targets use client-only `PrintWindow` into a private bitmap with no desktop-copy fallback; only an explicitly selected display uses display capture. One bounded worker remains occupied until native capture finishes, even if its HTTP caller times out, so a hung target cannot accumulate capture workers. Images are size-limited JPEG data URLs without a frame cache. Independent backend review found no concrete privacy, lease, or locking defect. The frontend validates target geometry, sequence, and image format/size and rejects stale request/decode results. Native completion/lifecycle guards are included in the final review and scan.
+
+The Android preview review identified a delayed-success delivery race after pause or lease change. The fix checks the exact active lease, foreground state, lifecycle generation, and begin/end/cancel intent revision inside the final UI callback, substituting an error-only result when stale. Its 37-case lease harness includes 15 stale-frame cases, and SDK 36 compilation passed. iOS uses a separate one-request pinned preview session and generation/lease/ticket checks; ordinary page navigation now resets bridge tickets and releases old input before callbacks can be reused. The owners' isolated native preview test captures only its own window, verifies three JPEG cases, and rejects a covering window through the focus gate before capture.
+
 ## Final verification
 
 The root-directory `snyk_code_scan` call included the integrated C#, Android Java, JavaScript, Python and iOS Swift source under the normal `.dcignore` exclusions. The MCP response does not report a per-language file-count breakdown. The scan does not compile or execute the iOS host.
@@ -60,6 +64,8 @@ The root-directory `snyk_code_scan` call included the integrated C#, Android Jav
 | Final help-text-only follow-up `snyk_code_scan` | Success at 2026-11-05 21:48:30 Europe/Istanbul; 7 Low, 0 Medium, 0 High, with no new findings. Root scan included the `tests/run-all.cjs` usage example correction on runtime base `702d40b`; the delta changes displayed help text only |
 | Final pen-feedback `snyk_code_scan` | Root scan succeeded at 2026-11-05 22:00:02 Europe/Istanbul: 7 Low, 0 Medium, 0 High; no new findings. Scope includes geometry snapshots, frontend scheduling, manual receiver geometry/rendering, cold WebView readiness/diagnostics, and test-runner time budgets. Owners reported 52 pen-backend, 33 integration, 39 frontend, 43 rendered-desktop, and 27 native-window checks passing |
 | Isolated latency-profiler `snyk_code_scan` | Explicit scan of `F:/streamer-board/.test-output/pen-resolve-latency` succeeded at 22:01:04: 0 issues. This additional call covers the generated C# profiler outside the normal root scan exclusions |
+| Final live-pen-preview `snyk_code_scan` | Root scan succeeded at 2026-11-05 22:26:31 Europe/Istanbul with 7 Low, 0 Medium, 0 High; no new findings. Includes frozen capture service, lease snapshots, native bridge/lifecycle changes, frontend, and own-window preview tests. Owners reported 42 fake capture, 28 HTTP, 49 frontend, 153 rendered UI, 166 Android policy, and 37 Android lease checks passing |
+| Final fast-channel test follow-up `snyk_code_scan` | Root scan succeeded at 2026-11-05 22:28:42 Europe/Istanbul: 7 Low, 0 Medium, 0 High; no new findings. Includes the final two `tests/fast.cjs` assertions that preview requests are rejected on the persistent input channel and the next control ping still responds |
 | `npm audit --prefix tests --json` | Exit 0; 0 vulnerabilities across the reported 6 dependencies |
 | `dotnet list companion/TabletDeck.csproj package --vulnerable --include-transitive --format json` | Exit 0; no vulnerable direct or transitive packages reported by NuGet |
 
@@ -72,7 +78,7 @@ Remaining pre-existing findings:
 | Rule | Location | Review context |
 | --- | --- | --- |
 | `java/JavaScriptEnabled` | `android/src/app/tabletdeck/ChatPane.java:28` | Provider viewer needs JavaScript; isolated from the PC-control bridge |
-| `java/JavaScriptEnabled` | `android/src/app/tabletdeck/MainActivity.java:86` | Bundled allowlisted interface needs JavaScript; remote pages are not admitted to the privileged view |
+| `java/JavaScriptEnabled` | `android/src/app/tabletdeck/MainActivity.java:93` | Bundled allowlisted interface needs JavaScript; remote pages are not admitted to the privileged view |
 | `javascript/HttpToHttps/test` | `tests/computer-api.cjs:40` | Localhost-only isolated test request |
 | `javascript/InsecureTLSConfig/test` | `tests/execution.cjs:11` | Existing isolated self-signed test fixture |
 | `javascript/InsecureTLSConfig/test` | `tests/features.cjs:13` | Existing isolated self-signed test fixture |
@@ -82,3 +88,7 @@ Remaining pre-existing findings:
 Local evidence: `.test-output/snyk-deskwing-mcp-final-2026-11-05.json` (initial integrated findings), `.test-output/snyk-deskwing-mcp-rescan-2026-11-05.json` (post-fix), `.test-output/snyk-deskwing-mcp-confirmed-2026-11-05.json` (self-test follow-up), `.test-output/snyk-deskwing-mcp-expanded-2026-11-05.json` (initial expanded-scope findings), `.test-output/snyk-deskwing-mcp-expanded-rescan-2026-11-05.json` (expanded-scope result), `.test-output/snyk-deskwing-mcp-fullscreen-rescan-2026-11-05.json` (initial fullscreen/window findings), `.test-output/snyk-deskwing-mcp-fullscreen-final-2026-11-05.json` (frozen runtime-scope result), `.test-output/snyk-deskwing-mcp-helptext-final-2026-11-05.json` (latest help-text follow-up), `.test-output/npm-audit-deskwing-2026-11-05.json`, and `.test-output/dotnet-audit-deskwing-2026-11-05.json`. These are ignored artifacts, not release contents. Later security-relevant source or dependency changes require a bounded follow-up scan.
 
 Latest pen-feedback evidence: `.test-output/snyk-deskwing-mcp-pen-feedback-final-2026-11-05.json` (full-root result) and `.test-output/snyk-deskwing-mcp-latency-profiler-2026-11-05.json` (explicit isolated-profiler result). Dependency hashes above were rechecked and remain unchanged.
+
+Latest live-preview evidence: `.test-output/snyk-deskwing-mcp-pen-preview-final-2026-11-05.json`. The new npm entry is a test script only, and the new test projects link existing source without adding package dependencies.
+
+Latest exact-source checkpoint: `.test-output/snyk-deskwing-mcp-preview-tests-final-2026-11-05.json`, after the final fast-channel test additions. Runtime and dependency inputs did not change in this follow-up.

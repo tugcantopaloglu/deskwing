@@ -14,6 +14,8 @@ internal sealed record PenRequest(string Operation="",string Session="",string L
 internal readonly record struct PenRectangle(int X,int Y,int Width,int Height);
 internal sealed record PenDestination(PenTarget Info,PenRectangle Bounds,long Window=0,uint Process=0);
 internal sealed record PenFrame(int X,int Y,uint Pressure,int TiltX,int TiltY,string Phase,bool Barrel=false,bool Eraser=false,bool Cancelled=false);
+// Server-only authorization snapshot. It is never accepted from or serialized to a tablet.
+internal sealed record PenPreviewLease(string Principal,string Lease,long Generation,PenDestination Destination);
 
 // The service owns protocol/lease validation; the platform is the only component allowed to inject.
 internal interface IWindowsPenPlatform : IDisposable
@@ -39,7 +41,7 @@ internal sealed class WindowsPen : IDisposable
     private string owner="",lease="";
     private readonly HashSet<string> recentSessions=new(StringComparer.Ordinal);
     private readonly Queue<string> sessionOrder=new();
-    private long expires,started,sequence;
+    private long expires,started,sequence,generation;
     private bool enabled,contact,disposed;
     private string? error;
 
@@ -51,6 +53,23 @@ internal sealed class WindowsPen : IDisposable
     }
     public bool Active {get{lock(gate){CheckLease();return lease.Length>0;}}}
     public PenStatus Status {get{lock(gate){CheckLease();RefreshIdleTarget();return Snapshot();}}}
+    internal PenPreviewLease CaptureTarget(string principal,string token)
+    {
+        lock(gate){
+            ObjectDisposedException.ThrowIf(disposed,this);
+            CheckLease();
+            if(!enabled||lease.Length==0||principal!=owner||token!=lease)throw new InvalidOperationException("Start your own pen session before viewing its PC target.");
+            return new(owner,lease,generation,CurrentTarget());
+        }
+    }
+    internal void ValidateCapture(PenPreviewLease authorization)
+    {
+        ArgumentNullException.ThrowIfNull(authorization);
+        lock(gate){
+            var current=CaptureTarget(authorization.Principal,authorization.Lease);
+            if(current.Generation!=authorization.Generation||current.Destination!=authorization.Destination)throw new InvalidOperationException("The pen target changed while capturing. This frame was discarded.");
+        }
+    }
     private PenStatus Snapshot()=>new(platform.Supported,enabled,lease.Length>0,target?.Info,error);
     public object AdminState(){lock(gate){CheckLease();RefreshIdleTarget();return new{status=Snapshot(),targets=platform.Supported?platform.Targets().Select(t=>t.Info).ToArray():[]};}}
     private void RefreshIdleTarget()
@@ -114,13 +133,14 @@ internal sealed class WindowsPen : IDisposable
         try{platform.Begin();}catch(Exception ex) when(ex is Win32Exception or InvalidOperationException){error=ex.Message;throw;}
         leaseTarget=resolved;target=resolved;owner=principal;
         recentSessions.Add(sessionKey);sessionOrder.Enqueue(sessionKey);while(sessionOrder.Count>1024)recentSessions.Remove(sessionOrder.Dequeue());
-        lease=Convert.ToHexString(RandomNumberGenerator.GetBytes(24));started=now();expires=started+TimeoutMs;sequence=0;last=null;contact=false;error=null;
+        lease=Convert.ToHexString(RandomNumberGenerator.GetBytes(24));generation++;started=now();expires=started+TimeoutMs;sequence=0;last=null;contact=false;error=null;
         return new(lease,Target:resolved.Info);
     }
     private PenDestination CurrentTarget()
     {
         try{
             var current=platform.Resolve(leaseTarget??throw new InvalidOperationException("Choose a pen target again on the PC."),true);
+            if(current.Info.Id!=leaseTarget.Info.Id||current.Window!=leaseTarget.Window||current.Process!=leaseTarget.Process)throw new InvalidOperationException("The pen target was replaced. Choose it again on the PC and start a fresh session.");
             if(current.Bounds!=leaseTarget.Bounds){target=current;throw new InvalidOperationException("The pen target moved or changed size. Tap Start again after arranging the PC window.");}
             return current;
         }catch(Exception ex) when(ex is InvalidOperationException or ArgumentException or Win32Exception){Stop(ex.Message);throw;}
@@ -155,7 +175,7 @@ internal sealed class WindowsPen : IDisposable
     private void Stop(string? reason)
     {
         // Invalidate ownership first; neither a delayed batch nor a failed native cleanup can renew it.
-        lease="";owner="";leaseTarget=null;error=reason;
+        lease="";owner="";leaseTarget=null;generation++;error=reason;
         try{
             if(last is not null){
                 if(contact)platform.Inject(last with{Phase="up",Pressure=0,Barrel=false,Eraser=false,Cancelled=true});

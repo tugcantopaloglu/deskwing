@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-05T18:39:22.462Z",
+  "generatedAt": "2026-11-05T19:22:48.187Z",
   "title": "Design System: DeskWing",
   "extensions": {
     "sourceTokens": {
@@ -183,6 +183,14 @@
           "textColor": "{colors.ink}",
           "rounded": "{rounded.control}",
           "padding": "14px"
+        },
+        "pc-preview-status": {
+          "textColor": "{colors.secondary}",
+          "typography": "{typography.help}"
+        },
+        "pc-preview-error": {
+          "textColor": "{colors.amber}",
+          "typography": "{typography.help}"
         }
       }
     },
@@ -200,7 +208,9 @@
       "companion/wwwroot/pen-tablet.js",
       "companion/wwwroot/ink-window.css",
       "companion/wwwroot/ink-window.js",
-      "companion/DesktopConsole.cs"
+      "companion/DesktopConsole.cs",
+      "companion/PenPreview.cs",
+      "companion/WindowsPen.cs"
     ],
     "colorMeta": {
       "canvas": {
@@ -896,6 +906,36 @@
             ]
           },
           "exit": "Exit fullscreen remains floating; Back to controls is in normal view. Fullscreen/geometry/mapping changes end active pen session; restart explicitly."
+        },
+        "preview": {
+          "image": {
+            "position": "absolute",
+            "inset": "0",
+            "display": "block",
+            "width": "100%",
+            "height": "100%",
+            "objectFit": "fill",
+            "pointerEvents": "none",
+            "userSelect": "none",
+            "layer": "Behind hint and pen cursor, inside mapped pad.",
+            "ariaHidden": true
+          },
+          "status": {
+            "fontSize": "13px",
+            "lineHeight": 1.6,
+            "margin": "5px 0 0",
+            "color": "{colors.secondary}",
+            "errorColor": "{colors.amber}",
+            "role": "status"
+          },
+          "geometry": "Image and pen use the same normalized pad bounds; Fill tablet can stretch both, Match PC proportions preserves the target ratio.",
+          "states": [
+            "idle",
+            "loading",
+            "live",
+            "error"
+          ],
+          "clear": "Removes image src and hides it on stop, lifecycle interruption, capture/validation/decode failure, or soft timeout."
         }
       },
       "desktopWindows": {
@@ -1054,9 +1094,11 @@
           "pen-input-pad",
           "button-primary",
           "button-danger",
-          "pen-input-tools"
+          "pen-input-tools",
+          "pc-preview-status",
+          "pc-preview-error"
         ],
-        "behavior": "PC selects a display/window; active session is explicit; fullscreen and interruptions stop input. No target-app image stream."
+        "behavior": "PC enables a selected display/window for pen and live view. An explicit active owner session sends input and requests a bounded JPEG target preview; interruptions stop input and clear the preview."
       },
       {
         "name": "Dedicated PC ink window",
@@ -1096,9 +1138,9 @@
     },
     "penInputStates": {
       "target": "Windows target",
-      "enable": "Enable pen input",
+      "enable": "Enable pen & live view",
       "retarget": "Use this target",
-      "disable": "Disable pen input",
+      "disable": "Disable pen & live view",
       "start": "Start pen session",
       "stop": "Stop pen",
       "fullscreen": [
@@ -1113,15 +1155,48 @@
       "mapping": [
         "Fill tablet",
         "Match PC proportions"
-      ]
+      ],
+      "preview": {
+        "idle": "The live PC view appears after you start a pen session.",
+        "loading": "Loading the live PC view…",
+        "live": "Live PC view",
+        "unavailable": "PC view unavailable.",
+        "slow": "The PC view is taking too long. Check the PC connection.",
+        "errorTreatment": "Clear obsolete image, show amber status and open fullscreen tools; input may remain active."
+      },
+      "dispatch": {
+        "minimumSpacingMs": 8,
+        "maximumDispatchRateHz": 125,
+        "separateFromPreview": true,
+        "meaning": "Client request scheduling limit, not an end-to-end stroke latency measurement or a guaranteed sample rate."
+      }
     },
     "nativeFullscreen": {
       "route": "POST /local/fullscreen {enabled:boolean}",
       "android": "Hides status/navigation bars with transient system-bar swipe behavior; removes WebView insets while enabled. Back/native tools/background restore previous normal UI; no automatic re-entry.",
-      "ios": "Requests hidden status bar, home-indicator auto-hide, and full-view constraints. Native tools/background/disconnect/navigation/renderer restart restore normal layout.",
+      "ios": "Requests hidden status bar, home-indicator auto-hide, and window-bounds layout. System Home/edge gestures remain; Split View/Stage Manager are not forced to fill the display. Exit/mode exit, resign-active/background, native tools, disconnect/re-pair, navigation/reload, or renderer termination restore safe-area layout.",
       "failure": "App-filling canvas remains with visible warning when system bars cannot be hidden.",
       "lifecycle": "Native deskwing-fullscreen event carries enabled/reason; disabled event restores the web layout and ends pen input where applicable.",
-      "verification": "New immersive build requires fresh device checks. Earlier physical pen/fullscreen test and earlier iOS simulator build do not certify this changed UI."
+      "verification": "Commit 0691c1acdd509c1c41b4d81e7d81f8e6c32dcdaa passed 57 Windows verification suites and 9 iOS tests, including the unsigned simulator build and fullscreen policy. Physical iPad/system-bar behavior still needs device validation; selected-target pen preview is a later change needing fresh checks."
+    },
+    "penPreview": {
+      "source": "companion/PenPreview.cs",
+      "route": "POST /api/pen/frame",
+      "authorization": "Same current owner, active lease, enabled target, generation, and geometry; checked before and after capture. No capture merely from opening the workspace.",
+      "transport": "Silent JPEG data URL, one in-flight capture; independent of pen-input requests.",
+      "minimumIntervalMs": 84,
+      "advertisedMaximumFps": 12,
+      "maxImageDimensionPx": 1600,
+      "maximumDataUrlLength": 2097152,
+      "maximumJpegBytes": 1572846,
+      "serverResponseTimeoutMs": 2000,
+      "frontendSoftTimeoutMs": 1500,
+      "frontendTransportTimeoutMs": 5000,
+      "windowCapture": "Selected client area via PrintWindow; no fallback to desktop cropping.",
+      "displayCapture": "Explicitly selected display, including visible windows.",
+      "retention": "No disk frame storage or saved frame history.",
+      "failure": "Unsupported/protected targets may fail or be blank. No guaranteed visual latency or full-motion playback.",
+      "verification": "New selected-target preview requires fresh CI and physical-device rehearsal. Earlier pressure/delay observations do not validate preview alignment or freshness."
     }
   },
   "components": [
@@ -1209,9 +1284,9 @@
       "name": "Windows pen input surface",
       "kind": "custom",
       "refersTo": "pen-input-pad",
-      "description": "A mapped input surface with target and explicit session controls; no target-app screenshot.",
-      "html": "<section class=\"ds-pen-input\"><div class=\"ds-pen-target\"><strong>Selected Windows window</strong><p>Start a pen session when your Windows app is ready.</p></div><div class=\"ds-pen-actions\"><button class=\"ds-pen-start\">Start pen session</button><button class=\"ds-pen-exit\">Fullscreen</button><button class=\"ds-pen-exit\">Back to controls</button></div><div class=\"ds-pen-stage\"><div class=\"ds-pen-pad\"><p>Your pen controls the selected Windows screen or window.</p></div></div><output>X 0% · Y 0% · Pressure 0%</output></section>",
-      "css": ".ds-pen-input{font-family:Manrope,system-ui,sans-serif;display:flex;flex-direction:column;gap:16px;padding:20px 24px 24px;background:var(--canvas,#101318);color:var(--ink,#f5f7fa)}.ds-pen-target strong{display:block;font-size:15px;overflow-wrap:anywhere}.ds-pen-target p{font-size:13px;line-height:1.6;color:var(--secondary,#b8c3d1);margin:5px 0 0}.ds-pen-actions{display:flex;flex-wrap:wrap;gap:8px}.ds-pen-actions button{font-family:Manrope,system-ui,sans-serif;min-height:44px;padding:10px 16px;font-size:13px;font-weight:700;border-radius:12px;cursor:pointer;border:1px solid var(--outline,#354151)}.ds-pen-start{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent!important}.ds-pen-exit{background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-pen-actions button:hover:enabled{filter:brightness(1.12)}.ds-pen-actions button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-pen-actions button:disabled{opacity:.5;cursor:default}.ds-pen-stage{display:flex;align-items:center;justify-content:center;min-height:260px;max-height:65vh;overflow:hidden;background:#131922;border-radius:12px}.ds-pen-pad{width:100%;aspect-ratio:8/5;position:relative;overflow:hidden;background:var(--surface,#1c222b);border:1px solid var(--outline,#354151);border-radius:12px}.ds-pen-pad p{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:28px;margin:0;text-align:center;color:var(--secondary,#b8c3d1);line-height:1.6;font-size:clamp(14px,1.5vw,18px)}.ds-pen-input output{font-size:12px;line-height:1.6;font-variant-numeric:tabular-nums;color:var(--secondary,#b8c3d1)}@media(max-width:580px){.ds-pen-input{padding:12px;gap:12px}.ds-pen-actions button{padding:10px 12px}.ds-pen-stage{min-height:220px}}"
+      "description": "Stopped-state example of the mapped input surface. An active owner session displays the real selected-target JPEG behind input; loading and unavailable states carry explicit status.",
+      "html": "<section class=\"ds-pen-input\"><div class=\"ds-pen-target\"><strong>Selected Windows window</strong><p>Start a pen session when your Windows app is ready.</p><p role=\"status\">The live PC view appears after you start a pen session.</p></div><div class=\"ds-pen-actions\"><button class=\"ds-pen-start\">Start pen session</button><button class=\"ds-pen-exit\">Fullscreen</button><button class=\"ds-pen-exit\">Back to controls</button></div><div class=\"ds-pen-stage\"><div class=\"ds-pen-pad\"><img class=\"ds-pc-preview\" alt=\"\" aria-hidden=\"true\" hidden><p>Your pen controls the selected Windows screen or window.</p></div></div><output>X 0% · Y 0% · Pressure 0%</output></section>",
+      "css": ".ds-pen-input{font-family:Manrope,system-ui,sans-serif;display:flex;flex-direction:column;gap:16px;padding:20px 24px 24px;background:var(--canvas,#101318);color:var(--ink,#f5f7fa)}.ds-pen-target strong{display:block;font-size:15px;overflow-wrap:anywhere}.ds-pen-target p{font-size:13px;line-height:1.6;color:var(--secondary,#b8c3d1);margin:5px 0 0}.ds-pen-actions{display:flex;flex-wrap:wrap;gap:8px}.ds-pen-actions button{font-family:Manrope,system-ui,sans-serif;min-height:44px;padding:10px 16px;font-size:13px;font-weight:700;border-radius:12px;cursor:pointer;border:1px solid var(--outline,#354151)}.ds-pen-start{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent!important}.ds-pen-exit{background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-pen-actions button:hover:enabled{filter:brightness(1.12)}.ds-pen-actions button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-pen-actions button:disabled{opacity:.5;cursor:default}.ds-pen-stage{display:flex;align-items:center;justify-content:center;min-height:260px;max-height:65vh;overflow:hidden;background:#131922;border-radius:12px}.ds-pen-pad{width:100%;aspect-ratio:8/5;position:relative;overflow:hidden;background:var(--surface,#1c222b);border:1px solid var(--outline,#354151);border-radius:12px}.ds-pen-pad p{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:28px;margin:0;text-align:center;color:var(--secondary,#b8c3d1);line-height:1.6;font-size:clamp(14px,1.5vw,18px)}.ds-pen-input output{font-size:12px;line-height:1.6;font-variant-numeric:tabular-nums;color:var(--secondary,#b8c3d1)}@media(max-width:580px){.ds-pen-input{padding:12px;gap:12px}.ds-pen-actions button{padding:10px 12px}.ds-pen-stage{min-height:220px}}.ds-pc-preview{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:fill;pointer-events:none;user-select:none;-webkit-user-select:none}.ds-pc-preview[hidden]{display:none!important}"
     },
     {
       "name": "Immersive ink controls",
@@ -1220,6 +1295,14 @@
       "description": "Floating controls over paper, with the optional drawer closed. The drawer carries tools, notes, export, sync, and conflict details.",
       "html": "<div class=\"ds-immersive-ink\"><div class=\"ds-ink-floating\"><button class=\"ds-ink-tools\" aria-expanded=\"false\" aria-label=\"Show tools — ink sharing needs attention\">Show tools<span aria-hidden=\"true\"></span></button><button class=\"ds-ink-exit\">Exit fullscreen</button></div></div>",
       "css": ".ds-immersive-ink{position:relative;min-height:260px;background:#f6f3e9;overflow:hidden}.ds-ink-floating{position:absolute;top:max(10px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));display:flex;gap:6px}.ds-ink-floating button{font-family:Manrope,system-ui,sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:44px;min-width:44px;font-size:13px;font-weight:700;padding:8px 12px;border:1px solid var(--outline,#354151);border-radius:12px;box-shadow:0 2px 8px #0002;cursor:pointer}.ds-ink-tools{background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-ink-tools:hover{background:var(--surface-high,#252d38)}.ds-ink-tools span{display:block;width:8px;height:8px;border-radius:50%;background:var(--amber,#ffd58a)}.ds-ink-exit{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent!important}.ds-ink-floating button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}"
+    },
+    {
+      "name": "PC preview states",
+      "kind": "custom",
+      "refersTo": "pc-preview-status",
+      "description": "Text-state examples for the session-scoped preview. No fabricated application screenshot; runtime live pixels come from the authorized target.",
+      "html": "<div class=\"ds-preview-states\" aria-label=\"PC preview status examples\"><p class=\"ds-preview-status\" role=\"status\">Loading the live PC view…</p><p class=\"ds-preview-status\" role=\"status\">Live PC view</p><p class=\"ds-preview-status ds-preview-error\" role=\"status\">PC view unavailable. Check the connection.</p></div>",
+      "css": ".ds-preview-status{font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.6;margin:5px 0 0;color:var(--secondary,#b8c3d1)}.ds-preview-status.ds-preview-error{color:var(--amber,#ffd58a)}"
     }
   ],
   "narrative": {

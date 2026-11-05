@@ -153,6 +153,12 @@ components:
     textColor: "{colors.ink}"
     rounded: "{rounded.control}"
     padding: "14px"
+  pc-preview-status:
+    textColor: "{colors.secondary}"
+    typography: "{typography.help}"
+  pc-preview-error:
+    textColor: "{colors.amber}"
+    typography: "{typography.help}"
 ---
 
 # Design System: DeskWing
@@ -290,7 +296,9 @@ DeskWing Ink opens directly onto the fitted paper, with floating **Show tools** 
 
 Visually distinguish the live Windows input surface from the shared paper document. Show the selected display/application, readiness, and whether a pen session is active. Start/Stop and the fullscreen exit must remain discoverable. Pressure and other telemetry describe input samples; they are not evidence that a specific target app painted a stroke. A change of focus, geometry, connection, or lifecycle must visibly end the current session when the input contract requires it.
 
-The normal input pad uses the regular slate surface within an inset field-colored stage, fits the chosen target's aspect ratio, and adds a cyan border for an active connection. A small outlined cyan cursor becomes filled during contact. Keep its explanatory hint distinct from real app pixels: this mode does not show a target-app video.
+The normal input pad uses the regular slate surface within an inset field-colored stage, fits the chosen target's aspect ratio, and adds a cyan border for an active connection. During an active pen session, the selected target's JPEG preview sits behind the input surface and follows the same geometry as its pen coordinates. A small outlined cyan cursor becomes filled during contact. Keep loading, unavailable, and stopped states explicit, and clear obsolete frames. Preview pixels are application content, not sample artwork or evidence that every reported input sample produced a mark.
+
+The preview image fills the pad with `object-fit: fill` and does not receive pointer events. The target/status area shows **Loading the live PC view…**, **Live PC view**, or an unavailable explanation. Preview errors use amber text and open the tools overlay in fullscreen; input can remain active when capture fails. PC enable/disable labels name both **pen & live view** so the shared pixels are part of the stated action.
 
 Immersive fullscreen removes stage padding, borders, corner radius, heading, and footer. Floating **Show tools**, **Start pen**/**Stop pen**, and **Exit fullscreen** remain at least 44px. Show tools reveals target/status/mapping details in a bounded overlay; Back to controls remains in the normal view. Fill tablet is the immersive default; Match PC proportions is an explicit alternative. Entering/leaving fullscreen or changing mapping ends the old session before using new coordinates.
 
