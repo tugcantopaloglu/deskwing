@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-05T19:47:12.071Z",
+  "generatedAt": "2026-11-05T20:19:31.878Z",
   "title": "Design System: DeskWing",
   "extensions": {
     "sourceTokens": {
@@ -244,7 +244,11 @@
       "companion/DisplayStream.cs",
       "companion/WindowsDisplayEncoder.cs",
       "android/src/app/tabletdeck/NativeDisplayVideo.java",
-      "ios/Sources/DisplayVideoController.swift"
+      "ios/Sources/DisplayVideoController.swift",
+      "companion/WindowsDisplayCapture.cs",
+      "companion/WindowsDxgiCapture.cs",
+      "companion/WindowsDisplayCursor.cs",
+      "companion/WindowsDisplayCursorOverlay.cs"
     ],
     "colorMeta": {
       "canvas": {
@@ -967,9 +971,11 @@
             "idle",
             "loading",
             "live",
+            "retrying",
+            "stale",
             "error"
           ],
-          "clear": "Removes image src and hides it on stop, lifecycle interruption, capture/validation/decode failure, or soft timeout."
+          "clear": "Remove image src and hide it on stop/lifecycle change, invalid or hard-error capture, or freshness expiry. A brief busy/rate-limit retry may retain the recent same-session image until its 1.5-second deadline."
         }
       },
       "desktopWindows": {
@@ -1267,7 +1273,9 @@
         "live": "Live PC view",
         "unavailable": "PC view unavailable.",
         "slow": "The PC view is taking too long. Check the PC connection.",
-        "errorTreatment": "Clear obsolete image, show amber status and open fullscreen tools; input may remain active."
+        "errorTreatment": "Retryable busy/rate-limit responses retain a fresh image without opening tools. Stale/hard failures clear it. Hard error reveals fullscreen tools only once per session.",
+        "retrying": "The PC view is catching up. Retrying shortly…",
+        "stale": "The PC view is paused while waiting for a fresh frame. Check the PC connection."
       },
       "dispatch": {
         "minimumSpacingMs": 8,
@@ -1282,15 +1290,13 @@
       "ios": "Requests hidden status bar, home-indicator auto-hide, and window-bounds layout. System Home/edge gestures remain; Split View/Stage Manager are not forced to fill the display. Exit/mode exit, resign-active/background, native tools, disconnect/re-pair, navigation/reload, or renderer termination restore safe-area layout.",
       "failure": "App-filling canvas remains with visible warning when system bars cannot be hidden.",
       "lifecycle": "Native deskwing-fullscreen event carries enabled/reason; disabled event restores the web layout and ends pen input where applicable.",
-      "verification": "Windows and unsigned iOS simulator CI passed at a9a85c93d01b6d03d79648644548431a53ee0efd. Physical iPad/system-bar behavior still needs device validation. The later high-refresh display transport requires its own final checks."
+      "verification": "Windows and unsigned iOS simulator CI passed at a9a85c93d01b6d03d79648644548431a53ee0efd. The user physically confirmed corrected Pen tablet image/fullscreen stability on the tested Xiaomi setup. Physical iPad behavior remains unverified. Later high-refresh display transport needs its own final checks."
     },
     "penPreview": {
       "source": "companion/PenPreview.cs",
       "route": "POST /api/pen/frame",
       "authorization": "Same current owner, active lease, enabled target, generation, and geometry; checked before and after capture. No capture merely from opening the workspace.",
       "transport": "Silent JPEG data URL, one in-flight capture; independent of pen-input requests.",
-      "minimumIntervalMs": 84,
-      "advertisedMaximumFps": 12,
       "maxImageDimensionPx": 1600,
       "maximumDataUrlLength": 2097152,
       "maximumJpegBytes": 1572846,
@@ -1301,7 +1307,15 @@
       "displayCapture": "Explicitly selected display, including visible windows.",
       "retention": "No disk frame storage or saved frame history.",
       "failure": "Unsupported/protected targets may fail or be blank. No guaranteed visual latency or full-motion playback.",
-      "verification": "Windows and iOS CI passed at a9a85c93d01b6d03d79648644548431a53ee0efd. Physical selected-target preview alignment/freshness remain unverified; pressure/delay observations do not establish them."
+      "verification": "The user physically confirmed 'pen tablet is good' and 'Yes, image and fullscreen are stable' after the correction, recorded at main checkpoint 3f1e050f99d502a4bbf61e5537984719b0837223. Exact latency, exhaustive edge calibration, and target-app compatibility remain separate.",
+      "clientMinimumIntervalMs": 96,
+      "clientNominalMaximumFps": 10.416666666666666,
+      "retryDelayMs": 120,
+      "freshImageWindowMs": 1500,
+      "transientBehavior": "Retain only a recent same-session image across known busy/rate-limit responses; do not reopen fullscreen tools.",
+      "hardErrorBehavior": "Clear the image and reveal fullscreen tools at most once per session.",
+      "serverMinimumIntervalMs": 84,
+      "serverCaptureCapFps": 12
     },
     "nativeDisplayPresentation": {
       "android": {
@@ -1338,7 +1352,8 @@
           "fps received",
           "target Hz",
           "tablet Hz",
-          "below target"
+          "below target",
+          "Still image (heartbeats excluded from picture counts)"
         ]
       },
       "ios": {
@@ -1380,7 +1395,8 @@
           "screen Hz (display-link cadence)",
           "target Hz",
           "source Hz",
-          "frames dropped"
+          "frames dropped",
+          "Still image (heartbeats excluded from picture counts)"
         ],
         "measurementLimit": "Does not measure presented video-frame rate."
       }
@@ -1431,7 +1447,7 @@
             "height": 1080
           }
         ],
-        "encoder": "Built-in software Media Foundation H.264; GDI capture.",
+        "encoder": "Built-in software Media Foundation H.264.",
         "gpuEncoding": false,
         "androidDecoder": "Hardware H.264 with resolution/rate capability check.",
         "iosDecoder": "Platform sample-buffer video pipeline.",
@@ -1439,7 +1455,23 @@
         "unclaimedLeaseMs": 5000,
         "writeTimeoutMs": 2000,
         "streamCount": 1,
-        "queue": "One capture/encoder worker; bounded writes and backpressure; no growing frame queue."
+        "queue": "One capture/encoder worker; bounded writes and backpressure; no growing frame queue.",
+        "capture": {
+          "preferred": "DXGI duplication of the exact owned display output",
+          "cursor": "Included within the owned monitor",
+          "gpuCapture": true,
+          "gdiFallback": "Persistent GDI capture only at 60 Hz"
+        },
+        "heartbeat": {
+          "intervalMs": 500,
+          "flags": 8,
+          "payloadBytes": 0,
+          "meaning": "Unchanged desktop; retain last image and show Still image. Do not count as a received or rendered video picture."
+        },
+        "freshFrameAfterIdle": {
+          "minimumIdleMs": 500,
+          "keyframe": "Force an IDR on the first fresh picture after this idle gap."
+        }
       },
       "compatibility": {
         "label": "Open compatibility preview",
@@ -1461,7 +1493,23 @@
       "retention": "No streamed frame files saved to disk.",
       "verification": {
         "tabletCapability": "ADB reported 120 Hz current and 165 Hz maximum on the user's tablet; capability reading only.",
-        "performance": "New H.264 integration build and sustained 60+ fps device rehearsal pending. Encoder-only timing excludes capture, network, and tablet presentation."
+        "performance": "Warm isolated PC-side capture/encode measured 60.01 fps at 60 Hz target and 118.75 fps at 120 Hz target on an owned 165 Hz display with an animated fixture. Network and tablet playback were not measured; final integration/device validation remains pending.",
+        "pcSideMeasurement": {
+          "scope": "Warm isolated PC capture/encode, animated fixture, owned 165 Hz monitor; excludes network and tablet.",
+          "sourceRefreshHz": 165,
+          "observations": [
+            {
+              "targetHz": 60,
+              "measuredFps": 60.01
+            },
+            {
+              "targetHz": 120,
+              "measuredFps": 118.75
+            }
+          ],
+          "cleanup": "Owned monitor removed; physical monitor topology unchanged.",
+          "endToEndTabletMeasured": false
+        }
       }
     },
     "validationBaseline": {
@@ -1573,8 +1621,8 @@
       "name": "PC preview states",
       "kind": "custom",
       "refersTo": "pc-preview-status",
-      "description": "Text-state examples for the session-scoped preview. No fabricated application screenshot; runtime live pixels come from the authorized target.",
-      "html": "<div class=\"ds-preview-states\" aria-label=\"PC preview status examples\"><p class=\"ds-preview-status\" role=\"status\">Loading the live PC view…</p><p class=\"ds-preview-status\" role=\"status\">Live PC view</p><p class=\"ds-preview-status ds-preview-error\" role=\"status\">PC view unavailable. Check the connection.</p></div>",
+      "description": "Text-state examples for the session-scoped preview. Brief retry states preserve a fresh image without reopening tools; stale states clear it. No fabricated application screenshot.",
+      "html": "<div class=\"ds-preview-states\" aria-label=\"PC preview status examples\"><p class=\"ds-preview-status\" role=\"status\">Loading the live PC view…</p><p class=\"ds-preview-status\" role=\"status\">Live PC view</p><p class=\"ds-preview-status\" role=\"status\">The PC view is catching up. Retrying shortly…</p><p class=\"ds-preview-status ds-preview-error\" role=\"status\">The PC view is paused while waiting for a fresh frame.</p><p class=\"ds-preview-status ds-preview-error\" role=\"status\">PC view unavailable. Check the connection.</p></div>",
       "css": ".ds-preview-status{font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.6;margin:5px 0 0;color:var(--secondary,#b8c3d1)}.ds-preview-status.ds-preview-error{color:var(--amber,#ffd58a)}"
     },
     {

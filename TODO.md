@@ -71,10 +71,12 @@ Previous checkpoint: commit 0691c1a passed all 57 Windows CI suites and 9 iOS te
 
 Live pen-preview implementation: all ten affected suites passed against a fresh Windows publish, including 42 fake capture checks, 49 frontend checks and 153 rendered checks. Native own-window capture reproduced changed strokes and exact client edges at two sizes. Seven final visual captures passed review; the actual Snyk scan found zero new issues. Commit a9a85c9 passed all 58 Windows CI suites and 11 iOS tests. The signed Android update and matching Windows companion were installed with pairing/data retained. The user confirmed seeing PC drawings on the tablet, then reported frequent refreshing and fullscreen instability.
 
-Pen-preview correction: reproduced the client/server 84 ms scheduling collision, which cleared the image and reopened tools on brief throttling errors. The correction adds pacing margin, retains only a fresh same-session image for at most 1.5 seconds, and prevents transient errors reopening tools. All 58 controller and 155 rendered checks passed; a fresh actual Snyk scan found no new findings. The signed correction is installed; physical retest is pending.
+Pen-preview correction: reproduced the client/server 84 ms scheduling collision, which cleared the image and reopened tools on brief throttling errors. The correction adds pacing margin, retains only a fresh same-session image for at most 1.5 seconds, and prevents transient errors reopening tools. All 58 controller and 155 rendered checks passed; a fresh actual Snyk scan found no new findings. The signed correction is installed. The user confirmed that the pen tablet, image and fullscreen are now stable.
 
 ## 9. High refresh Second display (added by user)
-- [ ] Replace the four-frame-per-second JPEG view with an actual video capture, transport and playback path targeting at least 60 fps.
-- [ ] Add 60 Hz and Match tablet refresh rate options using reported device capabilities, with the chosen rate applied to the virtual monitor and stream.
+- [x] Replace the four-frame-per-second JPEG view with an actual video capture, transport and playback path targeting at least 60 fps.
+- [x] Add 60 Hz and Match tablet refresh rate options using reported device capabilities, with the chosen rate applied to the virtual monitor and stream.
 - [ ] Show measured delivery/playback performance and verify the connected Xiaomi tablet, including stop, background, reconnect and sharing revocation.
 - [ ] Validate Windows, Android and iOS implementations, rerun security/CI and update packages and documentation.
+
+High-refresh implementation uses GPU desktop capture, H.264, separate pinned HTTPS video transport and native tablet decoding. Warm PC-side capture, encoding and framing measured 60.01 fps at target 60 and 118.75 fps at target 120, without duplicated frames added to reach those rates. Physical display topology was unchanged after the owned-monitor tests. Network/tablet playback verification remains pending. The user explicitly authorized finishing the work and pushing it to main.

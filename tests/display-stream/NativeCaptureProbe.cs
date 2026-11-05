@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace TabletDeck;
@@ -8,10 +9,14 @@ namespace TabletDeck;
 // or another application's source. Encoded frames are counted and immediately discarded.
 internal static class NativeCaptureProbe
 {
-    internal static async Task Run(string[] args)
+    internal static async Task Run()
     {
-        if(args.Length!=3||args[0]!="--native-capture"||args[1]!="--motion-helper"||!Path.IsPathFullyQualified(args[2])||!File.Exists(args[2]))
-            throw new ArgumentException("Native capture is opt-in: --native-capture --motion-helper <absolute diagnostic executable>.");
+        // This compiler-provided source location is fixed at build time. No command-line,
+        // environment, network, or working-directory value may choose the executable.
+        var repository=Path.GetFullPath(Path.Combine(Path.GetDirectoryName(SourceLocation())!,"..",".."));
+        var helper=Path.Combine(repository,".test-output","display-motion-helper","DisplayMotionTests.exe");
+        if(!File.Exists(Path.Combine(repository,"tests","display-motion-native","DisplayMotionTests.csproj"))||!File.Exists(helper))
+            throw new InvalidOperationException("Build the project-owned motion helper into .test-output/display-motion-helper before using --native-capture.");
         using var display=new ExtendedDisplay();
         var before=display.Status();
         if(before.Active||before.Displays.Any(item=>item.IsOwned))throw new InvalidOperationException("The probe requires no existing owned display.");
@@ -23,7 +28,7 @@ internal static class NativeCaptureProbe
                 throw new InvalidOperationException("Windows did not expose the probe's independent 165 Hz display.");
             var own=created.Displays.Single(item=>item.IsOwned);
             Console.WriteLine($"Probe target {own.SourceName} at {own.X},{own.Y}, {own.Width}×{own.Height}, actual {created.RefreshRate:0.##} Hz.");
-            var start=new ProcessStartInfo(args[2]){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
+            var start=new ProcessStartInfo(helper){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
             foreach(var arg in new[]{"--source",own.SourceName,"--bounds",$"{own.X},{own.Y},{own.Width},{own.Height}","--hz","120","--seconds","25"})start.ArgumentList.Add(arg);
             motion=Process.Start(start)??throw new InvalidOperationException("The motion fixture did not start.");
             var first=await motion.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5));
@@ -62,6 +67,8 @@ internal static class NativeCaptureProbe
             if(!unchanged)throw new InvalidOperationException("The display topology differs from the pre-probe snapshot.");
         }
     }
+
+    private static string SourceLocation([CallerFilePath]string source="")=>source;
 
     private sealed class TimedProducer(IDisplayVideoProducer inner,List<double> times):IDisplayVideoProducer
     {

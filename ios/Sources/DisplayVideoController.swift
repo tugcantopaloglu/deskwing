@@ -233,7 +233,10 @@ final class DisplayVideoController: UIViewController {
         let elapsed = link.timestamp - reportedAt
         if elapsed >= 1 {
             let rate = Int((Double(received) / elapsed).rounded())
-            let still = receivedFirstKeyframe && displayLayer.isReadyForDisplay && lastVideoAt > 0 &&
+            let imageReady: Bool
+            if #available(iOS 17.4, *) { imageReady = displayLayer.isReadyForDisplay }
+            else { imageReady = false } // Older systems report received fps without claiming a visible still image.
+            let still = receivedFirstKeyframe && imageReady && lastVideoAt > 0 &&
                 link.timestamp - lastVideoAt >= 1 && lastHeartbeatAt > 0 && link.timestamp - lastHeartbeatAt <= 1.5
             let activity = still ? "Still image" : "\(rate) fps received"
             status.text = " \(activity) · \(currentRefreshRate) Hz screen\n Target \(format.refreshRate) Hz · source \(sourceRefresh) Hz" + (dropped > 0 ? " · \(dropped) frames dropped " : " ")

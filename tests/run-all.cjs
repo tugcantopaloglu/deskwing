@@ -19,7 +19,7 @@ const suites=[
   {name:'android-bridge-limits',group:'android',java:true,javaClass:'BridgeRequestLimitsHarness',javaSources:['android/src/app/tabletdeck/BridgeRequestLimits.java','tests/java/BridgeRequestLimitsHarness.java']},
   {name:'android-pen-leases',group:'android',java:true,javaClass:'PenLeaseTrackerHarness',javaSources:['android/src/app/tabletdeck/PenLeaseTracker.java','tests/java/PenLeaseTrackerHarness.java']},
   {name:'android-fullscreen-policy',group:'android',java:true,javaClass:'FullscreenPolicyHarness',javaSources:['android/src/app/tabletdeck/FullscreenPolicy.java','tests/java/FullscreenPolicyHarness.java']},
-  {name:'android-display-protocol',group:'android',java:true,javaClass:'app.tabletdeck.DisplayVideoProtocolHarness',javaSources:['android/src/app/tabletdeck/DisplayVideoProtocol.java','tests/java/DisplayVideoProtocolHarness.java']},
+  {name:'android-display-protocol',group:'android',java:true,javaClass:'app.tabletdeck.DisplayVideoProtocolHarness',javaSources:['android/src/app/tabletdeck/DisplayVideoProtocol.java','android/src/app/tabletdeck/DisplayReadDeadline.java','tests/java/DisplayVideoProtocolHarness.java']},
   {name:'android-bridge-tickets',group:'android',java:true,javaClass:'app.tabletdeck.BridgeRequestTicketsHarness',javaSources:['android/src/app/tabletdeck/BridgeRequestTickets.java','tests/java/BridgeRequestTicketsHarness.java']},
   {name:'android-frame-metrics',group:'android',java:true,javaClass:'app.tabletdeck.RenderedFrameMetricsHarness',javaSources:['android/src/app/tabletdeck/RenderedFrameMetrics.java','tests/java/RenderedFrameMetricsHarness.java']},
   {name:'copilot-backend',group:'core',project:'tests/copilot-backend/CopilotBackendTests.csproj'},

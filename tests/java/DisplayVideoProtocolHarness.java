@@ -5,8 +5,15 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /** No Android classes, network, decoder, or live display is used by this protocol fixture. */
 public final class DisplayVideoProtocolHarness {
@@ -185,6 +192,42 @@ public final class DisplayVideoProtocolHarness {
         rejects(()->state.accept(new DisplayVideoProtocol.Unit(0,1_050_000,new byte[]{0,0,0,1,0x61,1}),false,7_200_000_000L),IOException.class,"heartbeats do not weaken video timestamp ordering");
         check(!state.accept(new DisplayVideoProtocol.Unit(2,0,join(SPS,PPS)),true,7_300_000_000L)&&state.pictures()==2,"configuration-only units remain outside received-video count");
     }
+    private static final class TrickleInput extends InputStream {
+        final CountDownLatch blocking=new CountDownLatch(1);final byte[] prefix;final int fastBytes;private int offset;private boolean closed;
+        TrickleInput(byte[] prefix,int fastBytes){this.prefix=prefix;this.fastBytes=fastBytes;}
+        @Override public synchronized int read() throws IOException {
+            if(closed)throw new IOException("Test stream disconnected.");
+            if(offset>=fastBytes){blocking.countDown();try{wait(250);}catch(InterruptedException ex){Thread.currentThread().interrupt();throw new IOException("Test read interrupted.");}if(closed)throw new IOException("Test stream disconnected.");}
+            return offset<prefix.length?prefix[offset++]&255:0;
+        }
+        @Override public synchronized void close(){closed=true;notifyAll();}
+    }
+    private static void deadlineGuards() throws Exception {
+        ScheduledExecutorService deadlines=Executors.newSingleThreadScheduledExecutor();ExecutorService readers=Executors.newSingleThreadExecutor();
+        try{
+            for(boolean initialHeader:new boolean[]{true,false}){
+                TrickleInput trickle=new TrickleInput(initialHeader?header(1280,800,60):packet(DisplayVideoProtocol.MAX_ACCESS_UNIT,1,0,new byte[0]),initialHeader?0:16);
+                Future<Boolean> read=readers.submit(()->{try{if(initialHeader)DisplayVideoProtocol.header(new DataInputStream(trickle),1280,800,60);else DisplayVideoProtocol.unit(new DataInputStream(trickle));return false;}catch(IOException expected){return true;}});
+                try{
+                    check(trickle.blocking.await(2,TimeUnit.SECONDS),"trickled "+(initialHeader?"header":"access unit")+" enters a blocking read");
+                    try(DisplayReadDeadline deadline=new DisplayReadDeadline(deadlines,50,trickle::close)){
+                        check(read.get(3,TimeUnit.SECONDS)&&deadline.expired(),"independent deadline interrupts partial "+(initialHeader?"header":"2 MiB access unit")+" despite continued trickling");
+                        check(!deadline.acceptPicture(),"expired read cannot revive a late picture");
+                    }
+                }finally{trickle.close();read.cancel(true);}
+            }
+            CountDownLatch acceptedAbort=new CountDownLatch(1);
+            try(DisplayReadDeadline accepted=new DisplayReadDeadline(deadlines,500,acceptedAbort::countDown)){
+                check(accepted.acceptPicture()&&accepted.acceptPicture(),"first validated picture wins the deadline exactly once");
+                check(!acceptedAbort.await(650,TimeUnit.MILLISECONDS)&&!accepted.expired(),"accepted picture cancels the pending disconnect");
+            }
+            CountDownLatch oldAbort=new CountDownLatch(1),newAbort=new CountDownLatch(1);
+            try(DisplayReadDeadline old=new DisplayReadDeadline(deadlines,50,oldAbort::countDown);DisplayReadDeadline next=new DisplayReadDeadline(deadlines,100,newAbort::countDown)){
+                old.close();check(!old.acceptPicture(),"stopped session cannot accept a late first picture");
+                check(newAbort.await(2,TimeUnit.SECONDS)&&oldAbort.getCount()==1,"stopped deadline cannot disconnect a replacement session");
+            }
+        }finally{readers.shutdownNow();deadlines.shutdownNow();}
+    }
     public static void main(String[] args) throws Exception {
         for(int[] dimensions:new int[][]{{1280,800},{1600,900},{1920,1080}}){
             for(int rate:new int[]{60,90,120,144,165,240}){
@@ -276,6 +319,7 @@ public final class DisplayVideoProtocolHarness {
         for(String invalid:new String[]{null,"","120","MATCH","auto"})rejects(()->DisplayVideoProtocol.targetRate(invalid,120),IllegalArgumentException.class,"unsupported refresh mode rejected");
         configurationGuards();
         heartbeatGuards();
+        deadlineGuards();
         System.out.println(passed+" display-video protocol checks passed; no native decoder, capture, or network was used.");
     }
 }

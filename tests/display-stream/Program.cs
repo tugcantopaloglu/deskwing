@@ -37,7 +37,8 @@ internal static class Program
 
     private static async Task Main(string[] args)
     {
-        if(args.Length>0){await NativeCaptureProbe.Run(args);return;}
+        if(args.SequenceEqual(new[]{"--native-capture"})){await NativeCaptureProbe.Run();return;}
+        if(args.Length>0)throw new ArgumentException("The only optional mode is --native-capture; executable paths are not accepted.");
         await ExtendedDisplayTests.Run();
         using(var scene=new Scene())
         {

@@ -35,6 +35,8 @@ import java.util.Arrays;
 import java.util.Locale;
 import java.util.TreeSet;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -63,6 +65,7 @@ final class NativeDisplayVideo {
     private final Runnable enterFullscreen,exitFullscreen;
     private final Handler ui=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new SynchronousQueue<Runnable>(),new ThreadPoolExecutor.AbortPolicy());
+    private final ScheduledExecutorService deadlines=Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean workerBusy=new AtomicBoolean();
     private volatile Session active;
     private boolean closed;
@@ -100,6 +103,7 @@ final class NativeDisplayVideo {
     void stop(String reason){
         Session session=active;if(session==null)return;
         active=null;session.cancelled=true;
+        if(session.firstPictureDeadline!=null)session.firstPictureDeadline.close();
         HttpsURLConnection pending=session.pending;if(pending!=null)pending.disconnect();
         if(session.view!=null&&Build.VERSION.SDK_INT>=30){Surface surface=session.view.getHolder().getSurface();if(surface!=null&&surface.isValid())try{surface.setFrameRate(0,Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);}catch(RuntimeException ignored){}}
         ui.removeCallbacks(session.statistics);if(session.manager!=null&&session.listener!=null)session.manager.unregisterDisplayListener(session.listener);
@@ -107,7 +111,7 @@ final class NativeDisplayVideo {
         session.complete(error(new IOException("The display stopped before it opened.")));
         events.stopped(session.id,reason);
     }
-    void close(){closed=true;stop("DeskWing closed.");worker.shutdownNow();}
+    void close(){closed=true;stop("DeskWing closed.");worker.shutdownNow();deadlines.shutdownNow();}
     void stopInvalid(String reason){Session session=active;if(session!=null&&!valid(session))stop(reason);}
     private Display display(){return Build.VERSION.SDK_INT>=30?activity.getDisplay():activity.getWindowManager().getDefaultDisplay();}
     private int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
@@ -154,6 +158,10 @@ final class NativeDisplayVideo {
             double sourceRate=started.optDouble("sourceRefreshRate",0);if(!Double.isFinite(sourceRate)||sourceRate+1<rate)throw new IOException("Set the PC's DeskWing display to at least "+rate+" Hz, then start again.");
             session.width=width;session.height=height;
             HttpsURLConnection connection=session.connection.open(STREAM);session.pending=connection;configure(connection,5000);connection.setReadTimeout(3000);connection.setRequestProperty("Accept",MIME);
+            // A socket's per-read timeout is insufficient: a peer can keep readFully alive by
+            // trickling bytes. This timer owns only this connection and covers header + first AU.
+            DisplayReadDeadline firstPictureDeadline=new DisplayReadDeadline(deadlines,5000,connection::disconnect);session.firstPictureDeadline=firstPictureDeadline;
+            guard(session);
             write(connection,new JSONObject().put("lease",lease),()->guard(session));
             if(connection.getResponseCode()!=200)throw responseError(connection);
             String contentType=connection.getContentType();if(contentType==null||!contentType.split(";",2)[0].trim().equalsIgnoreCase(MIME))throw new IOException("The PC did not return a supported video stream.");
@@ -166,6 +174,7 @@ final class NativeDisplayVideo {
                 byte[][] configuration=DisplayVideoProtocol.configuration(first.bytes);
                 DisplayVideoProtocol.validateConfiguration(configuration,width,height);
                 DisplayVideoProtocol.configurationOnly(first,true);
+                if(!firstPictureDeadline.acceptPicture())throw new IOException("The PC did not provide the first display picture in time. Start again.");
                 MediaFormat format=MediaFormat.createVideoFormat("video/avc",width,height);format.setByteBuffer("csd-0",ByteBuffer.wrap(configuration[0]));format.setByteBuffer("csd-1",ByteBuffer.wrap(configuration[1]));
                 format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE,DisplayVideoProtocol.MAX_ACCESS_UNIT);format.setInteger(MediaFormat.KEY_FRAME_RATE,rate);format.setInteger(MediaFormat.KEY_PRIORITY,0);format.setFloat(MediaFormat.KEY_OPERATING_RATE,rate);if(Build.VERSION.SDK_INT>=30)format.setInteger(MediaFormat.KEY_LOW_LATENCY,1);
                 String decoder=findDecoder(width,height,rate);codec=MediaCodec.createByCodecName(decoder);
@@ -194,9 +203,10 @@ final class NativeDisplayVideo {
                 }
                 if(valid(session))throw new IOException("The PC stopped sharing this display.");
             }finally{connection.disconnect();if(session.pending==connection)session.pending=null;}
-        }catch(Exception ex){if(!session.cancelled)fail(session,ex);}
+        }catch(Exception ex){if(!session.cancelled)fail(session,session.firstPictureDeadline!=null&&session.firstPictureDeadline.expired()?new IOException("The PC did not provide the first display picture in time. Start again."):ex);}
         finally{
             session.cancelled=true;
+            if(session.firstPictureDeadline!=null)session.firstPictureDeadline.close();
             if(output!=null){output.interrupt();try{output.join(200);}catch(InterruptedException ex){Thread.currentThread().interrupt();}}
             if(codec!=null){try{codec.stop();}catch(RuntimeException ignored){}try{codec.release();}catch(RuntimeException ignored){}}
             if(callbacks!=null)callbacks.quitSafely();
@@ -253,7 +263,7 @@ final class NativeDisplayVideo {
     private final class Session {
         final String id,mode;final int requestedRate;final float initialRefresh;final Connection connection;final Reply reply;final long epoch;
         final AtomicBoolean started=new AtomicBoolean(),replied=new AtomicBoolean();final AtomicLong received=new AtomicLong(),rendered=new AtomicLong(),dropped=new AtomicLong();final RenderedFrameMetrics renderMetrics=new RenderedFrameMetrics();
-        volatile boolean cancelled;volatile HttpsURLConnection pending;volatile String lease="";volatile int width,height;volatile Exception decoderError;volatile DisplayVideoProtocol.StreamState streamState;
+        volatile boolean cancelled;volatile HttpsURLConnection pending;volatile String lease="";volatile int width,height;volatile Exception decoderError;volatile DisplayVideoProtocol.StreamState streamState;volatile DisplayReadDeadline firstPictureDeadline;
         FrameLayout overlay;SurfaceView view;TextView status;Runnable statistics;DisplayManager manager;DisplayManager.DisplayListener listener;
         long statAt=System.nanoTime(),lastReceived,lastRendered;int statisticsTicks;
         Session(String id,String mode,int rate,float refresh,Connection connection,Reply reply,long epoch){this.id=id;this.mode=mode;requestedRate=rate;initialRefresh=refresh;this.connection=connection;this.reply=reply;this.epoch=epoch;}

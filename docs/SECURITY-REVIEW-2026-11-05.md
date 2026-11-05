@@ -69,6 +69,7 @@ The root-directory `snyk_code_scan` call included the integrated C#, Android Jav
 | Final live-pen-preview `snyk_code_scan` | Root scan succeeded at 2026-11-05 22:26:31 Europe/Istanbul with 7 Low, 0 Medium, 0 High; no new findings. Includes frozen capture service, lease snapshots, native bridge/lifecycle changes, frontend, and own-window preview tests. Owners reported 42 fake capture, 28 HTTP, 49 frontend, 153 rendered UI, 166 Android policy, and 37 Android lease checks passing |
 | Final fast-channel test follow-up `snyk_code_scan` | Root scan succeeded at 2026-11-05 22:28:42 Europe/Istanbul: 7 Low, 0 Medium, 0 High; no new findings. Includes the final two `tests/fast.cjs` assertions that preview requests are rejected on the persistent input channel and the next control ping still responds |
 | Main preview hotfix `snyk_code_scan` | Root scan succeeded at 2026-11-05 23:08:15 Europe/Istanbul: 7 Low, 0 Medium, 0 High; no new findings. Scope is main `0df805c` plus the frozen `tests/ink-rendered.cjs` retry/error tests. The separate high-refresh worktree is not included |
+| Main monotonic capture deadline follow-up `snyk_code_scan` | Root scan succeeded at 2026-11-05 23:21:41 Europe/Istanbul on `ae72437`: 7 Low, 0 Medium, 0 High; no new findings. The native worker now checks elapsed time independently of delayed timer callbacks; the owner reported all 42 capture checks passing |
 | `npm audit --prefix tests --json` | Exit 0; 0 vulnerabilities across the reported 6 dependencies |
 | `dotnet list companion/TabletDeck.csproj package --vulnerable --include-transitive --format json` | Exit 0; no vulnerable direct or transitive packages reported by NuGet |
 
@@ -97,3 +98,5 @@ Latest live-preview evidence: `.test-output/snyk-deskwing-mcp-pen-preview-final-
 Fast-channel follow-up checkpoint: `.test-output/snyk-deskwing-mcp-preview-tests-final-2026-11-05.json`, after the final fast-channel test additions. Runtime and dependency inputs did not change in that follow-up.
 
 Latest main-app checkpoint: `.test-output/snyk-deskwing-mcp-preview-hotfix-final-2026-11-05.json`, after the preview freshness hotfix and final rendered retry assertions. Dependency hashes remain unchanged.
+
+Subsequent main deadline checkpoint: `.test-output/snyk-deskwing-mcp-preview-deadline-final-2026-11-05.json`, covering `ae72437`. The same dependency hashes remain unchanged.
