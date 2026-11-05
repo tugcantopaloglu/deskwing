@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -45,22 +46,30 @@ internal sealed class PenPreview
         if(!await captureGate.WaitAsync(0,ct))throw new InvalidOperationException("PC preview capture is busy. It will retry without queuing frames.");
         if(attempted&&now()-attemptAt<MinimumIntervalMs){captureGate.Release();throw new InvalidOperationException("PC preview is rate limited. It will retry shortly.");}
         attempted=true;attemptAt=now();
+        var captureStarted=Stopwatch.GetTimestamp();
         var cancellation=CancellationTokenSource.CreateLinkedTokenSource(ct);
         cancellation.CancelAfter(timeoutMs);
+        void CheckCaptureLifetime()
+        {
+            cancellation.Token.ThrowIfCancellationRequested();
+            // Timer callbacks can be delayed independently of WaitAsync's timeout. A late native
+            // return must be discarded even when CancelAfter has not run on a busy thread pool yet.
+            if(Stopwatch.GetElapsedTime(captureStarted).TotalMilliseconds>=timeoutMs)throw new TimeoutException();
+        }
         // PrintWindow is synchronous and an unresponsive app can block it. Only this one worker may
         // capture; timing out a response does NOT free its slot or create additional native workers.
         // No GDI work runs while WindowsPen's gate or the fast-control gate is held.
         var capture=Task.Run(()=>{
             try{
-                cancellation.Token.ThrowIfCancellationRequested();
+                CheckCaptureLifetime();
                 pen.ValidateCapture(authorization);
                 var bitmap=platform.Capture(authorization.Destination,request.Width,cancellation.Token);
-                cancellation.Token.ThrowIfCancellationRequested();
+                CheckCaptureLifetime();
                 var expected=Dimensions(authorization.Destination.Bounds,request.Width);
                 if(bitmap.Width!=expected.Width||bitmap.Height!=expected.Height||bitmap.Jpeg is not {Length:>=4}||bitmap.Jpeg.Length>MaximumJpegBytes||bitmap.Jpeg[0]!=255||bitmap.Jpeg[1]!=216||bitmap.Jpeg[^2]!=255||bitmap.Jpeg[^1]!=217)
                     throw new InvalidOperationException("The PC target returned an invalid or oversized preview.");
                 var image=ImagePrefix+Convert.ToBase64String(bitmap.Jpeg);
-                cancellation.Token.ThrowIfCancellationRequested();
+                CheckCaptureLifetime();
                 pen.ValidateCapture(authorization);
                 var target=authorization.Destination;
                 return new PenPreviewFrame(image,bitmap.Width,bitmap.Height,target.Info.Id,target.Bounds.Width,target.Bounds.Height,Interlocked.Increment(ref sequence),DateTimeOffset.UtcNow);
