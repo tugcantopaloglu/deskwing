@@ -42,17 +42,24 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
     @discardableResult
     func send(path: String, method: String, body: [String: Any], pairing: Bool = false, reply: @escaping Reply) throws -> URLSessionDataTask {
         guard HostPolicy.validHost(host), (1...65535).contains(port), HostPolicy.normalizedPin(pin) == pin,
-              (pairing && path == "/api/pair" && method == "POST" && token.isEmpty()) ||
-                (!pairing && pin.count == 64 && !token.isEmpty() && HostPolicy.allowed(path, method: method)) else {
+              (pairing && path == "/api/pair" && method == "POST" && token.isEmpty) ||
+                (!pairing && pin.count == 64 && !token.isEmpty && HostPolicy.allowed(path, method: method)) else {
             throw DeskError.message("This PC request is not allowed.")
         }
         var parts = URLComponents(); parts.scheme = "https"; parts.host = host; parts.port = port; parts.path = path
+        if method == "GET", let revision = HostPolicy.inkRevision(path) {
+            parts.path = "/api/ink"; parts.queryItems = [URLQueryItem(name: "revision", value: revision)]
+        }
         guard let url = parts.url else { throw DeskError.message("Invalid PC address.") }
         var request = URLRequest(url: url); request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if !token.isEmpty { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
-        if method == "POST" { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
+        if method == "POST" {
+            let data = try JSONSerialization.data(withJSONObject: body)
+            guard data.count <= HostPolicy.maximumBodyBytes(path) else { throw DeskError.message("This PC request is too large.") }
+            request.httpBody = data
+        }
         if pairing { request.timeoutInterval = 12 }
         if path.hasSuffix("/frame") { request.timeoutInterval = 8 }
         let task = session.dataTask(with: request)
@@ -63,7 +70,7 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
         lock.unlock()
         task.resume()
         if !pairing && HostPolicy.needsDispatchDeadline(path, method: method, body: body) {
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 2) { [weak self, weak task] in
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + HostPolicy.dispatchDeadline(path)) { [weak self, weak task] in
                 guard let self, let task else { return }
                 self.lock.lock()
                 guard var item = self.pending[task.taskIdentifier], !item.bodyStarted else { self.lock.unlock(); return }

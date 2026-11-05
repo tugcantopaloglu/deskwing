@@ -2,6 +2,18 @@ import XCTest
 @testable import DeskWing
 
 final class HostPolicyTests: XCTestCase {
+    func testRendererRestartCannotCompleteReusedRequest() throws {
+        var requests = BridgeRequests()
+        let beforeReload = try XCTUnwrap(requests.begin(1))
+        XCTAssertNil(requests.begin(1))
+        requests.reset()
+        let afterReload = try XCTUnwrap(requests.begin(1))
+        XCTAssertFalse(requests.finish(1, ticket: beforeReload))
+        XCTAssertTrue(requests.contains(1))
+        XCTAssertTrue(requests.finish(1, ticket: afterReload))
+        XCTAssertFalse(requests.finish(1, ticket: afterReload))
+        XCTAssertEqual(requests.count, 0)
+    }
     func testPrivateIPv4Boundary() {
         for host in ["10.0.0.4", "192.168.1.42", "172.16.0.1", "172.31.255.254", "169.254.1.4", "100.64.0.1"] {
             XCTAssertTrue(HostPolicy.validHost(host), host)
@@ -22,6 +34,16 @@ final class HostPolicyTests: XCTestCase {
     func testBridgeBoundary() {
         XCTAssertTrue(HostPolicy.allowed("/api/action", method: "POST"))
         XCTAssertTrue(HostPolicy.allowed("/api/computer/follow", method: "POST"))
+        XCTAssertTrue(HostPolicy.allowed("/api/ink", method: "GET"))
+        XCTAssertTrue(HostPolicy.allowed("/api/ink", method: "POST"))
+        let revisionPath = "/api/ink?revision=" + String(repeating: "aB01", count: 16)
+        XCTAssertTrue(HostPolicy.allowed(revisionPath, method: "GET"))
+        XCTAssertFalse(HostPolicy.allowed(revisionPath, method: "POST"))
+        XCTAssertFalse(HostPolicy.allowed(revisionPath + "&other=1", method: "GET"))
+        XCTAssertFalse(HostPolicy.allowed("/api/ink?revision=" + String(repeating: "z", count: 64), method: "GET"))
+        XCTAssertFalse(HostPolicy.allowed("/api/ink?revision=%41" + String(repeating: "A", count: 63), method: "GET"))
+        XCTAssertTrue(HostPolicy.allowed("/api/pen", method: "GET"))
+        XCTAssertTrue(HostPolicy.allowed("/api/pen", method: "POST"))
         for path in ["/api/admin/config", "/api/action?admin=1", "/api/../admin/config", "https://192.168.1.1/api/action", "/api/pair"] {
             XCTAssertFalse(HostPolicy.allowed(path, method: "POST"), path)
         }
@@ -38,11 +60,28 @@ final class HostPolicyTests: XCTestCase {
         XCTAssertFalse(HostPolicy.allowedInBackground("/api/hold", body: ["operation":"begin"]))
         XCTAssertFalse(HostPolicy.allowedInBackground("/api/soundpad/play", body: [:]))
         XCTAssertFalse(HostPolicy.allowedInBackground("/api/computer/follow", body: ["automatic":true]))
+        XCTAssertTrue(HostPolicy.allowedInBackground("/api/pen", body: ["operation":"end"]))
+        XCTAssertTrue(HostPolicy.allowedInBackground("/api/pen", body: ["operation":"cancel"]))
+        XCTAssertFalse(HostPolicy.allowedInBackground("/api/pen", body: ["operation":"begin"]))
+        XCTAssertFalse(HostPolicy.allowedInBackground("/api/pen", body: ["operation":"samples"]))
+        XCTAssertFalse(HostPolicy.allowedInBackground("/api/pen", body: ["operation":"renew"]))
+        XCTAssertFalse(HostPolicy.allowedInBackground("/api/ink", body: [:]))
         XCTAssertTrue(HostPolicy.needsDispatchDeadline("/api/action", method: "POST", body: [:]))
         XCTAssertTrue(HostPolicy.needsDispatchDeadline("/api/soundpad/play", method: "POST", body: [:]))
         XCTAssertFalse(HostPolicy.needsDispatchDeadline("/api/hold", method: "POST", body: ["operation":"release"]))
         XCTAssertFalse(HostPolicy.needsDispatchDeadline("/api/monitor/frame", method: "POST", body: [:]))
         XCTAssertFalse(HostPolicy.needsDispatchDeadline("/api/board", method: "GET", body: [:]))
+        XCTAssertFalse(HostPolicy.needsDispatchDeadline("/api/pen", method: "POST", body: ["operation":"cancel"]))
+        XCTAssertTrue(HostPolicy.needsDispatchDeadline("/api/pen", method: "POST", body: ["operation":"samples"]))
+    }
+    func testInkExceptionDoesNotExpandOtherRequests() {
+        XCTAssertEqual(HostPolicy.maximumBodyBytes("/api/ink"), 4 * 1024 * 1024)
+        XCTAssertEqual(HostPolicy.maximumBridgeBytes("/api/ink"), 4 * 1024 * 1024 + 16384)
+        XCTAssertEqual(HostPolicy.maximumBodyBytes("/api/pen"), 16384)
+        XCTAssertEqual(HostPolicy.maximumBodyBytes("/api/ink?x=1"), 16384)
+        XCTAssertEqual(HostPolicy.maximumBridgeBytes("/api/admin/config"), 16384)
+        XCTAssertEqual(HostPolicy.dispatchDeadline("/api/pen"), 0.5)
+        XCTAssertEqual(HostPolicy.dispatchDeadline("/api/action"), 2)
     }
     func testPNGAndFilenameValidation() {
         XCTAssertEqual(PNGExport.safeName("../private.png"), "DeskWing-sketch.png")

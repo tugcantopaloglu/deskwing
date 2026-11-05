@@ -13,10 +13,11 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
     private var pc: PairedPC?
     private var client: PinnedClient?
     private var pairingClient: PinnedClient?
-    private var requestIDs = Set<Int>()
+    private var requests = BridgeRequests()
     private var generation = 0
     private var foreground = true
     private var currentLease: String?
+    private var currentPenLease: String?
     private weak var handwriting: PenInputController?
     private weak var provider: SFSafariViewController?
     private var startupWarning: String?
@@ -67,66 +68,76 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
               number.doubleValue == Double(number.intValue), (1...Int(Int32.max)).contains(number.intValue),
               let path = request["path"] as? String, let method = request["method"] as? String else { return }
         let id = number.intValue
-        guard !requestIDs.contains(id) else { return }
-        guard requestIDs.count < 32 else { sendDirect(id, ["error":"Too many pending requests. Wait for the PC, then try again."]); return }
-        requestIDs.insert(id)
+        guard !requests.contains(id) else { return }
+        guard requests.count < 32 else { sendDirect(id, ["error":"Too many pending requests. Wait for the PC, then try again."]); return }
+        guard let ticket = requests.begin(id) else { return }
         let body = request["body"] as? [String: Any] ?? [:]
-        guard method == "GET" || method == "POST", path == "/local/export-image" || bytes.count <= 16384 else {
-            fail(id, "This request is invalid or too large."); return
+        guard method == "GET" || method == "POST", bytes.count <= HostPolicy.maximumBridgeBytes(path) else {
+            fail(id, ticket: ticket, "This request is invalid or too large."); return
         }
         if path.hasPrefix("/native/") || path.hasPrefix("/local/") {
-            guard method == "POST" else { fail(id, "This local request requires POST."); return }
-            local(id, path: path, body: body); return
+            guard method == "POST" else { fail(id, ticket: ticket, "This local request requires POST."); return }
+            local(id, ticket: ticket, path: path, body: body); return
         }
-        guard HostPolicy.allowed(path, method: method) else { fail(id, "This request is not allowed from the tablet."); return }
-        guard foreground || HostPolicy.allowedInBackground(path, body: body) else { fail(id, "Controls are paused while DeskWing is in the background."); return }
-        guard let client else { fail(id, "Pair this tablet with your Windows PC first."); return }
+        guard HostPolicy.allowed(path, method: method) else { fail(id, ticket: ticket, "This request is not allowed from the tablet."); return }
+        guard foreground || HostPolicy.allowedInBackground(path, body: body) else { fail(id, ticket: ticket, "Controls are paused while DeskWing is in the background."); return }
+        guard let client else { fail(id, ticket: ticket, "Pair this tablet with your Windows PC first."); return }
         let epoch = generation
         do {
             try client.send(path: path, method: method, body: body) { [weak self] result in
                 guard let self else { return }
                 guard epoch == self.generation || HostPolicy.allowedInBackground(path, body: body) else {
-                    self.fail(id, "The connection changed before confirmation. The action may have run; it was not repeated."); return
+                    // A begin response can arrive after suspension. Release that exact old-PC lease instead of retaining it.
+                    if case .success(let response) = result, let lease = response["lease"] as? String,
+                       body["operation"] as? String == "begin", path == "/api/hold" || path == "/api/pen" {
+                        let operation = path == "/api/pen" ? "cancel" : "release"
+                        try? client.send(path: path, method: "POST", body: ["operation":operation, "lease":lease]) { _ in }
+                    }
+                    self.fail(id, ticket: ticket, "The connection changed before confirmation. The action may have run; it was not repeated."); return
                 }
                 switch result {
                 case .success(let response):
                     if path == "/api/hold" {
-                        if body["operation"] as? String == "release" { self.currentLease = nil }
+                        if body["operation"] as? String == "release", body["lease"] as? String == self.currentLease { self.currentLease = nil }
                         else if let lease = response["lease"] as? String { self.currentLease = lease }
                     }
-                    self.complete(id, response)
-                case .failure(let error): self.fail(id, error.localizedDescription)
+                    if path == "/api/pen" {
+                        if ["end", "cancel"].contains(body["operation"] as? String ?? ""), body["lease"] as? String == self.currentPenLease { self.currentPenLease = nil }
+                        else if body["operation"] as? String == "begin", let lease = response["lease"] as? String { self.currentPenLease = lease }
+                    }
+                    self.complete(id, ticket: ticket, response)
+                case .failure(let error): self.fail(id, ticket: ticket, error.localizedDescription)
                 }
             }
-        } catch { fail(id, error.localizedDescription) }
+        } catch { fail(id, ticket: ticket, error.localizedDescription) }
     }
-    private func local(_ id: Int, path: String, body: [String: Any]) {
-        if path == "/native/connection" || path == "/native/diagnostics/reset" { complete(id, connection()); return }
-        if path == "/native/chat", body["operation"] as? String == "hide" { provider?.dismiss(animated: true); complete(id, ["ok":true]); return }
-        guard foreground else { fail(id, "Open DeskWing before using this tool."); return }
+    private func local(_ id: Int, ticket: UUID, path: String, body: [String: Any]) {
+        if path == "/native/connection" || path == "/native/diagnostics/reset" { complete(id, ticket: ticket, connection()); return }
+        if path == "/native/chat", body["operation"] as? String == "hide" { provider?.dismiss(animated: true); complete(id, ticket: ticket, ["ok":true]); return }
+        guard foreground else { fail(id, ticket: ticket, "Open DeskWing before using this tool."); return }
         do {
             switch path {
-            case "/native/pair": try pair(id, body: body)
+            case "/native/pair": try pair(id, ticket: ticket, body: body)
             case "/native/forget":
-                try PairingStore.forget(); retireClient(); pc = nil; complete(id, connection())
+                try PairingStore.forget(); retireClient(); pc = nil; complete(id, ticket: ticket, connection())
             case "/native/transport":
                 guard body["mode"] as? String == "wifi" else { throw DeskError.message("iOS connects to your PC over Wi-Fi/LAN. Android's USB tunnel is not supported on iOS.") }
                 guard let current = pc, body["host"] as? String == current.host else { throw DeskError.message("Pair again to verify a different PC address.") }
-                complete(id, connection())
+                complete(id, ticket: ticket, connection())
             case "/native/scan": throw DeskError.message("Use manual pairing on iOS: enter the PC address, certificate code, and PIN.")
-            case "/local/handwriting": try showHandwriting(id, body: body)
-            case "/local/export-image": try exportImage(id, body: body)
-            case "/native/chat": try showChat(id, body: body)
+            case "/local/handwriting": try showHandwriting(id, ticket: ticket, body: body)
+            case "/local/export-image": try exportImage(id, ticket: ticket, body: body)
+            case "/native/chat": try showChat(id, ticket: ticket, body: body)
             default: throw DeskError.message("This local request is not supported on iOS.")
             }
-        } catch { fail(id, error.localizedDescription) }
+        } catch { fail(id, ticket: ticket, error.localizedDescription) }
     }
     private func connection() -> [String: Any] {
         ["paired":pc != nil, "host":pc?.host ?? "", "mode":"wifi", "pairingId":pc?.pairingID ?? "",
          "port":pc?.port ?? 8743, "controlPort":pc?.controlPort ?? 8744, "fastConnected":false,
          "roundTripMs":-1, "diagnostics":[:], "platform":"ios"]
     }
-    private func pair(_ id: Int, body: [String: Any]) throws {
+    private func pair(_ id: Int, ticket: UUID, body: [String: Any]) throws {
         guard pairingClient == nil else { throw DeskError.message("Pairing is already in progress.") }
         let host = (body["host"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard (body["mode"] as? String ?? "wifi") == "wifi", HostPolicy.validHost(host) else { throw DeskError.message("Use the PC's private numeric IPv4 address on the same Wi-Fi/LAN.") }
@@ -141,7 +152,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
             try pairing.send(path: "/api/pair", method: "POST", body: ["code":code, "name":"DeskWing " + UIDevice.current.model], pairing: true) { [weak self] result in
                 guard let self else { return }
                 defer { pairing.invalidate(); if self.pairingClient === pairing { self.pairingClient = nil } }
-                guard epoch == self.generation, self.foreground else { self.fail(id, "Pairing stopped when the app left the foreground. Generate a fresh PIN and try again."); return }
+                guard epoch == self.generation, self.foreground else { self.fail(id, ticket: ticket, "Pairing stopped when the app left the foreground. Generate a fresh PIN and try again."); return }
                 do {
                     let response = try result.get()
                     guard let fingerprint = response["fingerprint"] as? String, let token = response["token"] as? String,
@@ -150,41 +161,43 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
                     }
                     let saved = PairedPC(host: host, port: port, controlPort: controlPort, fingerprint: fingerprint, token: token, pairingID: UUID().uuidString)
                     try PairingStore.save(saved); self.retireClient(); self.pc = saved; self.client = self.makeClient(saved)
-                    self.complete(id, self.connection())
-                } catch { self.fail(id, error.localizedDescription) }
+                    self.complete(id, ticket: ticket, self.connection())
+                } catch { self.fail(id, ticket: ticket, error.localizedDescription) }
             }
         } catch { pairingClient = nil; pairing.invalidate(); throw error }
     }
     private func retireClient() {
-        generation += 1; releaseHeldKey()
+        generation += 1; releaseInputLeases()
         let old = client; old?.cancelPending(keepingReleases: true); client = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { old?.invalidate() }
     }
-    private func releaseHeldKey() {
-        guard let lease = currentLease, let client else { return }; currentLease = nil
-        try? client.send(path: "/api/hold", method: "POST", body: ["operation":"release", "lease":lease]) { _ in }
+    private func releaseInputLeases() {
+        let keyboard = currentLease, pen = currentPenLease; currentLease = nil; currentPenLease = nil
+        guard let client else { return }
+        if let keyboard { try? client.send(path: "/api/hold", method: "POST", body: ["operation":"release", "lease":keyboard]) { _ in } }
+        if let pen { try? client.send(path: "/api/pen", method: "POST", body: ["operation":"cancel", "lease":pen]) { _ in } }
     }
     @objc private func suspend() {
         UIApplication.shared.isIdleTimerDisabled = false
         foreground = false; generation += 1; pairingClient?.invalidate(); pairingClient = nil
-        releaseHeldKey(); client?.cancelPending(keepingReleases: true); handwriting?.cancel()
-        web?.evaluateJavaScript("if(typeof releaseDeckHold==='function')releaseDeckHold();if(window.monitorSuspend)window.monitorSuspend();if(window.penSuspend)window.penSuspend();if(window.deckStreamClosed)window.deckStreamClosed();", completionHandler: nil)
+        releaseInputLeases(); client?.cancelPending(keepingReleases: true); handwriting?.cancel()
+        web?.evaluateJavaScript("if(typeof releaseDeckHold==='function')releaseDeckHold();if(window.penTabletSuspend)window.penTabletSuspend();if(window.monitorSuspend)window.monitorSuspend();if(window.penSuspend)window.penSuspend();if(window.deckStreamClosed)window.deckStreamClosed();", completionHandler: nil)
     }
     @objc private func resume() {
         UIApplication.shared.isIdleTimerDisabled = true
         foreground = true
-        web?.evaluateJavaScript("if(window.monitorResume)window.monitorResume();if(window.DeskPen&&window.DeskPen.resume)window.DeskPen.resume();if(typeof refresh==='function')refresh(true);", completionHandler: nil)
+        web?.evaluateJavaScript("if(window.monitorResume)window.monitorResume();if(window.DeskPen&&window.DeskPen.resume)window.DeskPen.resume();if(window.penTabletResume)window.penTabletResume();if(typeof refresh==='function')refresh(true);", completionHandler: nil)
     }
-    private func showHandwriting(_ id: Int, body: [String: Any]) throws {
+    private func showHandwriting(_ id: Int, ticket: UUID, body: [String: Any]) throws {
         guard presentedViewController == nil else { throw DeskError.message("Finish the open sheet before using handwriting.") }
         let text = body["text"] as? String ?? ""
         guard text.utf16.count <= 8000 else { throw DeskError.message("Handwriting fields support up to 8,000 characters.") }
-        let editor = PenInputController(text: text) { [weak self] text, cancelled in self?.complete(id, ["text":text,"cancelled":cancelled]) }
+        let editor = PenInputController(text: text) { [weak self] text, cancelled in self?.complete(id, ticket: ticket, ["text":text,"cancelled":cancelled]) }
         handwriting = editor
         let navigation = UINavigationController(rootViewController: editor); navigation.modalPresentationStyle = .formSheet
         present(navigation, animated: true)
     }
-    private func exportImage(_ id: Int, body: [String: Any]) throws {
+    private func exportImage(_ id: Int, ticket: UUID, body: [String: Any]) throws {
         guard presentedViewController == nil else { throw DeskError.message("Finish the open sheet before exporting a drawing.") }
         let data = try PNGExport.decode(body["dataUrl"] as? String ?? "")
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("DeskWing-export-" + UUID().uuidString, isDirectory: true)
@@ -196,12 +209,12 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         sheet.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
         sheet.completionWithItemsHandler = { [weak self] _, completed, _, error in
             try? FileManager.default.removeItem(at: folder)
-            if let error { self?.fail(id, error.localizedDescription) } else { self?.complete(id, ["saved":completed,"cancelled":!completed]) }
+            if let error { self?.fail(id, ticket: ticket, error.localizedDescription) } else { self?.complete(id, ticket: ticket, ["saved":completed,"cancelled":!completed]) }
         }
         present(sheet, animated: true)
     }
-    private func showChat(_ id: Int, body: [String: Any]) throws {
-        if body["operation"] as? String == "bounds" { complete(id, ["ok":true]); return }
+    private func showChat(_ id: Int, ticket: UUID, body: [String: Any]) throws {
+        if body["operation"] as? String == "bounds" { complete(id, ticket: ticket, ["ok":true]); return }
         guard body["operation"] as? String == "show", presentedViewController == nil,
               let providerName = body["provider"] as? String, let channel = body["channel"] as? String else { throw DeskError.message("Close the open sheet before loading a provider chat.") }
         let pattern = providerName == "twitch" ? "^[a-z0-9_]{1,25}$" : providerName == "kick" ? "^[a-z0-9_-]{1,50}$" : "(?!)"
@@ -209,15 +222,15 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         let address = providerName == "twitch" ? "https://www.twitch.tv/popout/\(channel)/chat?popout=" : "https://kick.com/popout/\(channel)/chat"
         guard let url = URL(string: address) else { throw DeskError.message("Invalid provider address.") }
         let sheet = SFSafariViewController(url: url); provider = sheet; present(sheet, animated: true)
-        complete(id, ["ok":true])
+        complete(id, ticket: ticket, ["ok":true])
         let event: [String: Any] = ["session":body["session"] as? Int ?? 0, "state":"Chat opened in a separate provider viewer. It has no PC-control bridge."]
         if let data = try? JSONSerialization.data(withJSONObject: event), let json = String(data: data, encoding: .utf8) {
             web.evaluateJavaScript("if(window.monitorChatEvent)window.monitorChatEvent(\(json));", completionHandler: nil)
         }
     }
-    private func fail(_ id: Int, _ message: String) { complete(id, ["error":String(message.prefix(1000))]) }
-    private func complete(_ id: Int, _ result: [String: Any]) {
-        guard requestIDs.remove(id) != nil else { return }; sendDirect(id, result)
+    private func fail(_ id: Int, ticket: UUID, _ message: String) { complete(id, ticket: ticket, ["error":String(message.prefix(1000))]) }
+    private func complete(_ id: Int, ticket: UUID, _ result: [String: Any]) {
+        guard requests.finish(id, ticket: ticket) else { return }; sendDirect(id, result)
     }
     private func sendDirect(_ id: Int, _ result: [String: Any]) {
         guard HostPolicy.trustedPage(web?.url), JSONSerialization.isValidJSONObject(result),
@@ -236,7 +249,9 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        releaseHeldKey(); client?.cancelPending(keepingReleases: true); requestIDs.removeAll(); generation += 1
+        generation += 1; requests.reset(); handwriting?.cancel(); provider?.dismiss(animated: false)
+        pairingClient?.invalidate(); pairingClient = nil
+        releaseInputLeases(); client?.cancelPending(keepingReleases: true)
         webView.reload()
     }
 }

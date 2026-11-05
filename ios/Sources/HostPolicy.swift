@@ -6,17 +6,33 @@ enum DeskError: LocalizedError {
     var errorDescription: String? { if case let .message(value) = self { return value }; return nil }
 }
 
+/// JavaScript restarts its numeric request counter after a renderer reload. UUID tickets keep old completions isolated.
+struct BridgeRequests {
+    private var active: [Int: UUID] = [:]
+    var count: Int { active.count }
+    func contains(_ id: Int) -> Bool { active[id] != nil }
+    mutating func begin(_ id: Int) -> UUID? {
+        guard active[id] == nil else { return nil }
+        let ticket = UUID(); active[id] = ticket; return ticket
+    }
+    mutating func finish(_ id: Int, ticket: UUID) -> Bool {
+        guard active[id] == ticket else { return false }
+        active.removeValue(forKey: id); return true
+    }
+    mutating func reset() { active.removeAll() }
+}
+
 enum HostPolicy {
     static let getPaths: Set<String> = [
         "/api/computer/media", "/api/computer", "/api/computer/display", "/api/ping", "/api/mixer",
         "/api/soundpad/recent", "/api/profiles", "/api/soundpad/favourites", "/api/board", "/api/state",
-        "/api/execution", "/api/apps", "/api/soundpad/library"
+        "/api/execution", "/api/apps", "/api/soundpad/library", "/api/ink", "/api/pen"
     ]
     static let postPaths: Set<String> = [
         "/api/computer/follow", "/api/computer/media/action", "/api/computer/action", "/api/computer/preset",
         "/api/computer/display/frame", "/api/monitor/frame", "/api/ping", "/api/profile-lock",
         "/api/soundpad/recent/clear", "/api/profile", "/api/soundpad/favourites", "/api/cancel", "/api/hold",
-        "/api/action", "/api/audio", "/api/mute", "/api/apps", "/api/layout", "/api/soundpad/play", "/api/soundpad/library"
+        "/api/action", "/api/audio", "/api/mute", "/api/apps", "/api/layout", "/api/soundpad/play", "/api/soundpad/library", "/api/ink", "/api/pen"
     ]
     static func validHost(_ host: String) -> Bool {
         let parts = host.split(separator: ".", omittingEmptySubsequences: false)
@@ -42,11 +58,28 @@ enum HostPolicy {
         return zip(left, right).reduce(UInt8(0)) { $0 | ($1.0 ^ $1.1) } == 0
     }
     static func allowed(_ path: String, method: String) -> Bool {
-        (method == "GET" && getPaths.contains(path)) || (method == "POST" && postPaths.contains(path))
+        (method == "GET" && (getPaths.contains(path) || inkRevision(path) != nil)) || (method == "POST" && postPaths.contains(path))
+    }
+    static func inkRevision(_ path: String) -> String? {
+        let prefix = "/api/ink?revision="
+        guard path.hasPrefix(prefix) else { return nil }
+        let revision = String(path.dropFirst(prefix.count))
+        guard revision.utf8.count == 64, revision.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) else { return nil }
+        return revision
     }
     static func allowedInBackground(_ path: String, body: [String: Any]) -> Bool {
-        path == "/api/cancel" || (path == "/api/hold" && body["operation"] as? String == "release")
+        path == "/api/cancel" || (path == "/api/hold" && body["operation"] as? String == "release") ||
+            (path == "/api/pen" && ["end", "cancel"].contains(body["operation"] as? String ?? ""))
     }
+    static func maximumBodyBytes(_ path: String) -> Int {
+        path == "/api/ink" ? 4 * 1024 * 1024 : 16384
+    }
+    static func maximumBridgeBytes(_ path: String) -> Int {
+        if path == "/local/export-image" { return 12 * 1024 * 1024 }
+        if path == "/api/ink" { return maximumBodyBytes(path) + 16384 }
+        return 16384
+    }
+    static func dispatchDeadline(_ path: String) -> TimeInterval { path == "/api/pen" ? 0.5 : 2 }
     static func needsDispatchDeadline(_ path: String, method: String, body: [String: Any]) -> Bool {
         method == "POST" && !allowedInBackground(path, body: body) &&
             !["/api/ping", "/api/monitor/frame", "/api/computer/display/frame", "/api/soundpad/library"].contains(path)
