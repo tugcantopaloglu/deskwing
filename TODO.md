@@ -55,7 +55,7 @@ Requested 2026-11-05: implement every inspection finding, improve the design, an
 - [x] Mirror scratchpad ink and notes to the PC with local backup, revision conflicts and reconnection handling.
 - [x] Add native Windows pen input for Windows Ink apps, with pressure/tilt and explicit PC target/permission (Whiteboard web/Teams and Photoshop still need app-specific tests).
 - [x] Add fullscreen scratchpad and fullscreen pen-tablet surface with reachable exit.
-- [ ] Validate expanded pen modes, update packages, rerun security/regressions and document verified app compatibility.
+- [x] Validate expanded pen modes, update packages, rerun security/regressions and document verified app compatibility and remaining app-specific limits.
 - [x] Refine tablet fullscreen to hide Android system bars and use a canvas-only surface with compact reachable controls.
 - [x] Add a separate resizable PC Ink window and permit a smaller resizable main companion window.
 - [x] Refresh Pen tablet target dimensions after PC resizing and apply exact session geometry before accepting pen input.
@@ -71,10 +71,12 @@ Previous checkpoint: commit 0691c1a passed all 57 Windows CI suites and 9 iOS te
 
 Live pen-preview implementation: all ten affected suites passed against a fresh Windows publish, including 42 fake capture checks, 49 frontend checks and 153 rendered checks. Native own-window capture reproduced changed strokes and exact client edges at two sizes. Seven final visual captures passed review; the actual Snyk scan found zero new issues. Commit a9a85c9 passed all 58 Windows CI suites and 11 iOS tests. The signed Android update and matching Windows companion were installed with pairing/data retained. The user confirmed seeing PC drawings on the tablet, then reported frequent refreshing and fullscreen instability.
 
-Pen-preview correction: reproduced the client/server 84 ms scheduling collision, which cleared the image and reopened tools on brief throttling errors. The correction adds pacing margin, retains only a fresh same-session image for at most 1.5 seconds, and prevents transient errors reopening tools. All 58 controller and 155 rendered checks passed; a fresh actual Snyk scan found no new findings. The signed correction is installed; physical retest is pending.
+Pen-preview correction: reproduced the client/server 84 ms scheduling collision, which cleared the image and reopened tools on brief throttling errors. The correction adds pacing margin, retains only a fresh same-session image for at most 1.5 seconds, and prevents transient errors reopening tools. All 58 controller and 155 rendered checks passed; a fresh actual Snyk scan found no new findings. The user confirmed that the installed pen tablet, image and fullscreen are stable. The final monotonic capture-deadline correction passed a fresh complete 58-suite run and its actual security scan.
 
-## 9. High refresh Second display (added by user)
+## 9. High refresh Second display (deferred by user)
 - [ ] Replace the four-frame-per-second JPEG view with an actual video capture, transport and playback path targeting at least 60 fps.
 - [ ] Add 60 Hz and Match tablet refresh rate options using reported device capabilities, with the chosen rate applied to the virtual monitor and stream.
 - [ ] Show measured delivery/playback performance and verify the connected Xiaomi tablet, including stop, background, reconnect and sharing revocation.
 - [ ] Validate Windows, Android and iOS implementations, rerun security/CI and update packages and documentation.
+
+The user deferred this work and requested a clean stable main push. Experimental native-video changes and unfinished Android cleanup remain on `codex/display-high-refresh`; they are excluded from the stable main branch and installed tablet package. The temporary virtual display was removed without changing physical monitor positions or sizes. Existing Second display on main remains the bounded JPEG preview described in its guide.
