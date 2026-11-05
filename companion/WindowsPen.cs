@@ -29,7 +29,7 @@ internal interface IWindowsPenPlatform : IDisposable
 internal sealed class WindowsPen : IDisposable
 {
     internal const int TimeoutMs=1200,MaximumBatch=32;
-    internal sealed record PenLease(string Lease,int ExpiresInMs=TimeoutMs,int MaxBatch=MaximumBatch,long Sequence=0);
+    internal sealed record PenLease(string Lease,int ExpiresInMs=TimeoutMs,int MaxBatch=MaximumBatch,long Sequence=0,PenTarget? Target=null);
     private readonly object gate=new();
     private readonly IWindowsPenPlatform platform;
     private readonly Func<long> now;
@@ -50,9 +50,17 @@ internal sealed class WindowsPen : IDisposable
         if(startTimer)timer=new Timer(_=>{lock(gate){if(!disposed)CheckLease();}},null,100,100);
     }
     public bool Active {get{lock(gate){CheckLease();return lease.Length>0;}}}
-    public PenStatus Status {get{lock(gate){CheckLease();return Snapshot();}}}
+    public PenStatus Status {get{lock(gate){CheckLease();RefreshIdleTarget();return Snapshot();}}}
     private PenStatus Snapshot()=>new(platform.Supported,enabled,lease.Length>0,target?.Info,error);
-    public object AdminState(){lock(gate){CheckLease();return new{status=Snapshot(),targets=platform.Supported?platform.Targets().Select(t=>t.Info).ToArray():[]};}}
+    public object AdminState(){lock(gate){CheckLease();RefreshIdleTarget();return new{status=Snapshot(),targets=platform.Supported?platform.Targets().Select(t=>t.Info).ToArray():[]};}}
+    private void RefreshIdleTarget()
+    {
+        if(lease.Length>0||target is null||!enabled)return;
+        // Window geometry remains useful while stopped, including when the PC settings have focus.
+        // It never creates a device or grants a new control lease.
+        try{target=platform.Resolve(target,false);}
+        catch(Exception ex) when(ex is InvalidOperationException or ArgumentException or Win32Exception){error=ex.Message;}
+    }
     public PenStatus Configure(PenSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -107,13 +115,13 @@ internal sealed class WindowsPen : IDisposable
         leaseTarget=resolved;target=resolved;owner=principal;
         recentSessions.Add(sessionKey);sessionOrder.Enqueue(sessionKey);while(sessionOrder.Count>1024)recentSessions.Remove(sessionOrder.Dequeue());
         lease=Convert.ToHexString(RandomNumberGenerator.GetBytes(24));started=now();expires=started+TimeoutMs;sequence=0;last=null;contact=false;error=null;
-        return new(lease);
+        return new(lease,Target:resolved.Info);
     }
     private PenDestination CurrentTarget()
     {
         try{
             var current=platform.Resolve(leaseTarget??throw new InvalidOperationException("Choose a pen target again on the PC."),true);
-            if(current.Bounds!=leaseTarget.Bounds)throw new InvalidOperationException("The pen target moved or changed size. Tap Start again after arranging the PC window.");
+            if(current.Bounds!=leaseTarget.Bounds){target=current;throw new InvalidOperationException("The pen target moved or changed size. Tap Start again after arranging the PC window.");}
             return current;
         }catch(Exception ex) when(ex is InvalidOperationException or ArgumentException or Win32Exception){Stop(ex.Message);throw;}
     }

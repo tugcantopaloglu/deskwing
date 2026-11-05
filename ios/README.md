@@ -1,6 +1,6 @@
 # DeskWing iOS host
 
-This directory contains a native iPhone/iPad host for the shared tablet UI. It **builds and passes eight unit tests in the hosted iPad simulator**. It is not yet a signed or released iOS app. Development uses Windows; GitHub's hosted Mac runner provides compilation and simulator validation. Physical iPad, Apple Pencil, pairing and distribution gates below remain required.
+This directory contains a native iPhone/iPad host for the shared tablet UI. It **builds and passes nine unit tests in the hosted iPad simulator**. It is not yet a signed or released iOS app. Development uses Windows; GitHub's hosted Mac runner provides compilation and simulator validation. Physical iPad, Apple Pencil, pairing and distribution gates below remain required.
 
 ## Included
 
@@ -69,8 +69,8 @@ Project generation follows [XcodeGen's source/resource specification](https://gi
 
 ## Recorded validation
 
-- Hosted Mac validation passed on 2026-11-05 for commit `b683825b076bdf41afbf5719b770118453cff6d1`: Xcode 26.6, iPad Pro 13-inch (M5) simulator, iPadOS 26.4.1. The unsigned Debug app compiled and all eight `DeskWingTests` passed with zero failures. [iOS simulator job and logs](https://github.com/tugcantopaloglu/tablet-deck-studio/actions/runs/42082154607/job/127437726088).
-- Tests cover private-address and certificate-pin policy, bridge route/origin boundaries, background release rules, ink request limits, PNG validation, malformed certificates, and stale callback isolation after a renderer restart. They do not exercise live TLS pairing or hardware pen input.
+- Hosted Mac validation passed on 2026-11-05 for commit `702d40b575133baf1160c285fcb0698599c9ff65`: Xcode 26.6, iPad Pro 13-inch (M5) simulator, iPadOS 26.4.1. The unsigned Debug app compiled and all nine `DeskWingTests` passed with zero failures. [iOS simulator job and logs](https://github.com/tugcantopaloglu/tablet-deck-studio/actions/runs/42086833842/job/127454109100).
+- Tests cover private-address and certificate-pin policy, bridge route/origin boundaries, background release rules, ink request limits, PNG validation, malformed certificates, stale callback isolation after a renderer restart, and strict full-screen requests with background-safe exit. They do not exercise live TLS pairing, visual full-screen behavior or hardware pen input.
 
 - `python ios/sync-assets.py`: shared assets copied with a manifest and path checks.
 - Python syntax, JavaScript syntax, XML plist parsing and generated-manifest/source comparison: run locally.

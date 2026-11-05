@@ -58,6 +58,8 @@ Requested 2026-11-05: implement every inspection finding, improve the design, an
 - [ ] Validate expanded pen modes, update packages, rerun security/regressions and document verified app compatibility.
 - [x] Refine tablet fullscreen to hide Android system bars and use a canvas-only surface with compact reachable controls.
 - [x] Add a separate resizable PC Ink window and permit a smaller resizable main companion window.
+- [x] Refresh Pen tablet target dimensions after PC resizing and apply exact session geometry before accepting pen input.
+- [x] Reduce pen batching delay and fix the diagnostic canvas's edge alignment and repeated repaint cost.
 
 Expanded pen evidence: shared ink passed 50 backend and 38 HTTP checks; native Windows receiver confirmed real position, pressure, tilt and clean release; 56 two-client/fullscreen browser checks passed. Independent visual review passed all 16 final captures. Microsoft retired standalone Whiteboard; physical testing uses the local diagnostic canvas unless a supported web/Teams account is available.
 

@@ -142,10 +142,10 @@ npm run test:ui --prefix .\tests
 
 # Reuse a known isolated build for a focused rerun.
 $env:TABLETDECK_COMPANION = 'F:\streamer-board\.test-output\verification-example\Windows\TabletDeck-Companion.exe'
-npm test --prefix .\tests -- --no-build --suite editor-workflow,macro-editor,pen-ui
+node .\tests\run-all.cjs --no-build --suite 'editor-workflow,macro-editor,pen-ui'
 ```
 
-The `core` group includes API and controller tests plus mocked backend projects; `android` includes JVM harnesses and the isolated services those harnesses exercise; `ui` includes headless Chromium and the offscreen native window check. The default `all` group includes all three. Test failures are collected while remaining independent suites continue; the command exits unsuccessfully if any suite fails. Prerequisite or publish failures stop immediately. Use `--fail-fast` for a focused debugging run. Results and unrun suites are recorded in `.test-output/verification-*/summary.json`; logs remain beside the summary. A partial or focused result is not a complete release pass.
+The `core` group includes API and controller tests plus mocked backend projects; `android` includes JVM harnesses and the isolated services those harnesses exercise; `ui` includes headless Chromium and the offscreen native window check. The default `all` group includes all three. For custom options, invoke `node tests/run-all.cjs` directly and quote comma-separated suite names so PowerShell's npm shim cannot reinterpret them. Test failures are collected while remaining independent suites continue; the command exits unsuccessfully if any suite fails. Prerequisite or publish failures stop immediately. Use `--fail-fast` for a focused debugging run. Results and unrun suites are recorded in `.test-output/verification-*/summary.json`; logs remain beside the summary. A partial or focused result is not a complete release pass.
 
 Installer tests are an explicit opt-in because they need a packaged installer and perform actual replacement/rollback inside their guarded temporary fixture:
 

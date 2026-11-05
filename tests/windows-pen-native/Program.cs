@@ -8,6 +8,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if(args.Contains("--geometry-self-test")){ManualInkGeometry.Verify();return 0;}
         var manual=args.Contains("--manual");
         if (!manual&&!args.Contains("--run-native")) {
             Console.Error.WriteLine("Use --run-native for the automatic isolated diagnostic, or --manual for a drawing receiver without synthetic input.");

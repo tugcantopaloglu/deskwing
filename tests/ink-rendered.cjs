@@ -40,7 +40,7 @@ async function fixture(route){
    case '/api/pen':{
     if(request.method()==='GET')return send(status());
     const body=request.postDataJSON();penPackets.push(structuredClone(body));
-    if(body.operation==='begin'){if(!enabled||lease)return send({error:'Pen is disabled or busy'},409);lease='fixture-lease-'+body.session;penSequence=0;return send({lease,sequence:0,maxBatch:32});}
+    if(body.operation==='begin'){if(!enabled||lease)return send({error:'Pen is disabled or busy'},409);lease='fixture-lease-'+body.session;penSequence=0;return send({lease,sequence:0,maxBatch:32,target:structuredClone(currentTarget)});}
     if(body.lease!==lease)return send({error:'Pen lease expired'},409);
     if(['cancel','release','end'].includes(body.operation)){lease='';return send({ok:true});}
     if(!['renew','samples'].includes(body.operation)||body.sequence!==penSequence+1)return send({error:'Invalid fixture sequence'},409);

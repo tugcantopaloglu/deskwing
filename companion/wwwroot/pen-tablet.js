@@ -1,7 +1,7 @@
 'use strict';
 // Windows Ink is opt-in. An expired, interrupted, or disconnected lease never resumes itself.
 (function () {
-  const MAX_BATCH = 32, MAX_PENDING = 96, MAX_AGE = 500, TICK = 24, RENEW = 350, REQUEST_TIMEOUT = 850;
+  const MAX_BATCH = 32, MAX_PENDING = 96, MAX_AGE = 500, TICK = 8, RENEW = 350, REQUEST_TIMEOUT = 850;
   const finite = value => typeof value === 'number' && Number.isFinite(value);
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const phases = new Set(['hover','down','move','up','leave']);
@@ -16,7 +16,7 @@
   function isContact(event) { return event.pointerType === 'pen' && ((event.buttons & 33) !== 0 || event.pressure > 0); }
   function createClient(options) {
     const request = options.request, now = options.now || (() => performance.now()), schedule = options.schedule || setTimeout, unschedule = options.unschedule || clearTimeout, changed = options.onChange || (() => {});
-    let state = 'idle', message = 'Start a pen session when your Windows app is ready.', generation = 0, lease = null, sequence = 0, startedAt = 0, sentAt = 0, timer = null, inFlight = false, queue = [], batchLimit = MAX_BATCH;
+    let state = 'idle', message = 'Start a pen session when your Windows app is ready.', generation = 0, lease = null, sequence = 0, startedAt = 0, sentAt = 0, lastPacketAt = -Infinity, timer = null, timerDue = Infinity, inFlight = false, queue = [], lastSample = null, batchLimit = MAX_BATCH;
     const snapshot = () => ({state,message,pending:queue.length,inFlight,sequence});
     const emit = () => changed(snapshot());
     function deadline(promise) {
@@ -29,14 +29,17 @@
       if (!capturedLease) return Promise.resolve();
       return deadline(Promise.resolve().then(() => request({operation,lease:capturedLease},REQUEST_TIMEOUT))).catch(() => {});
     }
-    function arm() {
-      if (state !== 'active' || timer !== null) return;
-      timer = schedule(() => {timer=null;void tick();},TICK);
+    function arm(delay = TICK) {
+      if (state !== 'active') return;
+      const due=now()+Math.max(0,delay);
+      if(timer !== null && timerDue<=due)return;
+      if(timer !== null)unschedule(timer);
+      timerDue=due;timer = schedule(() => {timer=null;timerDue=Infinity;void tick();},Math.max(0,delay));
     }
     function stop(reason = 'Pen session stopped. Start again when you are ready.', error = false, operation = 'cancel') {
       const capturedLease = lease;
-      generation++; lease=null; queue=[]; inFlight=false;
-      if (timer !== null) unschedule(timer); timer=null;
+      generation++; lease=null; queue=[]; lastSample=null; inFlight=false;
+      if (timer !== null) unschedule(timer); timer=null;timerDue=Infinity;
       state=error ? 'error' : 'idle'; message=reason; emit();
       return release(capturedLease,operation);
     }
@@ -44,7 +47,7 @@
       if (state === 'active' || state === 'starting') return false;
       if (typeof session !== 'string' || !/^[a-zA-Z0-9_-]{16,80}$/.test(session)) throw new Error('A new session identifier is required.');
       const token = ++generation;
-      state='starting'; message='Starting a Windows pen session…'; queue=[]; emit();
+      state='starting'; message='Starting a Windows pen session…'; queue=[];lastSample=null; emit();
       const raw = Promise.resolve().then(() => request({operation:'begin',session},0));
       // A timeout cannot cancel a request already on the wire. Release its lease if it arrives late.
       raw.then(result => {if (token !== generation && typeof result?.lease === 'string') void release(result.lease);},() => {});
@@ -56,7 +59,11 @@
           throw new Error('The PC returned an invalid pen session.');
         }
         lease=result.lease; sequence=0; batchLimit=Math.max(1,Math.min(MAX_BATCH,Number.isInteger(result.maxBatch) ? result.maxBatch : MAX_BATCH));
-        startedAt=now(); sentAt=startedAt; inFlight=false; state='active'; message='Pen connected. Draw in the Windows app on your PC.'; emit(); arm(); return true;
+        startedAt=now(); sentAt=startedAt;lastPacketAt=-Infinity;inFlight=false;
+        // The begin reply is authoritative: apply its current window bounds before input can start.
+        if(typeof options.onLease==='function')options.onLease(result.target);
+        if(token!==generation)return false;
+        state='active'; message='Pen connected. Draw in the Windows app on your PC.'; emit(); arm(RENEW); return true;
       } catch (error) {
         if (token === generation) void stop(error?.message || 'Could not start the pen session. Check your PC connection.',true);
         return false;
@@ -66,27 +73,33 @@
       if (state !== 'active') return false;
       let sample;
       try {sample=normalizeSample(value);} catch {void stop('The pen reported invalid input. Start a new pen session.',true);return false;}
+      if((sample.phase==='move'||sample.phase==='hover') && lastSample && Object.keys(sample).every(key=>sample[key]===lastSample[key]))return true;
+      lastSample=sample;
       queue.push({sample,time:now()});
       while (queue.length > MAX_PENDING) {
         const disposable = queue.findIndex(item => item.sample.phase === 'move' || item.sample.phase === 'hover');
         if (disposable < 0) {void stop('Too much pen input is waiting for the PC. Start a new pen session.',true);return false;}
         queue.splice(disposable,1);
       }
-      arm(); return true;
+      if(!inFlight && ['down','up','leave'].includes(sample.phase))void tick();
+      else arm(Math.max(0,lastPacketAt+TICK-now()));
+      return true;
     }
     async function tick() {
       if (state !== 'active') return;
       if (queue.length && now()-queue[0].time > MAX_AGE) {void stop('The PC connection is too slow for live pen input. Start again after reconnecting.',true);return;}
-      if (inFlight || (!queue.length && now()-sentAt < RENEW)) {arm();return;}
+      if(inFlight){arm();return;}
+      if(!queue.length && now()-sentAt<RENEW){arm(RENEW-(now()-sentAt));return;}
+      if(now()-lastPacketAt<TICK){arm(TICK-(now()-lastPacketAt));return;}
       const token=generation, capturedLease=lease, sentSequence=++sequence;
       const samples=queue.splice(0,batchLimit).map(item => item.sample);
       const packet={operation:samples.length ? 'samples' : 'renew',lease:capturedLease,sequence:sentSequence,elapsedMs:Math.round(now()-startedAt),samples};
-      sentAt=now(); inFlight=true; arm();
+      sentAt=now();lastPacketAt=sentAt; inFlight=true; arm();
       try {
         const result=await deadline(Promise.resolve().then(() => request(packet,REQUEST_TIMEOUT)));
         if (token !== generation) return;
         if (!result || result.ok !== true || result.sequence !== sentSequence) throw new Error('The PC could not confirm pen input. Start a new pen session.');
-        inFlight=false; arm();
+        inFlight=false;arm(queue.length ? Math.max(0,lastPacketAt+TICK-now()) : Math.max(0,RENEW-(now()-sentAt)));
       } catch (error) {
         if (token === generation) void stop(error?.message || 'The PC disconnected. Start a new pen session after reconnecting.',true);
       }
@@ -99,19 +112,26 @@
   window.DeskPenTabletCore=core;
 
   let host, statusLine, targetLine, pad, stage, cursor, coordinates, hint, startButton, stopButton, fullscreenButton, exitButton, adminControls, targetSelect, enableButton, disableButton, refreshButton, floatingControls, toolsButton, floatingSessionButton, mappingSelect, mappingHelp;
-  let active=false, suspended=false, status=null, statusError='', statusTimer=null, refreshing=false, configBusy=false, targetEdited=false, targetStamp='', pointerId=null, fullscreen=false, fullscreenPending=false, toolsOpen=false, fillTablet=true, fullscreenError='', pollingGeneration=0, layoutGeneration=0, resizeObserver;
+  let active=false, suspended=false, status=null, statusError='', statusTimer=null, refreshing=false, configBusy=false, targetEdited=false, targetStamp='', pointerId=null, fullscreen=false, fullscreenPending=false, toolsOpen=false, fillTablet=true, fullscreenError='', applyingLeaseTarget=false, pollingGeneration=0, layoutGeneration=0, resizeObserver;
   const element=(tag,className,text) => {const node=document.createElement(tag);if(className)node.className=className;if(text !== undefined)node.textContent=text;return node;};
   const button=(text,handler,className='quiet') => {const node=element('button',className,text);node.type='button';node.addEventListener('click',handler);return node;};
   const desktop=() => typeof desktopConsole !== 'undefined' && desktopConsole === true;
   const nativeHost=() => typeof native !== 'undefined' && native === true && typeof nativeRequest === 'function';
   const request=(path,body,timeout=REQUEST_TIMEOUT) => {if(typeof api !== 'function')return Promise.reject(new Error('The PC connection is unavailable.'));return api(path,body,timeout);};
-  const client=createClient({request:(body,timeout)=>request('/api/pen',body,timeout),onChange:()=>{if (!client.active) releasePointer();if(fullscreen && client.snapshot().state==='error')toolsOpen=true;render();}});
+  const client=createClient({request:(body,timeout)=>request('/api/pen',body,timeout),onLease:target=>{
+    if(!target || typeof target.id!=='string' || typeof target.label!=='string' || !finite(target.width) || !finite(target.height) || target.width<=0 || target.height<=0)throw new Error('The PC did not return the current pen target. Refresh the PC connection and try again.');
+    applyingLeaseTarget=true;
+    try{status={...status,active:true,target:{id:target.id,label:target.label,kind:target.kind,width:target.width,height:target.height}};resizePad();}finally{applyingLeaseTarget=false;}
+  },onChange:()=>{if (!client.active) releasePointer();if(fullscreen && client.snapshot().state==='error')toolsOpen=true;render();}});
   function releasePointer() {
     const captured=pointerId;pointerId=null;
     if(captured !== null) {try {if(pad?.hasPointerCapture(captured))pad.releasePointerCapture(captured);}catch{}}
     if(cursor)cursor.hidden=true;
   }
-  function stop(reason,error=false) {releasePointer();return client.stop(reason,error);}
+  function stop(reason,error=false) {
+    releasePointer();
+    return client.stop(reason,error).then(()=>{if(!client.busy && status){status={...status,active:false};render();}});
+  }
   function sessionId() {
     const bytes=new Uint8Array(16);
     if(!window.crypto?.getRandomValues)throw new Error('Secure pen sessions are unavailable in this browser. Use the paired DeskWing app.');
@@ -226,7 +246,7 @@
     if(!stage || !pad || !active)return;
     const bounds=stage.getBoundingClientRect(), ratio=status?.target?.width>0 && status?.target?.height>0 ? status.target.width/status.target.height : 16/10;
     const width=Math.max(1,fullscreen && fillTablet ? bounds.width : Math.min(bounds.width,bounds.height*ratio)), height=Math.max(1,fullscreen && fillTablet ? bounds.height : width/ratio);
-    if(client.busy && (Math.abs(pad.clientWidth-width)>2 || Math.abs(pad.clientHeight-height)>2))void stop('The pen surface changed size. Start a new pen session.');
+    if(!applyingLeaseTarget && client.busy && (Math.abs(pad.clientWidth-width)>2 || Math.abs(pad.clientHeight-height)>2))void stop('The pen surface changed size. Start a new pen session.');
     pad.style.width=`${width}px`;pad.style.height=`${height}px`;
   }
   async function setFullscreen(value,notifyNative=true) {

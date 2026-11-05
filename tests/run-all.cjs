@@ -25,7 +25,7 @@ const suites=[
   {name:'ink-backend',group:'core',project:'tests/ink-backend/InkBackendTests.csproj'},
   {name:'shortcut-migration',group:'core',project:'tests/shortcut-migration/ShortcutMigrationTests.csproj'},
   {name:'integration-api',group:'core',integration:true},
-  ...['layout','copilot-ui','soundpad-sync-ui','media-touchbar-ui','live-soundpad-board','live-sync','desktop-rendered','editor-workflow','macro-editor','pen-ui','workspace-rendered','ink-rendered'].map(name=>({name,group:'ui',script:name+'.cjs',browser:true})),
+  ...['layout','copilot-ui','soundpad-sync-ui','media-touchbar-ui','live-soundpad-board','live-sync','desktop-rendered','editor-workflow','macro-editor','pen-ui','workspace-rendered','ink-rendered'].map(name=>({name,group:'ui',script:name+'.cjs',browser:true,timeout:name==='desktop-rendered'?240000:180000})),
   {name:'features',group:'ui',integration:true,browser:true},
   ...['installer','installer-update'].map(name=>({name,group:'installer',script:name+'.cjs'}))
 ];
@@ -71,7 +71,7 @@ async function freePort(){const listener=net.createServer();listener.listen(0,'1
 
 async function main(){
   const settings=options(process.argv.slice(2)),selected=selectedSuites(settings);
-  if(settings.help){console.log('Usage: npm --prefix tests test -- [--group all|core|android|ui|installer] [--suite name,name] [--no-build] [--fail-fast] [--list]\nDefault: build an isolated Windows companion and run every core, Android harness, and UI suite, collecting all failures.\nInstaller tests require explicit --group installer and TABLETDECK_SETUP. Audio playback, real keyboard, driver and physical tablet rehearsals are separate opt-in checks.');return;}
+  if(settings.help){console.log('Usage: node tests/run-all.cjs [--group all|core|android|ui|installer] [--suite "name,name"] [--no-build] [--fail-fast] [--list]\nDefault: build an isolated Windows companion and run every core, Android harness, and UI suite, collecting all failures.\nInstaller tests require explicit --group installer and TABLETDECK_SETUP. Audio playback, real keyboard, driver and physical tablet rehearsals are separate opt-in checks.');return;}
   if(settings.list){for(const suite of selected)console.log(suite.group.padEnd(10)+suite.name);return;}
   if(process.platform!=='win32')throw new Error('The complete companion regression requires Windows x64. Use the Windows CI job or a Windows development machine.');
   if(Number(process.versions.node.split('.')[0])<22)throw new Error('Node.js 22 or newer is required.');
@@ -165,7 +165,7 @@ async function main(){
         await run(suite.name,path.join(env.JAVA_HOME,'bin/java.exe'),['-cp',classes,suite.javaClass]);
       }
       else if(suite.project)await run(suite.name,'dotnet',['run','--project',path.join(root,suite.project),'-c','Release','--artifacts-path',path.join(output,'backend-build')],{timeout:300000});
-      else await run(suite.name,process.execPath,[path.join(__dirname,suite.script)]);
+      else await run(suite.name,process.execPath,[path.join(__dirname,suite.script)],{timeout:suite.timeout||180000});
     }catch(error){failures.push({suite:suite.name,error:error.message});if(settings.failFast||interrupted)throw error;console.error('Continuing after '+suite.name+' failed: '+error.message);}}
     report.failures=failures;
     if(failures.length)throw new Error(failures.length+' of '+selected.length+' suites failed: '+failures.map(failure=>failure.suite).join(', '));
