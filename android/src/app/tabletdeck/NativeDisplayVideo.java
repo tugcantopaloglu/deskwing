@@ -66,6 +66,7 @@ final class NativeDisplayVideo {
     private final Handler ui=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=new ThreadPoolExecutor(1,1,0,TimeUnit.MILLISECONDS,new SynchronousQueue<Runnable>(),new ThreadPoolExecutor.AbortPolicy());
     private final ScheduledExecutorService deadlines=Executors.newSingleThreadScheduledExecutor();
+    private final NetworkCloseQueue networkCleanup=new NetworkCloseQueue();
     private final AtomicBoolean workerBusy=new AtomicBoolean();
     private volatile Session active;
     private boolean closed;
@@ -90,7 +91,8 @@ final class NativeDisplayVideo {
             if(active!=null||workerBusy.get())throw new IllegalStateException("The previous display is still open or closing. Close it before starting again.");
             Display display=display();float current=display==null?0:display.getRefreshRate();int target=DisplayVideoProtocol.targetRate(mode,current);
             long epoch=lifecycle.getAsLong();Connection connection=connections.create();if(epoch!=lifecycle.getAsLong())throw new IllegalStateException("The PC connection changed. Start the display again.");
-            Session session=new Session(id,mode,target,current,connection,reply,epoch);created=session;active=session;
+            NetworkCloseQueue.Reservation cleanup=networkCleanup.reserve();
+            Session session=new Session(id,mode,target,current,connection,reply,epoch,cleanup);created=session;active=session;
             attach(session);enterFullscreen.run();
         }catch(Exception ex){if(created!=null&&active==created){created.complete(error(ex));stop("The display could not open.");}else reply.complete(error(ex));}
     }
@@ -104,14 +106,15 @@ final class NativeDisplayVideo {
         Session session=active;if(session==null)return;
         active=null;session.cancelled=true;
         if(session.firstPictureDeadline!=null)session.firstPictureDeadline.close();
-        HttpsURLConnection pending=session.pending;if(pending!=null)pending.disconnect();
+        HttpsURLConnection pending=session.pending;session.pending=null;
+        session.cleanup.submit(pending==null?null:pending::disconnect);
         if(session.view!=null&&Build.VERSION.SDK_INT>=30){Surface surface=session.view.getHolder().getSurface();if(surface!=null&&surface.isValid())try{surface.setFrameRate(0,Surface.FRAME_RATE_COMPATIBILITY_DEFAULT);}catch(RuntimeException ignored){}}
         ui.removeCallbacks(session.statistics);if(session.manager!=null&&session.listener!=null)session.manager.unregisterDisplayListener(session.listener);
         root.removeView(session.overlay);exitFullscreen.run();
         session.complete(error(new IOException("The display stopped before it opened.")));
         events.stopped(session.id,reason);
     }
-    void close(){closed=true;stop("DeskWing closed.");worker.shutdownNow();deadlines.shutdownNow();}
+    void close(){closed=true;stop("DeskWing closed.");worker.shutdownNow();deadlines.shutdownNow();networkCleanup.close();}
     void stopInvalid(String reason){Session session=active;if(session!=null&&!valid(session))stop(reason);}
     private Display display(){return Build.VERSION.SDK_INT>=30?activity.getDisplay():activity.getWindowManager().getDefaultDisplay();}
     private int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
@@ -261,12 +264,12 @@ final class NativeDisplayVideo {
     private static JSONObject error(Exception ex){JSONObject result=new JSONObject();try{result.put("error",ex.getMessage()==null?"The display connection failed.":ex.getMessage());}catch(Exception ignored){}return result;}
     private static void exact(JSONObject object,String... names){if(object==null)throw new IllegalArgumentException("The display request is empty.");for(Iterator<String> keys=object.keys();keys.hasNext();){String key=keys.next();boolean valid=false;for(String name:names)if(name.equals(key))valid=true;if(!valid)throw new IllegalArgumentException("Unsupported display option.");}}
     private final class Session {
-        final String id,mode;final int requestedRate;final float initialRefresh;final Connection connection;final Reply reply;final long epoch;
+        final String id,mode;final int requestedRate;final float initialRefresh;final Connection connection;final Reply reply;final long epoch;final NetworkCloseQueue.Reservation cleanup;
         final AtomicBoolean started=new AtomicBoolean(),replied=new AtomicBoolean();final AtomicLong received=new AtomicLong(),rendered=new AtomicLong(),dropped=new AtomicLong();final RenderedFrameMetrics renderMetrics=new RenderedFrameMetrics();
         volatile boolean cancelled;volatile HttpsURLConnection pending;volatile String lease="";volatile int width,height;volatile Exception decoderError;volatile DisplayVideoProtocol.StreamState streamState;volatile DisplayReadDeadline firstPictureDeadline;
         FrameLayout overlay;SurfaceView view;TextView status;Runnable statistics;DisplayManager manager;DisplayManager.DisplayListener listener;
         long statAt=System.nanoTime(),lastReceived,lastRendered;int statisticsTicks;
-        Session(String id,String mode,int rate,float refresh,Connection connection,Reply reply,long epoch){this.id=id;this.mode=mode;requestedRate=rate;initialRefresh=refresh;this.connection=connection;this.reply=reply;this.epoch=epoch;}
+        Session(String id,String mode,int rate,float refresh,Connection connection,Reply reply,long epoch,NetworkCloseQueue.Reservation cleanup){this.id=id;this.mode=mode;requestedRate=rate;initialRefresh=refresh;this.connection=connection;this.reply=reply;this.epoch=epoch;this.cleanup=cleanup;}
         void complete(JSONObject result){if(replied.compareAndSet(false,true))reply.complete(result);}
     }
 }

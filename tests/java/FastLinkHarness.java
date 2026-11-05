@@ -6,6 +6,14 @@ import java.security.cert.X509Certificate;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.InetAddress;
 
 public final class FastLinkHarness {
     private static int passed;
@@ -15,14 +23,17 @@ public final class FastLinkHarness {
         final int port=Integer.parseInt(System.getenv("DECK_TEST_PORT"));
         SSLContext context=SSLContext.getInstance("TLS");
         context.init(null,new TrustManager[]{new PinnedTrustManager(pin,null)},null);
+        final X509Certificate fixturePeer;
         try(SSLSocket probe=(SSLSocket)context.getSocketFactory().createSocket("127.0.0.1",port)){
             probe.setSoTimeout(3000);probe.startHandshake();
             X509Certificate peer=(X509Certificate)probe.getSession().getPeerCertificates()[0];
+            fixturePeer=peer;
             final String[] found={null};new PinnedTrustManager(pin.substring(0,24),fingerprint->found[0]=fingerprint).checkServerTrusted(new X509Certificate[]{peer},"RSA");
             check(pin.equals(found[0]),"pairing code verifies the full self-signed PC certificate through platform trust validation");
             try{new PinnedTrustManager(new String(new char[64]).replace('\0','0'),value->{throw new AssertionError("Wrong pin callback");}).checkServerTrusted(new X509Certificate[]{peer},"RSA");throw new AssertionError("Wrong pin accepted");}catch(java.security.cert.CertificateException expected){check(true,"wrong certificate pin is rejected before trust-anchor creation");}
             try{new PinnedTrustManager(pin,null).checkServerTrusted(new X509Certificate[0],"RSA");throw new AssertionError("Empty chain accepted");}catch(java.security.cert.CertificateException expected){check(true,"empty certificate chain is rejected");}
         }
+        cleanupChecks(fixturePeer,pin,token);
         CountDownLatch ready=new CountDownLatch(1),result=new CountDownLatch(1),state=new CountDownLatch(1),reconnected=new CountDownLatch(2),pong=new CountDownLatch(1);
         FastLink link=new FastLink(new FastLink.Listener(){
             public FastLink.Settings settings(){return new FastLink.Settings("127.0.0.1",port,token,pin,context.getSocketFactory());}
@@ -58,5 +69,55 @@ public final class FastLinkHarness {
         FastLink wrong=new FastLink(new FastLink.Listener(){public FastLink.Settings settings(){return new FastLink.Settings("127.0.0.1",port,token,new String(new char[64]).replace('\0','0'),context.getSocketFactory());}public boolean packet(String json){accepted.set(true);return true;}public void disconnected(){}});
         try{wrong.start();Thread.sleep(1200);check(!accepted.get()&&!wrong.connected()&&!wrong.send("{}"),"native extra certificate-pin check rejects mismatch");}finally{wrong.close();}
         System.out.println(passed+" native Java fast-link checks passed; no Android app or GUI opened.");
+    }
+    private static void cleanupChecks(X509Certificate certificate,String pin,String token) throws Exception {
+        final Thread caller=Thread.currentThread();final BlockingSocket first=new BlockingSocket(certificate,caller,true),second=new BlockingSocket(certificate,caller,false);
+        final AtomicInteger created=new AtomicInteger();final CountDownLatch ready=new CountDownLatch(2);
+        SSLSocketFactory factory=new SSLSocketFactory(){
+            public String[] getDefaultCipherSuites(){return new String[0];}public String[] getSupportedCipherSuites(){return new String[0];}
+            @Override public Socket createSocket() throws IOException {int count=created.incrementAndGet();if(count==1)return first;if(count==2)return second;throw new IOException("No additional fixture sockets.");}
+            public Socket createSocket(Socket socket,String host,int port,boolean close) throws IOException {throw new IOException("Unused fixture overload.");}
+            public Socket createSocket(String host,int port) throws IOException {throw new IOException("Unused fixture overload.");}
+            public Socket createSocket(String host,int port,InetAddress local,int localPort) throws IOException {throw new IOException("Unused fixture overload.");}
+            public Socket createSocket(InetAddress host,int port) throws IOException {throw new IOException("Unused fixture overload.");}
+            public Socket createSocket(InetAddress host,int port,InetAddress local,int localPort) throws IOException {throw new IOException("Unused fixture overload.");}
+        };
+        FastLink link=new FastLink(new FastLink.Listener(){public FastLink.Settings settings(){return new FastLink.Settings("127.0.0.1",1,token,pin,factory);}public boolean packet(String json){ready.countDown();return true;}public void disconnected(){}});
+        try{
+            link.start();for(int count=0;count<200&&!link.connected();count++)Thread.sleep(5);
+            check(link.connected(),"cleanup fixture reaches an authenticated ready state");
+            long began=System.nanoTime();link.reset();long elapsed=System.nanoTime()-began;
+            check(elapsed<TimeUnit.MILLISECONDS.toNanos(250)&&!link.connected(),"reset immediately invalidates readiness without waiting for TLS close");
+            check(first.closeStarted.await(1,TimeUnit.SECONDS)&&!first.closedOnCaller.get(),"TLS close runs on a background cleanup thread");
+            check(first.closed.getCount()==1,"fixture holds the TLS close in progress");
+            began=System.nanoTime();for(int count=0;count<1000;count++)link.reset();link.pause();elapsed=System.nanoTime()-began;
+            check(elapsed<TimeUnit.MILLISECONDS.toNanos(250),"repeated reset and pause return while TLS close is blocked");
+            check(first.closeCalls.get()==1&&created.get()==1,"repeated reset deduplicates one exact close and cannot open replacement sockets early");
+            check(!link.send("{}"),"reset commands are rejected instead of queued for the next connection");
+            first.allowClose.countDown();check(first.closed.await(1,TimeUnit.SECONDS),"background cleanup physically closes the old socket");
+            link.resume();check(ready.await(3,TimeUnit.SECONDS),"replacement connection starts after the old socket closes");
+            for(int count=0;count<200&&!link.connected();count++)Thread.sleep(5);
+            check(link.connected()&&second.closeCalls.get()==0&&first.closeCalls.get()==1,"old cleanup cannot close the new connection");
+            began=System.nanoTime();link.close();elapsed=System.nanoTime()-began;
+            check(elapsed<TimeUnit.MILLISECONDS.toNanos(250)&&!link.connected(),"close invalidates immediately without caller-thread TLS I/O");
+            check(second.closed.await(1,TimeUnit.SECONDS)&&!second.closedOnCaller.get()&&second.closeCalls.get()==1,"final exact socket is closed once on the cleanup worker");
+            java.lang.reflect.Field cleanupField=FastLink.class.getDeclaredField("cleanup");cleanupField.setAccessible(true);
+            java.util.concurrent.ThreadPoolExecutor cleanup=(java.util.concurrent.ThreadPoolExecutor)cleanupField.get(link);
+            check(cleanup.awaitTermination(3,TimeUnit.SECONDS),"cleanup worker terminates after transport shutdown");
+            check(cleanup.getLargestPoolSize()==1&&cleanup.getTaskCount()==2,"cleanup uses one worker and one task per socket, without a reset backlog");
+        }finally{first.allowClose.countDown();second.allowClose.countDown();link.close();}
+    }
+    /** Synthetic TLS socket: all I/O stays in memory and close can deliberately block. */
+    private static final class BlockingSocket extends SSLSocket {
+        final Thread caller;final X509Certificate certificate;final CountDownLatch allowClose,closeStarted=new CountDownLatch(1),closed=new CountDownLatch(1);
+        final AtomicInteger closeCalls=new AtomicInteger();final AtomicBoolean closedOnCaller=new AtomicBoolean();final byte[] packet;
+        BlockingSocket(X509Certificate certificate,Thread caller,boolean blocked) throws IOException {this.certificate=certificate;this.caller=caller;allowClose=new CountDownLatch(blocked?1:0);ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream output=new DataOutputStream(bytes);byte[] json="{\"type\":\"ready\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);output.writeInt(json.length);output.write(json);packet=bytes.toByteArray();}
+        @Override public void connect(SocketAddress address,int timeout){}@Override public void setTcpNoDelay(boolean value){}@Override public void setKeepAlive(boolean value){}@Override public void setSoTimeout(int value){}
+        @Override public void startHandshake(){}
+        @Override public java.io.OutputStream getOutputStream(){return new ByteArrayOutputStream();}
+        @Override public InputStream getInputStream(){return new InputStream(){int offset;public int read() throws IOException {if(offset<packet.length)return packet[offset++]&255;try{closed.await();return -1;}catch(InterruptedException ex){Thread.currentThread().interrupt();throw new IOException("Fixture read interrupted.",ex);}}};}
+        @Override public void close() throws IOException {closeCalls.incrementAndGet();if(Thread.currentThread()==caller){closedOnCaller.set(true);throw new IOException("TLS close attempted on the caller thread.");}closeStarted.countDown();try{allowClose.await();}catch(InterruptedException ex){Thread.currentThread().interrupt();throw new IOException("Fixture close interrupted.",ex);}finally{closed.countDown();}}
+        @Override public SSLSession getSession(){return new SSLSession(){public byte[] getId(){return new byte[0];}public SSLSessionContext getSessionContext(){return null;}public long getCreationTime(){return 0;}public long getLastAccessedTime(){return 0;}public void invalidate(){}public boolean isValid(){return true;}public void putValue(String name,Object value){}public Object getValue(String name){return null;}public void removeValue(String name){}public String[] getValueNames(){return new String[0];}public java.security.cert.Certificate[] getPeerCertificates(){return new java.security.cert.Certificate[]{certificate};}public java.security.cert.Certificate[] getLocalCertificates(){return null;}public javax.security.cert.X509Certificate[] getPeerCertificateChain(){return null;}public java.security.Principal getPeerPrincipal(){return certificate.getSubjectX500Principal();}public java.security.Principal getLocalPrincipal(){return null;}public String getCipherSuite(){return "TLS_AES_128_GCM_SHA256";}public String getProtocol(){return "TLSv1.3";}public String getPeerHost(){return "127.0.0.1";}public int getPeerPort(){return 1;}public int getPacketBufferSize(){return 16384;}public int getApplicationBufferSize(){return 16384;}};}
+        public String[] getSupportedCipherSuites(){return new String[0];}public String[] getEnabledCipherSuites(){return new String[0];}public void setEnabledCipherSuites(String[] suites){}public String[] getSupportedProtocols(){return new String[0];}public String[] getEnabledProtocols(){return new String[0];}public void setEnabledProtocols(String[] protocols){}public void addHandshakeCompletedListener(HandshakeCompletedListener listener){}public void removeHandshakeCompletedListener(HandshakeCompletedListener listener){}public void setUseClientMode(boolean mode){}public boolean getUseClientMode(){return true;}public void setNeedClientAuth(boolean need){}public boolean getNeedClientAuth(){return false;}public void setWantClientAuth(boolean want){}public boolean getWantClientAuth(){return false;}public void setEnableSessionCreation(boolean flag){}public boolean getEnableSessionCreation(){return true;}
     }
 }
