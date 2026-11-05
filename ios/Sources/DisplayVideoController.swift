@@ -17,9 +17,10 @@ final class DisplayFrameInbox {
     func noteHeartbeat() { lock.lock(); if !stopped { heartbeatPending = true }; lock.unlock() }
     func takeHeartbeat() -> Bool { lock.lock(); defer { lock.unlock() }; let value = heartbeatPending; heartbeatPending = false; return value }
     func offer(_ unit: DisplayVideoUnit) {
+        let picture = DisplayH264.containsPicture(unit.bytes)
         lock.lock(); defer { lock.unlock() }
         guard !stopped else { return }
-        if !unit.configuration { received += 1 }
+        if picture { received += 1 }
         if waitingForKeyframe && !unit.keyframe {
             if unit.configuration { units = [unit]; bytes = unit.bytes.count }
             else { dropped += 1 }
@@ -207,7 +208,6 @@ final class DisplayVideoController: UIViewController {
         let interval = link.targetTimestamp - link.timestamp
         if interval > 0 { currentRefreshRate = Int((1 / interval).rounded()) }
         let (units, resync, count, lost) = inbox.take(); received += count; dropped += lost
-        if count > 0 { lastVideoAt = link.timestamp }
         if inbox.takeHeartbeat() { lastHeartbeatAt = link.timestamp }
         if resync { displayLayer.flushAndRemoveImage(); builder.reset() }
         do {
@@ -217,6 +217,7 @@ final class DisplayVideoController: UIViewController {
                 else { ready = displayLayer.isReadyForMoreMediaData }
                 guard ready else { displayLayer.flushAndRemoveImage(); builder.reset(); inbox.waitForKeyframe(); dropped += 1; break }
                 if let (sample, changed) = try builder.sample(unit) {
+                    lastVideoAt = link.timestamp
                     if unit.keyframe { receivedFirstKeyframe = true }
                     if changed { displayLayer.flushAndRemoveImage() }
                     if #available(iOS 17, *) { displayLayer.sampleBufferRenderer.enqueue(sample) }

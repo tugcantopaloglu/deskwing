@@ -408,6 +408,13 @@ final class DisplayVideoTests: XCTestCase {
         XCTAssertEqual(video.2, 1)
         XCTAssertEqual(video.3, 0)
 
+        // Mixed KEY|CONFIG can carry a real IDR; an unflagged parameter-only packet is not video.
+        inbox.offer(DisplayVideoUnit(bytes: picture, keyframe: true, configuration: true, presentationMicroseconds: 1))
+        inbox.offer(DisplayVideoUnit(bytes: Data([0, 0, 1, 0x67, 0x42]), keyframe: false, configuration: false, presentationMicroseconds: 2))
+        XCTAssertEqual(inbox.take().2, 1)
+        XCTAssertFalse(DisplayH264.containsPicture(Data([0, 0, 1, 0x67, 0x42])))
+        XCTAssertTrue(DisplayH264.containsPicture(picture))
+
         inbox.noteHeartbeat()
         inbox.stop()
         inbox.noteHeartbeat()

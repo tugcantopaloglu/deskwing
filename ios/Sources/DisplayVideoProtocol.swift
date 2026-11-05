@@ -127,6 +127,23 @@ enum DisplayVideoPolicy {
 /// Start-code removal happens before Core Media receives data. Every NAL remains bounded by the
 /// authenticated packet limit; no arbitrary codec or decoder configuration is accepted.
 enum DisplayH264 {
+    // Frame-rate accounting uses actual VCL NALs, not transport configuration flags. This bounded
+    // allocation-free check is not bitstream validation; nals() and Core Media still validate decoding.
+    static func containsPicture(_ data: Data) -> Bool {
+        guard data.count >= 4, data.count <= DisplayVideoParser.maximumAccessUnit else { return false }
+        return data.withUnsafeBytes { raw in
+            let bytes = raw.bindMemory(to: UInt8.self)
+            var index = 0
+            while index + 3 < bytes.count {
+                if bytes[index] == 0, bytes[index + 1] == 0, bytes[index + 2] == 1 {
+                    let header = bytes[index + 3]
+                    if header & 0x80 == 0, (1...5).contains(header & 0x1F) { return true }
+                    index += 4
+                } else { index += 1 }
+            }
+            return false
+        }
+    }
     static func nals(_ data: Data) throws -> [Data] {
         guard data.count >= 4, data.count <= DisplayVideoParser.maximumAccessUnit else { throw DeskError.message("Invalid H.264 frame size.") }
         let bytes = [UInt8](data)
