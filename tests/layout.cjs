@@ -3,12 +3,23 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {chromium}=require('playwright');
 const root=path.resolve(__dirname,'../companion/wwwroot');
-const output=path.resolve(__dirname,'../.test-output/layout');
+const output=path.join(path.resolve(process.env.TABLETDECK_TEST_OUTPUT||path.join(__dirname,'../.test-output')),'layout');
 fs.mkdirSync(output,{recursive:true});
-const allowed=new Set(['index.html','app.js','features.js','boards.js','desktop.js','studio.js','monitor.js','hardening.js','latency.js','style.css','vendor/purify.min.js','fonts/Manrope.ttf']);
+const html=fs.readFileSync(path.join(root,'index.html'),'utf8'),allowed=new Set(['index.html','fonts/Manrope.ttf']);
+for(const [tag] of html.matchAll(/<(?:script|link)\b[^>]*>/gi)){
+ const attribute=name=>tag.match(new RegExp('\\b'+name+'\\s*=\\s*(["\\\'])(.*?)\\1','i'))?.[2];
+ const script=/^<script\b/i.test(tag);if(!script&&attribute('rel')!=='stylesheet')continue;
+ const asset=attribute(script?'src':'href');if(!asset)continue;
+ assert.match(asset,/^(?:[\w-]+\/)*[\w.-]+\.(?:js|css)$/,'fixture assets must be explicit local script or stylesheet paths');
+ allowed.add(asset);
+}
 // Intercept a synthetic HTTPS origin inside the browser. No local web server,
 // certificate exception, or real network connection is needed for this fixture.
-const assets=new Map([...allowed].map(route=>[route,{body:fs.readFileSync(path.join(root,route)),type:route.endsWith('.js')?'application/javascript':route.endsWith('.css')?'text/css':route.endsWith('.ttf')?'font/ttf':'text/html'}]));
+const realRoot=fs.realpathSync(root),assets=new Map([...allowed].map(route=>{
+ const file=fs.realpathSync(path.join(root,route)),relative=path.relative(realRoot,file);
+ assert.ok(relative&&!path.isAbsolute(relative)&&relative!=='..'&&!relative.startsWith('..'+path.sep),'fixture assets must remain inside wwwroot');
+ return [route,{body:fs.readFileSync(file),type:route.endsWith('.js')?'application/javascript':route.endsWith('.css')?'text/css':route.endsWith('.ttf')?'font/ttf':'text/html'}];
+}));
 let checks=0,browser;
 function check(value,label){assert.ok(value,label);checks++;console.log('PASS '+label);}
 async function fixture(page){
@@ -22,14 +33,16 @@ async function fixture(page){
 }
 (async()=>{
  browser=await chromium.launch({headless:true,executablePath:process.env.TABLETDECK_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
- const page=await browser.newPage({viewport:{width:1067,height:667},hasTouch:true});
+ const page=await browser.newPage({viewport:{width:1067,height:667},hasTouch:true}),served=new Set();
  await page.route('**/*',route=>{
   const request=new URL(route.request().url());
   const asset=request.origin==='https://layout.test'?assets.get(request.pathname.slice(1)||'index.html'):null;
+  if(asset)served.add(request.pathname.slice(1)||'index.html');
   return asset?route.fulfill({status:200,contentType:asset.type,body:asset.body}):route.fulfill({status:404,body:''});
  });
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
  await fixture(page);
+ check([...allowed].filter(asset=>/\.(?:js|css)$/.test(asset)).every(asset=>served.has(asset)),'fixture loads every script and stylesheet referenced by the current tablet document');
  check(await page.locator('.key').count()===12,'Studio keeps twelve keys');
  await page.getByRole('button',{name:'Full pad',exact:true}).click();
  check(await page.locator('.key').count()===24,'Full pad displays twenty-four keys');

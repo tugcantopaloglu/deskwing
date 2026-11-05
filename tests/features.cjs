@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const https=require('node:https');
 const {chromium}=require('playwright');
-const root=path.resolve(__dirname,'../.test-output');
+const root=path.resolve(process.env.TABLETDECK_TEST_OUTPUT||path.join(__dirname,'../.test-output'));
 const session=JSON.parse(fs.readFileSync(path.join(root,'data/admin-session.json'),'utf8'));
 const base='http://127.0.0.1:'+session.httpPort;
 let checks=0,browser;
@@ -41,29 +41,34 @@ async function run(){
 
  browser=await chromium.launch({executablePath:process.env.TABLETDECK_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
  const page=await browser.newPage({viewport:{width:1280,height:800},hasTouch:true});const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(base+'/#admin='+session.token);await page.locator('.key').first().waitFor();
- await page.getByRole('button',{name:'Edit',exact:true}).click();
+ await page.goto(base+'/desktop.html#admin='+session.token);await page.locator('#console-editor').click();await page.locator('.drag-handle').first().waitFor();
  const initialIds=(await admin('/api/board')).data.pages[0].buttons.map(b=>b.id);
  await drag(page,page.locator('.drag-handle').first(),page.locator('.drag-handle').nth(2));
  await page.getByRole('button',{name:'Save changes',exact:true}).click();await page.waitForTimeout(150);
  let current=(await admin('/api/board')).data.pages[0].buttons.map(b=>b.id);check(current[0]!==initialIds[0]&&current.includes(initialIds[0]),'PC drag-and-drop order persists');
 
- await page.getByRole('button',{name:'Edit',exact:true}).click();await page.getByRole('button',{name:'Arrange board',exact:true}).click();await page.waitForFunction(()=>arranging===true);await page.locator('body.arranging').waitFor();
+ // The shipping loopback root is the PC console. Serve the actual tablet HTML
+ // at a fixture-only route so its layout controls can use this isolated admin
+ // session without preview mode suppressing writes or a real Android bridge.
+ await page.route(base+'/tablet-feature-fixture',route=>route.fulfill({contentType:'text/html',body:fs.readFileSync(path.join(__dirname,'../companion/wwwroot/index.html'),'utf8')}));
+ await page.goto(base+'/tablet-feature-fixture#admin='+session.token);await page.locator('.key').first().waitFor();
+
+ await page.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('.editor-page-options > summary').click();await page.getByRole('button',{name:'Arrange board',exact:true}).click();await page.waitForFunction(()=>arranging===true);await page.locator('body.arranging').waitFor();
  let actions=0;await page.route('**/api/action',route=>{actions++;return route.fulfill({json:{ok:true}});});
  await page.locator('.key').first().click();check(actions===0,'arrange mode prevents triggering actions');await page.getByRole('button',{name:'Close settings',exact:true}).click();
  const original=current[0];await drag(page,page.locator('.key').first(),page.locator('.key').nth(3));await page.getByRole('button',{name:'Save order',exact:true}).click();await page.waitForTimeout(150);
  current=(await admin('/api/board')).data.pages[0].buttons.map(b=>b.id);check(current[0]!==original,'board drag order saves through validated layout endpoint');
- await page.getByRole('button',{name:'Edit',exact:true}).click();await page.getByRole('button',{name:'Arrange board',exact:true}).click();await page.waitForFunction(()=>arranging===true);
+ await page.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('.editor-page-options > summary').click();await page.getByRole('button',{name:'Arrange board',exact:true}).click();await page.waitForFunction(()=>arranging===true);
  const saved=[...current];await drag(page,page.locator('.key').first(),page.locator('.key').nth(2),true);await page.getByRole('button',{name:'Cancel',exact:true}).click();await page.waitForTimeout(150);
  check(JSON.stringify((await admin('/api/board')).data.pages[0].buttons.map(b=>b.id))===JSON.stringify(saved),'touch drag can be cancelled without saving');
- await page.getByRole('button',{name:'Edit',exact:true}).click();await page.getByRole('button',{name:'Arrange board',exact:true}).click();await page.waitForFunction(()=>arranging===true);await page.locator('.key').first().focus();await page.keyboard.press('Alt+ArrowRight');await page.getByRole('button',{name:'Save order',exact:true}).click();await page.waitForTimeout(100);
+ await page.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('.editor-page-options > summary').click();await page.getByRole('button',{name:'Arrange board',exact:true}).click();await page.waitForFunction(()=>arranging===true);await page.locator('.key').first().focus();await page.keyboard.press('Alt+ArrowRight');await page.getByRole('button',{name:'Save order',exact:true}).click();await page.waitForTimeout(100);
  check((await admin('/api/board')).data.pages[0].buttons[0].id!==saved[0],'keyboard alternative reorders board buttons');
 
  const capture=path.join(root,'features');fs.mkdirSync(capture,{recursive:true});
  const shortConfig=(await admin('/api/admin/config')).data,longConfig=structuredClone(shortConfig);
  for(let i=13;i<=14;i++)longConfig.pages[0].buttons.push({...structuredClone(longConfig.pages[0].buttons[0]),id:'cross-slice-'+i,label:'Extra button '+i});
  await admin('/api/admin/config',{config:longConfig,replacePassword:false});await page.reload();await page.locator('.key').first().waitFor();await page.setViewportSize({width:1024,height:600});
- await page.getByRole('button',{name:'Edit',exact:true}).click();await page.getByRole('button',{name:'Arrange board',exact:true}).click();await page.waitForFunction(()=>arranging===true);
+ await page.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('.editor-page-options > summary').click();await page.getByRole('button',{name:'Arrange board',exact:true}).click();await page.waitForFunction(()=>arranging===true);
  await page.getByRole('button',{name:'Next',exact:true}).tap();await page.getByRole('button',{name:'Extra button 13',exact:true}).tap();
  await page.getByLabel('Move to position',{exact:true}).selectOption('0');await page.screenshot({path:path.join(capture,'arrange-position.png')});await page.getByRole('button',{name:'Move button',exact:true}).tap();
  check(await page.locator('.key').first().getAttribute('data-id')==='cross-slice-13','touch position picker moves a key across groups of twelve');
@@ -95,7 +100,7 @@ async function run(){
  await page.getByLabel('Search sounds',{exact:true}).fill('');await page.screenshot({path:path.join(capture,'library-desktop.png')});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:path.join(capture,'library-mobile.png')});check(await page.evaluate(()=>document.querySelector('#panel-body').scrollWidth<=document.querySelector('#panel-body').clientWidth),'Soundpad browser has no compact horizontal overflow');
  await page.getByRole('button',{name:'Close settings',exact:true}).click();await page.setViewportSize({width:1024,height:600});
- await page.getByRole('button',{name:'Edit',exact:true}).click();await page.getByRole('button',{name:'Arrange board',exact:true}).click();await page.waitForFunction(()=>arranging===true);await page.screenshot({path:path.join(capture,'arrange-tablet.png')});
+ await page.getByRole('button',{name:'Edit',exact:true}).click();await page.locator('.editor-page-options > summary').click();await page.getByRole('button',{name:'Arrange board',exact:true}).click();await page.waitForFunction(()=>arranging===true);await page.screenshot({path:path.join(capture,'arrange-tablet.png')});
  await page.getByRole('button',{name:'Cancel',exact:true}).click();await page.screenshot({path:path.join(capture,'board-tablet.png')});
  check(errors.length===0,'new feature flows have no browser JavaScript errors');
  await browser.close();browser=null;await admin('/api/admin/config',{config:before,replacePassword:false});

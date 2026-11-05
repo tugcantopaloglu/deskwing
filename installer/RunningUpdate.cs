@@ -12,7 +12,7 @@ internal static class RunningUpdate
         var expected=Path.GetFullPath(Option("--expected-exe"));var version=Assembly.GetExecutingAssembly().GetName().Version!;
         if(!Version.TryParse(Option("--expected-version"),out var requested)||new Version(version.Major,version.Minor,version.Build)!=requested)throw new IOException("The updater version differs from the requested release.");
         using var process=Process.GetProcessById(pid);var actual=Path.GetFullPath(process.MainModule?.FileName??throw new IOException("Cannot identify the running companion."));
-        if(!actual.Equals(expected,StringComparison.OrdinalIgnoreCase)||Path.GetFileName(actual)!="TabletDeck-Companion.exe"||FileVersionInfo.GetVersionInfo(actual).ProductName!="TabletDeck-Companion")throw new IOException("The selected process is not the expected Tablet Deck companion.");
+        if(!actual.Equals(expected,StringComparison.OrdinalIgnoreCase)||Path.GetFileName(actual)!="TabletDeck-Companion.exe"||FileVersionInfo.GetVersionInfo(actual).ProductName!="TabletDeck-Companion")throw new IOException("The selected process is not the expected DeskWing companion.");
         var installed=FileVersionInfo.GetVersionInfo(actual);if(!testMode&&requested<=new Version(installed.FileMajorPart,installed.FileMinorPart,installed.FileBuildPart))throw new IOException("This updater is not newer than the installed companion.");
         var target=Path.GetDirectoryName(actual)!;
         var testRoot=Path.Combine(Path.GetTempPath(),"TabletDeckStudioSetupTests");
@@ -24,7 +24,7 @@ internal static class RunningUpdate
         // The existing service exits itself after handing off; this helper never kills a process.
         if(!process.WaitForExit(60000))throw new IOException("The companion did not exit. No files were changed.");
         var cache=testMode?Path.Combine(testRoot,"update-results"):Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"TabletDeck","updates");
-        var replaced=new List<(string Destination,string? Backup)>();
+        var replaced=new List<(string Destination,string? Backup)>();var managedInstallation=false;
         try{
             Directory.CreateDirectory(cache);var backup=Path.Combine(cache,"backup-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(backup);
             foreach(var file in files){var path=inside(target,file.Relative);if(File.Exists(path)){using var check=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.None);}}
@@ -36,6 +36,7 @@ internal static class RunningUpdate
             if(Path.GetFileName(target)=="Windows"&&File.Exists(manifest)){
                 var record=JsonSerializer.Deserialize<InstallManifest>(File.ReadAllText(manifest))??throw new IOException("Invalid installation record.");
                 if(record.Id!="TabletDeckStudio"||!Path.GetFullPath(record.Root).Equals(managedRoot,StringComparison.OrdinalIgnoreCase)||record.Files.Length>2000)throw new IOException("Invalid installation record.");foreach(var name in record.Files)inside(managedRoot,name);
+                managedInstallation=true;
                 var saved=Path.Combine(backup,"installation-record.json");File.Copy(manifest,saved,false);replaced.Add((manifest,saved));
                 File.WriteAllText(manifest,JsonSerializer.Serialize(record with{Files=record.Files.Concat(files.Select(f=>"Windows/"+f.Relative)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()}));
             }
@@ -45,8 +46,12 @@ internal static class RunningUpdate
             try{File.WriteAllText(Path.Combine(cache,"last-result.json"),JsonSerializer.Serialize(new{success=false,message="The Windows update failed. Previous program files were restored."}));}catch(IOException){}
             if(!testMode)Restart(actual,target);throw;
         }
+        if(managedInstallation&&!testMode){
+            try{InstalledShortcuts.Update(Directory.GetParent(target)!.FullName,true,new[]{Environment.GetFolderPath(Environment.SpecialFolder.Programs),Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)},existingOnly:true);}
+            catch(Exception ex) when(ex is IOException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException){Console.Error.WriteLine("DeskWing was updated, but an existing shortcut could not be renamed: "+ex.Message);}
+        }
         if(args.Contains("--restart")&&!testMode)Restart(actual,target);
         Console.WriteLine("PASS running companion updated; board data and pairing are outside the update target.");
     }
-    private static void Restart(string executable,string directory){var start=new ProcessStartInfo(executable){WorkingDirectory=directory,UseShellExecute=false,CreateNoWindow=true};start.ArgumentList.Add("--tray");start.ArgumentList.Add("--after-update");using var process=Process.Start(start)??throw new IOException("Update installed; open Tablet Deck from its shortcut to restart.");}
+    private static void Restart(string executable,string directory){var start=new ProcessStartInfo(executable){WorkingDirectory=directory,UseShellExecute=false,CreateNoWindow=true};start.ArgumentList.Add("--tray");start.ArgumentList.Add("--after-update");using var process=Process.Start(start)??throw new IOException("Update installed; open DeskWing from its shortcut to restart.");}
 }

@@ -72,7 +72,7 @@ async function run(){
     fs.writeFileSync(path.join(data,'config.json'),JSON.stringify({obsPort:19999,pages:[{id:'fixture',name:'Isolated fixture',buttons:[]}]}));
     await start();
 
-    for(const [route,body] of [['/api/computer',undefined],['/api/computer/media',undefined],['/api/computer/media/action',{}],['/api/computer/preset',{presetId:'desktop'}],['/api/computer/action',{}],['/api/computer/display',undefined],['/api/computer/display/frame',{width:960}]]){
+    for(const [route,body] of [['/api/computer',undefined],['/api/computer/media',undefined],['/api/computer/media/action',{}],['/api/computer/preset',{presetId:'desktop'}],['/api/computer/follow',{automatic:true}],['/api/computer/action',{}],['/api/computer/display',undefined],['/api/computer/display/frame',{width:960}]]){
         check((await api(route,body,{admin:false})).status===401,'unpaired request rejected: '+route);
     }
     const pin=(await api('/api/admin/pairing',{})).data;
@@ -88,6 +88,7 @@ async function run(){
     check(!JSON.stringify(snapshot).includes(token),'Computer snapshot does not expose pairing credential');
     const disabled=await api('/api/computer/action',{presetId:snapshot.activePresetId,controlId:snapshot.settings.presets.find(p=>p.id===snapshot.activePresetId).controls[0].id,contextToken:snapshot.contextToken},{admin:false,token});
     check(disabled.status===409&&/Enable Computer controls/.test(disabled.data.error),'disabled controller rejects configured action before keyboard execution');
+    check((await api('/api/computer/follow',{automatic:true},{admin:false,token})).status===409,'following cannot enable an opted-out controller');
     const disabledMedia=(await api('/api/computer/media',undefined,{admin:false,token})).data;
     check(disabledMedia.sessions.length===0&&/Enable Computer Copilot/.test(disabledMedia.error),'disabled media snapshot exposes no player metadata');
     check((await api('/api/computer/media/action',{presetId:'spotify',sessionId:'0'.repeat(32),contextToken:'0'.repeat(32),operation:'toggle'},{admin:false,token})).status===409,'disabled media route cannot dispatch a player operation');
@@ -131,6 +132,10 @@ async function run(){
     settings=selected;
     const mediaSettings={...clone(settings),enabled:true,automatic:false,manualPresetId:'spotify'};
     check((await api('/api/admin/computer',mediaSettings)).status===200,'fixture can enable a selected Spotify layout');
+    check((await api('/api/computer/follow',{automatic:true},{admin:false,token})).status===200&&(await api('/api/computer')).data.settings.automatic,'paired tablet can resume automatic following');
+    check((await api('/api/computer/follow',{automatic:false},{admin:false,token})).status===200&&!(await api('/api/computer')).data.settings.automatic,'paired tablet can pin the active layout');
+    check((await api('/api/computer/follow',{automatic:true},{headers:{Origin:'https://external.invalid'}})).status===403,'cross-origin following changes are rejected');
+    assert.equal((await api('/api/admin/computer',mediaSettings)).status,200);
     const mediaContext=(await api('/api/computer')).data;
     check((await api('/api/computer/action',{presetId:'spotify',controlId:'media-play',contextToken:mediaContext.contextToken})).status===409,'old Spotify button cannot fall back to a global keyboard play/pause');
     const invalidMedia={presetId:'spotify',sessionId:'0'.repeat(32),contextToken:'0'.repeat(32),operation:'release'};

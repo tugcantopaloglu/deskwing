@@ -25,6 +25,10 @@ try {
     await RejectAsync(()=>controller.Execute(Request(state,"frame-forward")),"disabled controller refuses execution");Check(calls.Count==0,"disabled controller never calls executor");
     Check(!state.Capabilities.ExtendedDisplay&&!state.Capabilities.DisplayCapture&&state.Capabilities.ContextualControls,"capabilities never claim a virtual display or capture");
     controller.Save(Enable(defaults));state=controller.Snapshot();
+    controller.Follow(false);state=controller.Snapshot();Check(!state.Settings.Automatic&&state.ActivePresetId=="resolve"&&state.Settings.ManualPresetId=="resolve","pin captures the currently followed layout without executing controls");
+    current=new("Photoshop.exe",true,103,24);Check(controller.Snapshot().ActivePresetId=="resolve","pinned layout stays selected when foreground app changes");
+    controller.Follow(true);Check(controller.Snapshot().Settings.Automatic&&controller.Snapshot().ActivePresetId=="photoshop","tablet can resume following without rewriting bindings");
+    current=new("Resolve.exe",true,101,23);state=controller.Snapshot();
     await controller.Execute(Request(state,"frame-forward"));Check(calls.Count==1&&calls[^1].Kind=="hotkey"&&calls[^1].Target=="RIGHT","configured timeline frame action resolves to one allowlisted hotkey");
     await RejectAsync(()=>controller.Execute(new("resolve","arbitrary",state.ContextToken)),"remote cannot invent a control ID");
     await RejectAsync(()=>controller.Execute(new("photoshop","brush",state.ContextToken)),"remote cannot invoke a hidden preset");

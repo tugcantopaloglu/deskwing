@@ -1,0 +1,16 @@
+/* Workspace modes retain the same controls and status hierarchy across platforms. */
+body.pen-mode,body.pen-mode.full-pad,body.pen-mode.studio-tools-ready{grid-template-rows:auto minmax(0,1fr);overflow:hidden}
+body.pen-mode.execution-visible{grid-template-rows:auto minmax(0,1fr) auto}
+body.desktop-console.pen-mode,body.desktop-console.pen-mode.execution-visible{grid-template-rows:72px minmax(0,1fr) auto}
+.desktop-console #pen-workspace{grid-column:2;grid-row:2;min-height:0;min-width:0}
+.display-workspace-mode #computer-workspace>:not(.computer-heading):not(.computer-display){display:none!important}
+.display-workspace-mode .computer-display{margin:0;flex:1;min-height:0}
+.display-workspace-mode .computer-display>summary{display:none}
+.display-workspace-mode .computer-heading{margin-bottom:20px}
+.display-workspace-mode .computer-heading p{max-width:65ch}
+::selection{background:#76d7e44d;color:var(--ink)}
+:is(input,textarea){caret-color:var(--cyan)}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+*{scrollbar-color:var(--outline) var(--bg);scrollbar-width:thin}
+@media(max-width:620px){.desktop-console #pen-workspace{grid-column:1;grid-row:3}body.desktop-console.pen-mode,body.desktop-console.pen-mode.execution-visible{grid-template-rows:auto auto minmax(0,1fr) auto}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important}}

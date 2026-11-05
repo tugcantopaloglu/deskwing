@@ -1,8 +1,22 @@
-# Tablet Deck Studio
+# DeskWing
 
-Turn an Android tablet into a customizable control board for a Windows streaming PC. Change OBS scenes, play sound effects, control audio, open apps, send hotkeys, and run macros over **Wi-Fi or USB**.
+Extend your Windows PC with a tablet workspace for streaming controls, app shortcuts, media, writing, and optional second-display viewing. Change OBS scenes, play sounds, control audio, open apps, and run macros over **Wi-Fi or USB**. DeskWing is the new name for Tablet Deck Studio.
 
 **[Download the latest release](https://github.com/tugcantopaloglu/tablet-deck-studio/releases/latest)** · [Build from source](docs/BUILDING.md) · [Verification results](docs/VERIFICATION.txt)
+
+## 1.14.0 development
+
+The current development work brings the broader workspace together:
+
+- A visual board editor with button/page reuse, multi-select styling, undo/redo, recoverable drafts, and protection against stale saves.
+- A macro composer with action-specific fields, target pickers, reorderable steps, duplication, and a delay summary.
+- **All / Favourites / Recent** filters on the live Soundpad pad and tablet **Follow app / Pin layout** controls for Computer Copilot.
+- Pen-aware controls and palm protection, a saved drawing scratchpad, and Android handwriting entry through a compatible system keyboard, with typed entry as a fallback.
+- Profile readiness checks, restore-as-new-profile recovery, and improvements to held shortcuts, background requests, damaged settings, and media-session timeouts.
+
+**1.14.0 is a development build, not a published release.** Follow the [implementation checklist](TODO.md) for completion and verification status. The release history and hardware results below describe earlier versions; they do not certify the new pen or editing workflows. Handwriting recognition depends on the tablet, Android version, stylus, and installed keyboard. iOS support and store releases are being prepared; this repository does not yet provide a verified iOS release.
+
+**Upgrade compatibility:** the visible app name becomes **DeskWing**, while `TabletDeck-Companion.exe`, `TabletDeck-Studio.apk`, the Android package `app.tabletdeck.studio`, and existing configuration paths retain their names. Keeping these identities and the original signing key preserves the existing upgrade path, pairing, and settings. Published downloads may still display Tablet Deck Studio. The optional second display remains the documented silent preview, not full-motion video or touch forwarding.
 
 ![Studio layout with twelve action keys and two audio faders — illustrative design preview](docs/images/studio-preview.png)
 
@@ -69,7 +83,7 @@ The low-latency transport and Android packaging fix from 1.4.1 are retained. Phy
 ## Requirements
 
 - Android 8.0 or newer, with an up-to-date Android System WebView / Chrome. Landscape tablet is the primary layout.
-- Windows 10 version 2004 (build 19041) or newer, or Windows 11, x64 for the 1.13 source. The companion includes its .NET runtime; Node, Python, Android Studio, and .NET installation are not required to use it.
+- Windows 10 version 2004 (build 19041) or newer, or Windows 11, x64 for the current source. The companion includes its .NET runtime; Node, Python, Android Studio, and .NET installation are not required to use it.
 - For OBS controls: OBS Studio 28 or newer with WebSocket server enabled. Soundpad and other non-OBS actions also work with OBS closed.
 - For Soundpad actions: Soundpad installed and running on the Windows PC under the same account as the companion.
 
@@ -320,7 +334,7 @@ The PC editor is bound to loopback port 8740 and requires a random local session
 
 Settings, the OBS password, certificate private key, and device records live under %LOCALAPPDATA%/TabletDeck, protected by a directory ACL for the current Windows user and SYSTEM. The OBS password and PFX are not application-encrypted at rest; users with access to the account can read them. Android credentials are in app-private storage and Android backups are disabled. The app’s WebView loads only bundled assets, blocks external navigation and frames, sanitizes dynamic markup, and permits only the required control endpoints through its native bridge.
 
-If you close the Windows console, the companion keeps running. Choose **Open Tablet Deck Studio** in the tray menu to restore its authenticated session. It does not install a service. Startup is opt-in through Windows options and uses the current account Run entry. Automatic USB reconnection, APK updating, and APK reopening also default off; existing saved choices are retained on update.
+If you close the Windows console, the companion keeps running. Choose **Open DeskWing** in the tray menu (**Open Tablet Deck Studio** in earlier releases) to restore its authenticated session. It does not install a service. Startup is opt-in through Windows options and uses the current account Run entry. Automatic USB reconnection, APK updating, and APK reopening also default off; existing saved choices are retained on update.
 
 ## Verification and limits
 
@@ -330,7 +344,7 @@ See [Verification results](docs/VERIFICATION.txt) for the final **1,173 checks**
 
 See [BUILDING.md](docs/BUILDING.md) for building the Windows companion and Android APK, signing-key handling, assembling a distribution, and running the isolated integration tests. Private release signing keys are deliberately excluded from this repository.
 
-The Windows source targets `net10.0-windows10.0.19041.0` and pins `WindowsSdkPackageVersion` to `10.0.19041.57` for media-session APIs. The SDK reference package is restored during the source build; it is not an extra end-user installation requirement. The source identity is 1.13.0, with Android version code 16.
+The Windows source targets `net10.0-windows10.0.19041.0` and pins `WindowsSdkPackageVersion` to `10.0.19041.57` for media-session APIs. The SDK reference package is restored during the source build; it is not an extra end-user installation requirement. The development source identity is 1.14.0, with Android version code 17; the published 1.13.0 APK uses version code 16.
 
 ```text
 android/                 Manifest, resources, and Java HTTPS bridge

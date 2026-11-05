@@ -41,18 +41,26 @@ import java.util.HashSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class MainActivity extends Activity {
     private static final String UI_HOST="app.tabletdeck.local";
     private static final Set<String> GET_PATHS=new HashSet<>(Arrays.asList("/api/computer/media","/api/computer","/api/computer/display","/api/ping","/api/mixer","/api/soundpad/recent","/api/profiles","/api/soundpad/favourites","/api/board","/api/state","/api/execution","/api/apps","/api/soundpad/library"));
-    private static final Set<String> POST_PATHS=new HashSet<>(Arrays.asList("/api/computer/media/action","/api/computer/action","/api/computer/preset","/api/computer/display/frame","/api/monitor/frame","/api/ping","/api/profile-lock","/api/soundpad/recent/clear","/api/profile","/api/soundpad/favourites","/api/cancel","/api/hold","/api/action","/api/audio","/api/mute","/api/apps","/api/layout","/api/soundpad/play","/api/soundpad/library"));
-    private static final Set<String> UI_ASSETS=new HashSet<>(Arrays.asList("/soundpad-board.js","/media-touchbar.js","/media-touchbar.css","/computer.js","/computer.css","/index.html","/app.js","/features.js","/boards.js","/desktop.js","/studio.js","/monitor.js","/hardening.js","/latency.js","/style.css","/fonts/Manrope.ttf","/vendor/purify.min.js"));
+    private static final Set<String> POST_PATHS=new HashSet<>(Arrays.asList("/api/computer/follow","/api/computer/media/action","/api/computer/action","/api/computer/preset","/api/computer/display/frame","/api/monitor/frame","/api/ping","/api/profile-lock","/api/soundpad/recent/clear","/api/profile","/api/soundpad/favourites","/api/cancel","/api/hold","/api/action","/api/audio","/api/mute","/api/apps","/api/layout","/api/soundpad/play","/api/soundpad/library"));
+    private static final Set<String> UI_ASSETS=new HashSet<>(Arrays.asList("/modes.js","/modes.css","/readiness.css","/editor.js","/editor.css","/macro-editor.js","/macro-editor.css","/pen.js","/pen.css","/tablet-workflows.css","/soundpad-board.js","/media-touchbar.js","/media-touchbar.css","/computer.js","/computer.css","/index.html","/app.js","/features.js","/boards.js","/desktop.js","/studio.js","/monitor.js","/hardening.js","/latency.js","/style.css","/fonts/Manrope.ttf","/vendor/purify.min.js"));
     private WebView web;
     private ChatPane chatPane;
+    private NativePenTools penTools;
     private SharedPreferences preferences;
-    private final ExecutorService network=Executors.newFixedThreadPool(2);
-    private final ExecutorService controls=Executors.newFixedThreadPool(3);
-    private final ExecutorService previews=Executors.newSingleThreadExecutor();
+    private final ExecutorService network=boundedExecutor(2,32);
+    private final ExecutorService controls=boundedExecutor(3,16);
+    private final ExecutorService urgent=boundedExecutor(1,8);
+    private final ExecutorService previews=boundedExecutor(1,2);
+    private final AtomicLong lifecycleGeneration=new AtomicLong();
     private final ConcurrentHashMap<Integer,Boolean> fastPending=new ConcurrentHashMap<>();
     private FastLink fastLink;
     private int pendingScan;
@@ -99,6 +107,7 @@ public final class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(),"DeckNative");
         FrameLayout root=new FrameLayout(this);root.addView(web,new FrameLayout.LayoutParams(-1,-1));setContentView(root);
         chatPane=new ChatPane(this,root,web,event->{if(!closed)web.evaluateJavascript("if(window.monitorChatEvent)window.monitorChatEvent("+event.toString()+");",null);});
+        penTools=new NativePenTools(this,this::deliver);
         web.setOnApplyWindowInsetsListener((view,insets)->{view.setPadding(insets.getSystemWindowInsetLeft(),0,insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
         web.loadUrl("https://"+UI_HOST+"/index.html");
         fastLink=new FastLink(new FastLink.Listener(){
@@ -119,16 +128,26 @@ public final class MainActivity extends Activity {
         });fastLink.start();
     }
     private static WebResourceResponse blocked(){return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));}
+    private static ExecutorService boundedExecutor(int threads,int capacity){return new ThreadPoolExecutor(threads,threads,0L,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<Runnable>(capacity),new ThreadPoolExecutor.AbortPolicy());}
     private JSONObject connection() throws Exception {
         return new JSONObject().put("diagnostics",fastLink==null?new JSONObject():new JSONObject(fastLink.statistics())).put("roundTripMs",fastLink==null?-1:fastLink.roundTripMs()).put("fastConnected",fastLink!=null&&fastLink.connected()).put("paired",!preferences.getString("token","").isEmpty()).put("host",preferences.getString("host","")).put("mode",preferences.getString("mode","wifi")).put("pairingId",preferences.getString("pairingId","")).put("port",preferences.getInt("port",8743)).put("controlPort",preferences.getInt("controlPort",8744));
     }
     public final class Bridge {
         @JavascriptInterface public void dispatch(String message) {
-            if(message==null||message.length()>16384||closed)return;
+            if(message==null||message.length()>((NativePenTools.MAX_PNG_BYTES+2)/3)*4+2048||closed)return;
             final String requestedPath;final JSONObject request;
             try{request=new JSONObject(message);requestedPath=request.getString("path");}catch(Exception ignored){return;}
+            if(message.length()>16384&&!requestedPath.equals("/local/export-image")){failRequest(request,"This request exceeds the tablet control limit.");return;}
+            if(requestedPath.equals("/local/handwriting")||requestedPath.equals("/local/export-image")){
+                if(!request.optString("method","POST").equals("POST")){failRequest(request,"Local pen tools require a POST request.");return;}
+                runOnUiThread(()->{try{if(paused||closed)throw new IllegalStateException("Open the tablet workspace before using pen tools.");penTools.request(request.getInt("id"),requestedPath,request.optJSONObject("body")==null?new JSONObject():request.getJSONObject("body"));}catch(Exception ex){failRequest(request,friendly(ex));}});return;
+            }
             if(requestedPath.equals("/native/chat")){runOnUiThread(()->{try{deliver(request.getInt("id"),chatPane.command(request.getJSONObject("body")));}catch(Exception ex){try{deliver(request.getInt("id"),new JSONObject().put("error",ex.getMessage()));}catch(Exception ignored){}}});return;}
-            (requestedPath.equals("/api/monitor/frame")||requestedPath.equals("/api/computer/display/frame")?previews:request.optString("method","POST").equals("POST")&&(fastPath(requestedPath)||requestedPath.equals("/api/computer/action")||requestedPath.equals("/api/computer/media/action"))?controls:network).execute(()->{
+            final long submittedNanos=System.nanoTime(),submittedGeneration=lifecycleGeneration.get();
+            JSONObject submittedBody=request.optJSONObject("body");
+            boolean safetyRequest=requestedPath.equals("/api/cancel")||requestedPath.equals("/api/hold")&&submittedBody!=null&&submittedBody.optString("operation").equals("release");
+            ExecutorService executor=safetyRequest?urgent:requestedPath.equals("/api/monitor/frame")||requestedPath.equals("/api/computer/display/frame")?previews:ControlRequestPolicy.isInteractiveWrite(requestedPath,request.optString("method","POST"))?controls:network;
+            try{executor.execute(()->{
                 int id=0;JSONObject result;
                 try {
                     id=request.getInt("id");
@@ -137,34 +156,37 @@ public final class MainActivity extends Activity {
                     if(path.equals("/native/connection"))result=connection();
                     else if(path.equals("/native/scan")){startScan(id);return;}
                     else if(path.equals("/native/diagnostics/reset")){fastLink.clearStatistics();result=connection();}
-                    else if(path.equals("/native/forget")){preferences.edit().clear().commit();updateWifiLock();fastLink.reset();result=connection();}
+                    else if(path.equals("/native/forget")){lifecycleGeneration.incrementAndGet();preferences.edit().clear().commit();updateWifiLock();fastLink.reset();result=connection();}
                     else if(path.equals("/native/transport")){
                         String mode=body.getString("mode");if(!mode.equals("usb")&&!mode.equals("wifi"))throw new Exception("Choose Wi-Fi or USB.");
                         String host=body.optString("host",preferences.getString("host","")).trim();
                         if(mode.equals("wifi"))validateHost(host);
-                        preferences.edit().putString("mode",mode).putString("host",host).commit();updateWifiLock();fastLink.clearStatistics();fastLink.reset();result=connection();
+                        lifecycleGeneration.incrementAndGet();preferences.edit().putString("mode",mode).putString("host",host).commit();updateWifiLock();fastLink.clearStatistics();fastLink.reset();result=connection();
                     }
                     else if(path.equals("/native/pair"))result=pair(body);
                     else {
                         if(!(method.equals("GET")&&GET_PATHS.contains(path))&&!(method.equals("POST")&&POST_PATHS.contains(path)))throw new Exception("This request is not allowed from the tablet.");
                         String token=preferences.getString("token","");if(token.isEmpty())throw new Exception("Pair this tablet with your PC first.");
-                        boolean releasingHold=path.equals("/api/hold")&&body.optString("operation").equals("release");
-                        if(paused&&(fastPath(path)||path.equals("/api/computer/action")||path.equals("/api/computer/media/action")||path.equals("/api/computer/preset")||path.equals("/api/computer/display/frame"))&&!releasingHold)throw new Exception("Controls are paused while the tablet app is in the background.");
+                        ControlRequestPolicy.validate(path,method,body.optString("operation"),paused,submittedNanos,System.nanoTime(),lifecycleGeneration.get(),submittedGeneration);
+                        if(paused&&(path.equals("/api/monitor/frame")||path.equals("/api/computer/display/frame")))throw new Exception("Previews are paused while the tablet app is in the background.");
+                        final String operation=body.optString("operation");
+                        Runnable beforeCommit=()->ControlRequestPolicy.validate(path,method,operation,paused,submittedNanos,System.nanoTime(),lifecycleGeneration.get(),submittedGeneration);
                         if(method.equals("POST")&&fastPath(path)&&fastLink!=null&&fastLink.connected()){
                             fastPending.put(id,Boolean.TRUE);
-                            try{if(fastLink.send(request.toString()))return;fastPending.remove(id);}catch(Exception ex){fastPending.remove(id);throw new Exception("Connection lost before confirmation. The action may have run; it was not repeated.",ex);}
+                            try{if(fastLink.send(request.toString(),beforeCommit))return;fastPending.remove(id);}catch(IllegalStateException ex){fastPending.remove(id);throw ex;}catch(Exception ex){fastPending.remove(id);throw new Exception("Connection lost before confirmation. The action may have run; it was not repeated.",ex);}
                         }
                         String host=preferences.getString("mode","wifi").equals("usb")?"127.0.0.1":preferences.getString("host","");
-                        result=send(host,path,method,body,preferences.getString("fingerprint",""),token,null);
+                        result=send(host,path,method,body,preferences.getString("fingerprint",""),token,null,beforeCommit);
                     }
                 }catch(Exception ex){result=new JSONObject();try{result.put("error",friendly(ex));}catch(Exception ignored){}}
                 deliver(id,result);
-            });
+            });}catch(RejectedExecutionException ex){failRequest(request,"Too many pending tablet requests. Wait for the current action, then try again; this request was not queued.");}
         }
     }
+    private void failRequest(JSONObject request,String message){try{deliver(request.getInt("id"),new JSONObject().put("error",message));}catch(Exception ignored){}}
     private static boolean fastPath(String path){return path.equals("/api/ping")||path.equals("/api/cancel")||path.equals("/api/apps")||path.equals("/api/action")||path.equals("/api/audio")||path.equals("/api/mute")||path.equals("/api/hold");}
     private synchronized void startScan(int id) throws Exception {if(pendingScan!=0)throw new Exception("A pairing scan is already open.");pendingScan=id;runOnUiThread(()->{try{startActivityForResult(new Intent(this,QrScanActivity.class),42);}catch(Exception ex){int request=pendingScan;pendingScan=0;try{deliver(request,new JSONObject().put("error","Camera scanner unavailable. Use manual pairing."));}catch(Exception ignored){}}});}
-    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request!=42)return;int id=pendingScan;pendingScan=0;if(id==0)return;try{if(result!=RESULT_OK||data==null)throw new Exception(data==null?"Scan cancelled. You can pair manually.":data.getStringExtra("error")==null?"Scan cancelled.":data.getStringExtra("error"));PairingPayload p=PairingPayload.parse(data.getStringExtra("pairing"));deliver(id,new JSONObject().put("host",p.host).put("mode",p.mode).put("port",p.port).put("controlPort",p.controlPort).put("certificate",p.certificate).put("code",p.code));}catch(Exception ex){try{deliver(id,new JSONObject().put("error",ex.getMessage()));}catch(Exception ignored){}}}
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(penTools!=null&&penTools.activityResult(request,result,data))return;if(request!=42)return;int id=pendingScan;pendingScan=0;if(id==0)return;try{if(result!=RESULT_OK||data==null)throw new Exception(data==null?"Scan cancelled. You can pair manually.":data.getStringExtra("error")==null?"Scan cancelled.":data.getStringExtra("error"));PairingPayload p=PairingPayload.parse(data.getStringExtra("pairing"));deliver(id,new JSONObject().put("host",p.host).put("mode",p.mode).put("port",p.port).put("controlPort",p.controlPort).put("certificate",p.certificate).put("code",p.code));}catch(Exception ex){try{deliver(id,new JSONObject().put("error",ex.getMessage()));}catch(Exception ignored){}}}
     private void deliver(int id,JSONObject result){final String json=result.toString();runOnUiThread(()->{if(!closed)web.evaluateJavascript("window.nativeResult("+id+","+json+");",null);});}
     private JSONObject pair(JSONObject body) throws Exception {
         String host=body.optString("host","").trim(),mode=body.optString("mode","wifi");
@@ -179,7 +201,7 @@ public final class MainActivity extends Activity {
         JSONObject request=new JSONObject().put("code",code).put("name",Build.MANUFACTURER+" "+Build.MODEL);
         JSONObject response=sendTo(mode.equals("usb")?"127.0.0.1":host,"/api/pair","POST",request,certificate,"",actualFingerprint,port);
         if(actualFingerprint[0]==null||!actualFingerprint[0].equals(response.getString("fingerprint")))throw new Exception("The PC certificate changed. Generate a new pairing code.");
-        preferences.edit().putString("pairingId",java.util.UUID.randomUUID().toString()).putInt("port",port).putInt("controlPort",controlPort).putString("host",host).putString("mode",mode).putString("fingerprint",actualFingerprint[0]).putString("token",response.getString("token")).commit();
+        lifecycleGeneration.incrementAndGet();preferences.edit().putString("pairingId",java.util.UUID.randomUUID().toString()).putInt("port",port).putInt("controlPort",controlPort).putString("host",host).putString("mode",mode).putString("fingerprint",actualFingerprint[0]).putString("token",response.getString("token")).commit();
         updateWifiLock();fastLink.clearStatistics();fastLink.reset();return connection();
     }
     private static void validateHost(String host) throws Exception {
@@ -191,10 +213,13 @@ public final class MainActivity extends Activity {
     private static String hash(X509Certificate cert) throws Exception {
         byte[] digest=MessageDigest.getInstance("SHA-256").digest(cert.getEncoded());StringBuilder result=new StringBuilder();for(byte b:digest)result.append(String.format(java.util.Locale.ROOT,"%02X",b));return result.toString();
     }
-    private JSONObject send(String host,String path,String method,JSONObject body,String expected,String token,String[] actual) throws Exception {
-        return sendTo(host,path,method,body,expected,token,actual,preferences.getInt("port",8743));
+    private JSONObject send(String host,String path,String method,JSONObject body,String expected,String token,String[] actual,Runnable beforeCommit) throws Exception {
+        return sendTo(host,path,method,body,expected,token,actual,preferences.getInt("port",8743),beforeCommit);
     }
     private JSONObject sendTo(String host,String path,String method,JSONObject body,String expected,String token,String[] actual,int port) throws Exception {
+        return sendTo(host,path,method,body,expected,token,actual,port,()->{});
+    }
+    private JSONObject sendTo(String host,String path,String method,JSONObject body,String expected,String token,String[] actual,int port,Runnable beforeCommit) throws Exception {
         validateHost(host);
         if(!expected.matches("[A-F0-9]{24}|[A-F0-9]{64}"))throw new Exception("Pair this tablet with your PC first.");
         HttpsURLConnection conn=(HttpsURLConnection)new URL("https://"+host+":"+port+path).openConnection();
@@ -205,7 +230,7 @@ public final class MainActivity extends Activity {
         if(!token.isEmpty())conn.setRequestProperty("Authorization","Bearer "+token);
         boolean complete=false;
         try {
-            if(method.equals("POST")){byte[] requestBytes=body.toString().getBytes(StandardCharsets.UTF_8);conn.setDoOutput(true);conn.setFixedLengthStreamingMode(requestBytes.length);conn.setRequestProperty("Content-Type","application/json");try(java.io.OutputStream out=conn.getOutputStream()){out.write(requestBytes);}}
+            if(method.equals("POST")){byte[] requestBytes=body.toString().getBytes(StandardCharsets.UTF_8);conn.setDoOutput(true);conn.setFixedLengthStreamingMode(requestBytes.length);conn.setRequestProperty("Content-Type","application/json");conn.connect();beforeCommit.run();try(java.io.OutputStream out=conn.getOutputStream()){beforeCommit.run();out.write(requestBytes);}}
             int status=conn.getResponseCode();
             InputStream stream=status>=200&&status<300?conn.getInputStream():conn.getErrorStream();
             if(stream==null)throw new Exception("The PC refused the connection ("+status+").");
@@ -246,7 +271,7 @@ public final class MainActivity extends Activity {
         }catch(RuntimeException ignored){/* Unsupported Wi-Fi hardware keeps the normal transport. */}
     }
     @Override public void onBackPressed(){web.evaluateJavascript("(function(){var d=document.querySelector('#confirm-dialog');if(d.open){d.close('cancel');return true;}if(document.querySelector('#panel').open){document.querySelector('#close-panel').click();return true;}return false;})()",result->{if("false".equals(result))finish();});}
-    @Override protected void onPause(){paused=true;updateWifiLock();if(chatPane!=null)chatPane.pause();if(fastLink!=null)fastLink.pause();if(web!=null){web.evaluateJavascript("if(typeof releaseDeckHold===\'function\')releaseDeckHold();if(window.monitorSuspend)window.monitorSuspend();",null);web.onPause();}super.onPause();}
+    @Override protected void onPause(){paused=true;lifecycleGeneration.incrementAndGet();if(penTools!=null)penTools.pause();updateWifiLock();if(chatPane!=null)chatPane.pause();if(fastLink!=null)fastLink.pause();if(web!=null){web.evaluateJavascript("if(typeof releaseDeckHold===\'function\')releaseDeckHold();if(window.monitorSuspend)window.monitorSuspend();if(window.penSuspend)window.penSuspend();",null);web.onPause();}super.onPause();}
     @Override protected void onResume(){super.onResume();paused=false;updateWifiLock();if(chatPane!=null)chatPane.resume();if(fastLink!=null)fastLink.resume();if(web!=null){web.onResume();web.evaluateJavascript("if(window.monitorResume)window.monitorResume();",null);}}
-    @Override protected void onDestroy(){closed=true;updateWifiLock();if(chatPane!=null)chatPane.hide();if(fastLink!=null)fastLink.close();network.shutdownNow();controls.shutdownNow();previews.shutdownNow();web.removeJavascriptInterface("DeckNative");web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){closed=true;lifecycleGeneration.incrementAndGet();if(penTools!=null)penTools.close();updateWifiLock();if(chatPane!=null)chatPane.hide();if(fastLink!=null)fastLink.close();network.shutdownNow();controls.shutdownNow();urgent.shutdownNow();previews.shutdownNow();web.removeJavascriptInterface("DeckNative");web.destroy();super.onDestroy();}
 }

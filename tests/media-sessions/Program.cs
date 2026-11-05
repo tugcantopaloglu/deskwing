@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Diagnostics;
 using TabletDeck;
 
 if(args.Contains("--probe")){
@@ -67,6 +68,56 @@ using(var partial=new MediaSessions(new FakePlatform{Handles=[validSpotify,broke
 }
 using(var unreadable=new MediaSessions(new FakePlatform{Handles=[brokenPlayer]})){var empty=await unreadable.Snapshot();Check(empty.Sessions.Length==0&&empty.Error is not null&&empty.Warning is null,"complete metadata failure remains an error for the native bridge");}
 using(var noPlayers=new MediaSessions(new FakePlatform())){var empty=await noPlayers.Snapshot();Check(empty.Sessions.Length==0&&empty.Error is null&&empty.Warning is null,"ordinary empty session enumeration has neither an error nor a warning");}
+var brokenIdentity=new FakeSession("unrelated.exe","Broken source"){SourceFailure=true};
+using(var sourceFailure=new MediaSessions(new FakePlatform{Handles=[brokenIdentity,new FakeSession("Spotify.exe","Readable")]})){var readable=await sourceFailure.Snapshot();Check(readable.Sessions.Length==1&&readable.Sessions[0].Title=="Readable"&&readable.Warning is not null,"a failing source getter cannot hide another player's metadata");}
+var hanging=new FakeSession("unrelated.exe","Never ready"){ReadBarrier=new(TaskCreationOptions.RunContinuationsAsynchronously),IgnoreReadCancellation=true};
+var isolatedSpotify=new FakeSession("Spotify.exe","Still usable");var isolatedBrowser=new FakeSession("Chrome","Still visible");
+using(var independent=new MediaSessions(new FakePlatform{Handles=[hanging,isolatedSpotify,isolatedBrowser]},TimeSpan.FromMilliseconds(100),TimeSpan.FromMilliseconds(800))){
+    var started=Stopwatch.StartNew();var usable=await independent.Snapshot();
+    Check(started.Elapsed<TimeSpan.FromMilliseconds(700)&&usable.Sessions.Length==2&&usable.Warning is not null,"a cancellation-ignoring first player cannot consume healthy players' independent read budgets");
+    var healthyIds=usable.Sessions.Select(s=>s.Id).ToArray();await Task.Delay(550);var again=await independent.Snapshot();
+    Check(hanging.ReadCount==1&&again.Sessions.Select(s=>s.Id).SequenceEqual(healthyIds),"refresh reuses an outstanding timed-out provider read and retains healthy session IDs");
+    await independent.Execute(Req(again.Sessions.Single(s=>s.Kind=="spotify")));
+    Check(isolatedSpotify.Calls.Count==1&&isolatedBrowser.Calls.Count==0&&hanging.Calls.Count==0,"a healthy selected player remains actionable despite a non-cooperative peer");
+    hanging.ReadBarrier.SetResult();
+}
+var intermittent=new FakeSession("Spotify.exe","Before interruption");var recoveryPlatform=new FakePlatform{Handles=[intermittent]};
+using(var recovering=new MediaSessions(recoveryPlatform,TimeSpan.FromMilliseconds(100),TimeSpan.FromMilliseconds(800))){
+    var original=(await recovering.Snapshot()).Sessions[0];intermittent.ReadBarrier=new(TaskCreationOptions.RunContinuationsAsynchronously);intermittent.IgnoreReadCancellation=true;
+    await Task.Delay(550);var missing=(await recovering.Snapshot()).Sessions.Single();
+    Check(missing.Id==original.Id&&!missing.Available&&!missing.CanPlay&&!missing.CanPause&&!missing.CanNext&&!missing.CanPrevious&&!missing.CanSeek&&missing.ContextToken!=original.ContextToken,"a temporarily unreadable known player keeps its ID while all controls and its old token are invalidated");
+    await Reject(()=>recovering.Execute(Req(original)),"old controls cannot act on a temporarily unreadable player");
+    intermittent.Data=intermittent.Data with{Title="After interruption",TrackRevision=1};intermittent.ReadBarrier.SetResult();await Task.Delay(30);
+    Check(!(await recovering.Snapshot()).Sessions[0].Available,"late timed-out metadata cannot repopulate the unavailable snapshot cache");
+    intermittent.ReadBarrier=null;await Task.Delay(550);var restored=(await recovering.Snapshot()).Sessions.Single();
+    Check(restored.Id==original.Id&&restored.Available&&restored.Title=="After interruption"&&restored.ContextToken!=original.ContextToken&&restored.ContextToken!=missing.ContextToken,"fresh metadata restores the same session identity with new authority and current title");
+    await Reject(()=>recovering.Execute(Req(original)),"pre-interruption context token stays rejected after recovery");
+    recoveryPlatform.Failure=true;await Task.Delay(550);Check((await recovering.Snapshot()).Error is not null,"temporary enumeration failure exposes an error");
+    recoveryPlatform.Failure=false;await Task.Delay(550);var enumerated=(await recovering.Snapshot()).Sessions.Single();
+    Check(enumerated.Id==original.Id&&enumerated.ContextToken!=restored.ContextToken,"enumeration recovery retains identity but invalidates old playback authority");
+    recoveryPlatform.Handles=[];await Task.Delay(550);await recovering.Snapshot();recoveryPlatform.Handles=[intermittent];await Task.Delay(550);
+    Check((await recovering.Snapshot()).Sessions.Single().Id!=original.Id,"a confirmed disconnection retires its ID even if the source object later returns");
+}
+var sharedPlatform=new FakePlatform{Handles=[new FakeSession("Spotify.exe","Shared read")],Barrier=new(TaskCreationOptions.RunContinuationsAsynchronously)};
+using(var sharedCancellation=new MediaSessions(sharedPlatform)){
+    using var caller=new CancellationTokenSource();var cancelled=sharedCancellation.Snapshot(caller.Token);var survivor=sharedCancellation.Snapshot();caller.Cancel();
+    try{await cancelled;throw new Exception("Cancelled waiter was accepted");}catch(OperationCanceledException){Check(true,"a snapshot caller can cancel its own wait");}
+    sharedPlatform.Barrier.SetResult();Check((await survivor).Sessions.Length==1&&sharedPlatform.Reads==1,"cancelling one waiter does not cancel shared metadata work for another");
+}
+var stalledCommand=new FakeSession("Spotify.exe","Slow command metadata");
+using(var guardedCommands=new MediaSessions(new FakePlatform{Handles=[stalledCommand]},TimeSpan.FromMilliseconds(100),TimeSpan.FromMilliseconds(800))){
+    var selected=(await guardedCommands.Snapshot()).Sessions.Single();stalledCommand.CommandReadBarrier=new(TaskCreationOptions.RunContinuationsAsynchronously);stalledCommand.IgnoreReadCancellation=true;
+    await Reject(()=>guardedCommands.Execute(Req(selected)),"a cancellation-ignoring command metadata read has a bounded caller-facing deadline");
+    selected=(await guardedCommands.Snapshot()).Sessions.Single();await Reject(()=>guardedCommands.Execute(Req(selected)),"refresh cannot start duplicate command metadata reads while the timed-out provider is still running");
+    Check(stalledCommand.CommandReadCount==1&&stalledCommand.Calls.Count==0,"repeated requests do not accumulate abandoned command reads or dispatch stale controls");stalledCommand.CommandReadBarrier.SetResult();
+}
+var disposalPlayer=new FakeSession("Spotify.exe","Before dispose");var disposalMedia=new MediaSessions(new FakePlatform{Handles=[disposalPlayer]});var disposalView=(await disposalMedia.Snapshot()).Sessions.Single();
+disposalPlayer.ReadBarrier=new(TaskCreationOptions.RunContinuationsAsynchronously);disposalPlayer.IgnoreReadCancellation=true;disposalPlayer.ReadEntered=new(TaskCreationOptions.RunContinuationsAsynchronously);
+var pendingControl=disposalMedia.Execute(Req(disposalView));await disposalPlayer.ReadEntered.Task;disposalMedia.Dispose();disposalPlayer.ReadBarrier.SetResult();
+try{await pendingControl;throw new Exception("Disposed control was accepted");}catch(Exception ex) when(ex is OperationCanceledException or ObjectDisposedException){Check(disposalPlayer.Calls.Count==0,"disposing during a metadata read prevents subsequent playback dispatch");}
+try{await disposalMedia.Snapshot();throw new Exception("Disposed snapshot was accepted");}catch(ObjectDisposedException){Check(true,"disposed media service cannot recreate a snapshot");}
+var disposalPlatform=new FakePlatform{Handles=[new FakeSession("Spotify.exe","Late enumeration")],Barrier=new(TaskCreationOptions.RunContinuationsAsynchronously)};var disposedRead=new MediaSessions(disposalPlatform);var pendingSnapshot=disposedRead.Snapshot();await Task.Delay(20);disposedRead.Dispose();disposalPlatform.Barrier.SetResult();
+try{await pendingSnapshot;throw new Exception("Disposed in-flight snapshot was accepted");}catch(ObjectDisposedException){Check(true,"disposing an in-flight snapshot cannot repopulate cleared state");}
 var now=new DateTimeOffset(2026,11,2,12,0,0,TimeSpan.Zero);long T(double seconds)=>TimeSpan.FromSeconds(seconds).Ticks;
 long Estimate(bool playing=true,double? rate=1,DateTimeOffset? updated=null,long? start=null,long? end=null,long? position=null)=>WindowsMediaSession.EstimatePosition(position??T(35),start??T(5),end??T(185),playing,updated??now.AddSeconds(-5),rate,now);
 Check(Estimate()==T(40),"playing progress advances by elapsed UTC time from reported timeline timestamp");
@@ -91,9 +142,9 @@ internal sealed class FakePlatform : IMediaSessionPlatform {
     public void Dispose(){}
 }
 internal sealed class FakeSession : IMediaSessionHandle {
-    public object Identity{get;}=new();public string Source{get;}public MediaSessionData Data;public List<(string,long)> Calls=[];public bool Accepted=true,ReadFailure;public TaskCompletionSource? Barrier;public TaskCompletionSource Entered=new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public FakeSession(string source,string title){Source=source;Data=new(title,"Artist","Album",0,50000000,1850000000,350000000,50000000,1850000000,true,true,true,true,true,true,Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j2V8AAAAASUVORK5CYII="));}
-    public Task<MediaSessionData> Read(bool artwork,CancellationToken ct)=>ReadFailure?Task.FromException<MediaSessionData>(new InvalidOperationException("Fixture metadata failure")):Task.FromResult(Data);
+    public object Identity{get;}=new();private readonly string source;public string Source=>SourceFailure?throw new InvalidOperationException("Fixture source failure"):source;public MediaSessionData Data;public List<(string,long)> Calls=[];public bool Accepted=true,ReadFailure,IgnoreReadCancellation,SourceFailure;public int ReadCount,CommandReadCount;public TaskCompletionSource? Barrier,ReadBarrier,CommandReadBarrier;public TaskCompletionSource Entered=new(TaskCreationOptions.RunContinuationsAsynchronously),ReadEntered=new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public FakeSession(string source,string title){this.source=source;Data=new(title,"Artist","Album",0,50000000,1850000000,350000000,50000000,1850000000,true,true,true,true,true,true,Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j2V8AAAAASUVORK5CYII="));}
+    public async Task<MediaSessionData> Read(bool artwork,CancellationToken ct){Interlocked.Increment(ref ReadCount);if(!artwork)Interlocked.Increment(ref CommandReadCount);ReadEntered.TrySetResult();if(ReadFailure)throw new InvalidOperationException("Fixture metadata failure");var data=Data;var barrier=artwork?ReadBarrier:CommandReadBarrier??ReadBarrier;if(barrier is not null)await barrier.Task.WaitAsync(IgnoreReadCancellation?CancellationToken.None:ct);return data;}
     public async Task<bool> Operate(string operation,long absoluteTicks,CancellationToken ct){Calls.Add((operation,absoluteTicks));Entered.TrySetResult();if(Barrier is not null)await Barrier.Task.WaitAsync(ct);return Accepted;}
 }
 }

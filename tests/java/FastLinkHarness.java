@@ -38,11 +38,19 @@ public final class FastLinkHarness {
             check(link.send("{\"id\":9,\"path\":\"/api/action\",\"body\":{\"id\":\""+action+"\"}}"),"native Java sends a configured action");
             check(result.await(3,TimeUnit.SECONDS),"native Java receives action acknowledgement");
             check(state.await(3,TimeUnit.SECONDS),"native Java receives pushed state");
+            java.lang.reflect.Field gateField=FastLink.class.getDeclaredField("writeGate");gateField.setAccessible(true);
+            AtomicBoolean expired=new AtomicBoolean(false),rejected=new AtomicBoolean(false);CountDownLatch queued=new CountDownLatch(1);
+            Thread delayedSend=new Thread(()->{queued.countDown();try{link.send("{\"id\":99,\"path\":\"/api/action\",\"body\":{\"id\":\""+action+"\"}}",()->{if(expired.get())throw new IllegalStateException("Expired fixture request");});}catch(IllegalStateException expected){rejected.set(true);}catch(Exception ex){throw new RuntimeException(ex);}});
+            synchronized(gateField.get(link)){delayedSend.start();check(queued.await(1,TimeUnit.SECONDS),"delayed-send fixture starts");for(int i=0;i<100&&delayedSend.getState()!=Thread.State.BLOCKED;i++)Thread.sleep(5);check(delayedSend.getState()==Thread.State.BLOCKED,"queued fast send waits for the transport write gate");expired.set(true);}
+            delayedSend.join(1000);check(!delayedSend.isAlive()&&rejected.get(),"fast send rechecks expiry after acquiring the gate and does not write a stale action");
             link.pause();check(!link.connected(),"native pause closes the fast link");
+            for(int i=0;i<100&&!link.statistics().contains("\"disconnects\":1");i++)Thread.sleep(5);
+            check(link.statistics().contains("\"disconnects\":1"),"pause/reset counts the established disconnect exactly once after ready is cleared");
             check(!link.send("{\"id\":10,\"path\":\"/api/ping\",\"body\":{}}"),"native disconnected send is not queued");
             link.resume();check(reconnected.await(4,TimeUnit.SECONDS),"native resume reconnects without replaying controls");
             for(int i=0;i<100&&!link.connected();i++)Thread.sleep(5);
             check(link.send("{\"id\":11,\"path\":\"/api/ping\",\"body\":{}}")&&pong.await(3,TimeUnit.SECONDS),"native reconnected link exchanges new requests");
+            check(link.statistics().contains("\"connects\":2")&&link.statistics().contains("\"disconnects\":1"),"reconnection preserves accurate established-session counters");
         }finally{link.close();}
         AtomicBoolean accepted=new AtomicBoolean(false);
         FastLink wrong=new FastLink(new FastLink.Listener(){public FastLink.Settings settings(){return new FastLink.Settings("127.0.0.1",port,token,new String(new char[64]).replace('\0','0'),context.getSocketFactory());}public boolean packet(String json){accepted.set(true);return true;}public void disconnected(){}});

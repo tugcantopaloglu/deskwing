@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 
 namespace TabletDeck;
 
@@ -11,12 +12,20 @@ public sealed class BoardProfile
 public sealed record FavouriteSound(string Key,string Name);
 public sealed record ProfileSummary(string Id,string Name,int Pages,int Buttons,bool Active);
 public sealed record BackupSummary(string Id,DateTimeOffset Created,string Reason,string ActiveProfile,int Profiles,int Pages,int Buttons,int Favourites);
+public sealed record ProfileBoardSnapshot(string ProfileId,string ProfileName,List<DeckPage> Pages,string BoardRevision);
+public sealed record BoardTransferRequest(string SourceProfileId,string SourceRevision,string TargetProfileId,string TargetRevision,string SourcePageId,string TargetPageId,string[] ButtonIds,string Operation);
 internal sealed record BoardBackup(string Id,DateTimeOffset Created,string Reason,DeckConfig Config);
 
 public sealed partial class DataStore
 {
     private ConfigHistory history=null!;
     public string RecoveryWarning {get;private set;}="";
+    private static string Revision(string id,List<DeckPage> pages)=>Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new{id,pages},Json)));
+    public string BoardRevision {get{lock(gate)return Revision(Config.ProfileId,Config.Pages);}}
+    public (DeckConfig Config,string Revision) ActiveSnapshot(){lock(gate)return (Copy(Config),Revision(Config.ProfileId,Config.Pages));}
+    public ProfileBoardSnapshot ProfileSnapshot(string id){lock(gate){var pages=ProfilePages(Config,id);return new(id,id==Config.ProfileId?Config.ProfileName:Config.Profiles.Single(p=>p.Id==id).Name,Copy(pages),Revision(id,pages));}}
+    private static List<DeckPage> ProfilePages(DeckConfig config,string id)=>id==config.ProfileId?config.Pages:config.Profiles.FirstOrDefault(p=>p.Id==id)?.Pages??throw new ArgumentException("This profile no longer exists. Refresh the profiles.");
+    private static void ExpectRevision(string? expected,string actual){if(expected is not null&&expected!=actual)throw new InvalidOperationException("This board changed since you opened it. Reload the latest board, then review your draft before saving.");}
     public static T Copy<T>(T value)=>JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value,Json),Json)!;
     internal static bool ValidSoundKey(string? key)=>key is {Length:64}&&key.All(Uri.IsHexDigit)&&key==key.ToUpperInvariant();
     private void InitializeConfig()
@@ -52,15 +61,38 @@ public sealed partial class DataStore
             Write("config.json",config);Config=config;
         }
     }
-    public void SaveActive(DeckConfig submitted,bool replacePassword)
+    public void SaveActive(DeckConfig submitted,bool replacePassword,string? expectedRevision=null)
     {
         lock(gate){
             if(submitted is null||submitted.ProfileId is null)throw new ArgumentException("Invalid board settings.");
             if(submitted.ProfileId.Length>0&&submitted.ProfileId!=Config.ProfileId)throw new InvalidOperationException("The profile changed. Reload Edit before saving.");
+            ExpectRevision(expectedRevision,Revision(Config.ProfileId,Config.Pages));
             var next=Copy(submitted);next.ProfileId=Config.ProfileId;next.ProfileName=Config.ProfileName;
             next.Profiles=Copy(Config.Profiles);next.Favourites=Copy(Config.Favourites);
             if(!replacePassword)next.ObsPassword=Config.ObsPassword;
+            // Revision-aware editors own board contents only. The legacy contract remains
+            // available for older local clients; current setup tools have dedicated routes.
+            if(expectedRevision is not null){next.ObsPort=Config.ObsPort;next.ObsPassword=Config.ObsPassword;next.MicInput=Config.MicInput;next.DesktopInput=Config.DesktopInput;next.MixerInputs=Copy(Config.MixerInputs);}
             SaveBoard(next,"Before board edit");
+        }
+    }
+    public object TransferButtons(BoardTransferRequest request)
+    {
+        lock(gate){
+            if(request is null||request.SourceRevision is null||request.TargetRevision is null||request.ButtonIds is null||request.ButtonIds.Length is <1 or >120||request.ButtonIds.Distinct(StringComparer.Ordinal).Count()!=request.ButtonIds.Length||request.Operation is not ("copy" or "move"))throw new ArgumentException("Choose buttons, two current pages, and Copy or Move.");
+            var next=Copy(Config);var sourcePages=ProfilePages(next,request.SourceProfileId);var targetPages=ProfilePages(next,request.TargetProfileId);
+            ExpectRevision(request.SourceRevision,Revision(request.SourceProfileId,sourcePages));ExpectRevision(request.TargetRevision,Revision(request.TargetProfileId,targetPages));
+            var source=sourcePages.FirstOrDefault(p=>p.Id==request.SourcePageId)??throw new ArgumentException("The source page no longer exists.");
+            var target=targetPages.FirstOrDefault(p=>p.Id==request.TargetPageId)??throw new ArgumentException("The destination page no longer exists.");
+            if(source.Id==target.Id)throw new ArgumentException("Choose a different destination page.");
+            if(source.LiveScenes||source.LiveSoundpad||target.LiveScenes||target.LiveSoundpad)throw new ArgumentException("Choose saved-button pages for copying or moving buttons.");
+            var selected=request.ButtonIds.Select(id=>source.Buttons.FirstOrDefault(a=>a.Id==id)??throw new ArgumentException("A selected button changed. Reload the board.")).ToArray();
+            if(target.Buttons.Count+selected.Length>120)throw new ArgumentException("The destination page can contain at most 120 buttons.");
+            void NewIds(DeckAction action){action.Id=Guid.NewGuid().ToString("N");foreach(var step in action.Steps)NewIds(step);}
+            foreach(var action in selected){var duplicate=Copy(action);NewIds(duplicate);target.Buttons.Add(duplicate);}
+            if(request.Operation=="move"){var ids=request.ButtonIds.ToHashSet(StringComparer.Ordinal);source.Buttons.RemoveAll(a=>ids.Contains(a.Id));}
+            SaveBoard(next,request.Operation=="copy"?"Before button copy":"Before button move");
+            return new{ok=true,sourceRevision=Revision(request.SourceProfileId,ProfilePages(Config,request.SourceProfileId)),targetRevision=Revision(request.TargetProfileId,ProfilePages(Config,request.TargetProfileId))};
         }
     }
     public ProfileSummary[] ProfileList(){lock(gate)return new[]{new ProfileSummary(Config.ProfileId,Config.ProfileName,Config.Pages.Count,Config.Pages.Sum(p=>p.Buttons.Count),true)}.Concat(Config.Profiles.Select(p=>new ProfileSummary(p.Id,p.Name,p.Pages.Count,p.Pages.Sum(page=>page.Buttons.Count),false))).ToArray();}
@@ -115,6 +147,10 @@ public sealed partial class DataStore
     public void RestoreBackup(string id)
     {
         lock(gate){var next=Copy(history.Load(id).Config);next.ObsPassword=Config.ObsPassword;SaveBoard(next,"Before backup restore");}
+    }
+    public string RestoreBackupProfile(string backupId,string profileId,string name)
+    {
+        lock(gate){var backup=history.Load(backupId);var pages=ProfilePages(backup.Config,profileId);return ImportProfile(name,Copy(pages));}
     }
 }
 

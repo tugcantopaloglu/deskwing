@@ -1,0 +1,55 @@
+name: DeskWing
+options:
+  bundleIdPrefix: app.deskwing
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    MARKETING_VERSION: "1.14.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  DeskWing:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: www
+        type: folder
+        buildPhase: resources
+      - path: Resources/ios-platform.js
+        buildPhase: resources
+      - path: PrivacyInfo.xcprivacy
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.deskwing.tablet
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+    preBuildScripts:
+      - name: Sync shared tablet assets
+        script: 'python3 "$SRCROOT/sync-assets.py"'
+        basedOnDependencyAnalysis: false
+  DeskWingTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: DeskWing
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  DeskWing:
+    build:
+      targets:
+        DeskWing: all
+        DeskWingTests: [test]
+    test:
+      targets: [DeskWingTests]

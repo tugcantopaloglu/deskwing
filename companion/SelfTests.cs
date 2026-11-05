@@ -49,12 +49,16 @@ public static class SelfTests
         TestReorder();Check(true,"layout reorder preserves actions and rejects duplicate IDs atomically");
         var silentPath=Path.Combine(Path.GetTempPath(),"tabletdeck-silence-"+Guid.NewGuid().ToString("N")+".wav");
         try {
-            using(var stream=File.Create(silentPath)) using(var writer=new BinaryWriter(stream)) {
-                var data=new byte[8820];writer.Write(Encoding.ASCII.GetBytes("RIFF"));writer.Write(36+data.Length);writer.Write(Encoding.ASCII.GetBytes("WAVEfmt "));writer.Write(16);writer.Write((short)1);writer.Write((short)1);writer.Write(44100);writer.Write(88200);writer.Write((short)2);writer.Write((short)16);writer.Write(Encoding.ASCII.GetBytes("data"));writer.Write(data.Length);writer.Write(data);
-            }
-            WindowsActions.PlaySound(silentPath);WindowsActions.StopSounds();Check(true,"Windows WAV playback and stop using a silent test file");
-        } finally {WindowsActions.StopSounds();File.Delete(silentPath);}
+            WriteSilentWave(silentPath);
+            using var reader=new WaveFileReader(silentPath);var samples=new byte[checked((int)reader.Length)];
+            Check(reader.WaveFormat.Encoding==WaveFormatEncoding.Pcm&&reader.WaveFormat.SampleRate==44100&&reader.WaveFormat.Channels==1&&reader.WaveFormat.BitsPerSample==16&&samples.Length==8820&&reader.Read(samples,0,samples.Length)==samples.Length&&samples.All(value=>value==0),"generated WAV format and silent sample data validate without an audio device");
+        } finally {File.Delete(silentPath);}
         Console.WriteLine($"{passed} self-tests passed.");
+    }
+    private static void WriteSilentWave(string path)
+    {
+        using var stream=File.Create(path);using var writer=new BinaryWriter(stream);
+        var data=new byte[8820];writer.Write(Encoding.ASCII.GetBytes("RIFF"));writer.Write(36+data.Length);writer.Write(Encoding.ASCII.GetBytes("WAVEfmt "));writer.Write(16);writer.Write((short)1);writer.Write((short)1);writer.Write(44100);writer.Write(88200);writer.Write((short)2);writer.Write((short)16);writer.Write(Encoding.ASCII.GetBytes("data"));writer.Write(data.Length);writer.Write(data);
     }
     private static async Task<(bool Get,bool Post)> TestLibraryEndpoints()
     {
@@ -116,6 +120,11 @@ public static class SelfTests
     }
     public static async Task AudioSmokeTest()
     {
+        var silentPath=Path.Combine(Path.GetTempPath(),"tabletdeck-audio-smoke-"+Guid.NewGuid().ToString("N")+".wav");
+        try {
+            WriteSilentWave(silentPath);WindowsActions.PlaySound(silentPath);WindowsActions.StopSounds();
+            Console.WriteLine("PASS Windows WAV playback and stop using a silent test file.");
+        }finally{WindowsActions.StopSounds();File.Delete(silentPath);}
         // The only volume modified is a silent stream in this test process.
         using var output=new WasapiOut();output.Init(new SilenceProvider(new WaveFormat(48000,16,2)));output.Play();
         using var mixer=new AppAudioMixer();AppAudioSession? own=null;

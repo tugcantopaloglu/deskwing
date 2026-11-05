@@ -1,0 +1,905 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-05T17:53:02.286Z",
+  "title": "Design System: DeskWing",
+  "extensions": {
+    "sourceTokens": {
+      "authority": "DESIGN.md frontmatter, extracted from the files below; synchronized snapshot for consumers requiring JSON tokens, not a separate design authority.",
+      "colors": {
+        "canvas": "#101318",
+        "surface": "#1c222b",
+        "surface-high": "#252d38",
+        "outline": "#354151",
+        "ink": "#f5f7fa",
+        "secondary": "#b8c3d1",
+        "cyan": "#78dce8",
+        "violet": "#b7a0f9",
+        "amber": "#ffd58a",
+        "red": "#ff8e93",
+        "blue": "#9ac9f5",
+        "green": "#7fe0a1",
+        "primary-ink": "#101e22",
+        "field": "#131922",
+        "danger-surface": "#39242b",
+        "danger-outline": "#67404c",
+        "paper": "#f6f3e9",
+        "pen-graphite": "#1b2530",
+        "pen-blue": "#295a95",
+        "pen-berry": "#8a355b",
+        "pen-green": "#36704f",
+        "pen-ochre": "#a85a16"
+      },
+      "typography": {
+        "body": {
+          "fontFamily": "Manrope, system-ui, sans-serif",
+          "fontSize": "16px",
+          "fontWeight": 400,
+          "letterSpacing": "normal"
+        },
+        "display": {
+          "fontFamily": "Manrope, system-ui, sans-serif",
+          "fontSize": "clamp(22px, 2.6vw, 38px)",
+          "fontWeight": 800,
+          "letterSpacing": "-.035em"
+        },
+        "headline": {
+          "fontFamily": "Manrope, system-ui, sans-serif",
+          "fontSize": "clamp(24px, 2.8vw, 34px)",
+          "fontWeight": 700,
+          "letterSpacing": "-.025em"
+        },
+        "title": {
+          "fontFamily": "Manrope, system-ui, sans-serif",
+          "fontSize": "22px",
+          "fontWeight": 700
+        },
+        "key-label": {
+          "fontFamily": "Manrope, system-ui, sans-serif",
+          "fontSize": "clamp(16px, 1.9vw, 29px)",
+          "fontWeight": 800,
+          "lineHeight": 1.2
+        },
+        "label": {
+          "fontFamily": "Manrope, system-ui, sans-serif",
+          "fontSize": "13px",
+          "fontWeight": 700
+        },
+        "help": {
+          "fontFamily": "Manrope, system-ui, sans-serif",
+          "fontSize": "13px",
+          "fontWeight": 400,
+          "lineHeight": 1.6
+        },
+        "navigation": {
+          "fontFamily": "Manrope, system-ui, sans-serif",
+          "fontSize": "13px",
+          "fontWeight": 700
+        }
+      },
+      "rounded": {
+        "badge": "6px",
+        "navigation": "8px",
+        "field": "10px",
+        "control": "12px",
+        "channel": "14px",
+        "key": "16px",
+        "dialog": "18px"
+      },
+      "spacing": {
+        "tight": "4px",
+        "compact": "8px",
+        "control-gap": "10px",
+        "small": "12px",
+        "medium": "16px",
+        "section": "20px",
+        "large": "24px",
+        "editor-columns": "28px",
+        "content": "32px"
+      },
+      "components": {
+        "button-primary": {
+          "backgroundColor": "{colors.cyan}",
+          "textColor": "{colors.primary-ink}",
+          "rounded": "{rounded.control}",
+          "padding": "10px 18px"
+        },
+        "button-quiet": {
+          "backgroundColor": "{colors.surface}",
+          "textColor": "{colors.ink}",
+          "rounded": "{rounded.control}",
+          "padding": "10px 18px"
+        },
+        "button-quiet-hover": {
+          "backgroundColor": "{colors.surface-high}",
+          "textColor": "{colors.ink}",
+          "rounded": "{rounded.control}"
+        },
+        "button-danger": {
+          "backgroundColor": "{colors.danger-surface}",
+          "textColor": "{colors.red}",
+          "rounded": "{rounded.control}",
+          "padding": "10px 18px"
+        },
+        "input": {
+          "backgroundColor": "{colors.field}",
+          "textColor": "{colors.ink}",
+          "rounded": "{rounded.field}",
+          "padding": "11px 13px"
+        },
+        "navigation-current": {
+          "backgroundColor": "{colors.surface-high}",
+          "textColor": "{colors.cyan}",
+          "typography": "{typography.navigation}",
+          "rounded": "{rounded.navigation}",
+          "padding": "9px 12px"
+        },
+        "studio-key": {
+          "backgroundColor": "{colors.surface}",
+          "textColor": "{colors.blue}",
+          "rounded": "{rounded.key}",
+          "padding": "12px 8px"
+        },
+        "editor-key": {
+          "backgroundColor": "{colors.surface}",
+          "textColor": "{colors.violet}",
+          "rounded": "{rounded.control}",
+          "padding": "23px 9px 13px"
+        },
+        "status-badge": {
+          "backgroundColor": "{colors.surface-high}",
+          "textColor": "{colors.secondary}",
+          "rounded": "{rounded.badge}",
+          "padding": "5px 9px"
+        },
+        "pen-paper": {
+          "backgroundColor": "{colors.paper}",
+          "rounded": "{rounded.control}"
+        }
+      }
+    },
+    "sources": [
+      "companion/wwwroot/style.css",
+      "companion/wwwroot/console.css",
+      "companion/wwwroot/editor.css",
+      "companion/wwwroot/macro-editor.css",
+      "companion/wwwroot/tablet-workflows.css",
+      "companion/wwwroot/readiness.css",
+      "companion/wwwroot/pen.css",
+      "companion/wwwroot/pen.js",
+      "companion/wwwroot/modes.css"
+    ],
+    "colorMeta": {
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Studio canvas",
+        "canonical": "#101318",
+        "source": "companion/wwwroot/style.css :root --canvas",
+        "tonalRamp": [
+          "oklch(15.00% 0.0113 260.65)",
+          "oklch(26.43% 0.0113 260.65)",
+          "oklch(37.86% 0.0113 260.65)",
+          "oklch(49.29% 0.0113 260.65)",
+          "oklch(60.71% 0.0113 260.65)",
+          "oklch(72.14% 0.0113 260.65)",
+          "oklch(83.57% 0.0113 260.65)",
+          "oklch(95.00% 0.0113 260.65)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Slate control",
+        "canonical": "#1c222b",
+        "source": "companion/wwwroot/style.css :root --surface",
+        "tonalRamp": [
+          "oklch(15.00% 0.0193 258.36)",
+          "oklch(26.43% 0.0193 258.36)",
+          "oklch(37.86% 0.0193 258.36)",
+          "oklch(49.29% 0.0193 258.36)",
+          "oklch(60.71% 0.0193 258.36)",
+          "oklch(72.14% 0.0193 258.36)",
+          "oklch(83.57% 0.0193 258.36)",
+          "oklch(95.00% 0.0193 258.36)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "surface-high": {
+        "role": "neutral",
+        "displayName": "Raised slate",
+        "canonical": "#252d38",
+        "source": "companion/wwwroot/style.css :root --surface-high",
+        "tonalRamp": [
+          "oklch(15.00% 0.0230 256.41)",
+          "oklch(26.43% 0.0230 256.41)",
+          "oklch(37.86% 0.0230 256.41)",
+          "oklch(49.29% 0.0230 256.41)",
+          "oklch(60.71% 0.0230 256.41)",
+          "oklch(72.14% 0.0230 256.41)",
+          "oklch(83.57% 0.0230 256.41)",
+          "oklch(95.00% 0.0230 256.41)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "outline": {
+        "role": "neutral",
+        "displayName": "Slate outline",
+        "canonical": "#354151",
+        "source": "companion/wwwroot/style.css :root --outline",
+        "tonalRamp": [
+          "oklch(15.00% 0.0318 255.72)",
+          "oklch(26.43% 0.0318 255.72)",
+          "oklch(37.86% 0.0318 255.72)",
+          "oklch(49.29% 0.0318 255.72)",
+          "oklch(60.71% 0.0318 255.72)",
+          "oklch(72.14% 0.0318 255.72)",
+          "oklch(83.57% 0.0318 255.72)",
+          "oklch(95.00% 0.0318 255.72)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Primary text",
+        "canonical": "#f5f7fa",
+        "source": "companion/wwwroot/style.css :root --ink",
+        "tonalRamp": [
+          "oklch(15.00% 0.0045 258.32)",
+          "oklch(26.43% 0.0045 258.32)",
+          "oklch(37.86% 0.0045 258.32)",
+          "oklch(49.29% 0.0045 258.32)",
+          "oklch(60.71% 0.0045 258.32)",
+          "oklch(72.14% 0.0045 258.32)",
+          "oklch(83.57% 0.0045 258.32)",
+          "oklch(95.00% 0.0045 258.32)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "secondary": {
+        "role": "neutral",
+        "displayName": "Secondary text",
+        "canonical": "#b8c3d1",
+        "source": "companion/wwwroot/style.css :root --secondary",
+        "tonalRamp": [
+          "oklch(15.00% 0.0232 254.42)",
+          "oklch(26.43% 0.0232 254.42)",
+          "oklch(37.86% 0.0232 254.42)",
+          "oklch(49.29% 0.0232 254.42)",
+          "oklch(60.71% 0.0232 254.42)",
+          "oklch(72.14% 0.0232 254.42)",
+          "oklch(83.57% 0.0232 254.42)",
+          "oklch(95.00% 0.0232 254.42)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "cyan": {
+        "role": "primary",
+        "displayName": "Action cyan",
+        "canonical": "#78dce8",
+        "source": "companion/wwwroot/style.css :root --cyan",
+        "tonalRamp": [
+          "oklch(15.00% 0.0952 205.66)",
+          "oklch(26.43% 0.0952 205.66)",
+          "oklch(37.86% 0.0952 205.66)",
+          "oklch(49.29% 0.0952 205.66)",
+          "oklch(60.71% 0.0952 205.66)",
+          "oklch(72.14% 0.0952 205.66)",
+          "oklch(83.57% 0.0952 205.66)",
+          "oklch(95.00% 0.0952 205.66)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "violet": {
+        "role": "secondary",
+        "displayName": "Scene violet",
+        "canonical": "#b7a0f9",
+        "source": "companion/wwwroot/style.css :root --violet",
+        "tonalRamp": [
+          "oklch(15.00% 0.1271 295.08)",
+          "oklch(26.43% 0.1271 295.08)",
+          "oklch(37.86% 0.1271 295.08)",
+          "oklch(49.29% 0.1271 295.08)",
+          "oklch(60.71% 0.1271 295.08)",
+          "oklch(72.14% 0.1271 295.08)",
+          "oklch(83.57% 0.1271 295.08)",
+          "oklch(95.00% 0.1271 295.08)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "amber": {
+        "role": "secondary",
+        "displayName": "Sound amber",
+        "canonical": "#ffd58a",
+        "source": "companion/wwwroot/style.css :root --amber",
+        "tonalRamp": [
+          "oklch(15.00% 0.1044 81.26)",
+          "oklch(26.43% 0.1044 81.26)",
+          "oklch(37.86% 0.1044 81.26)",
+          "oklch(49.29% 0.1044 81.26)",
+          "oklch(60.71% 0.1044 81.26)",
+          "oklch(72.14% 0.1044 81.26)",
+          "oklch(83.57% 0.1044 81.26)",
+          "oklch(95.00% 0.1044 81.26)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "red": {
+        "role": "secondary",
+        "displayName": "Broadcast red",
+        "canonical": "#ff8e93",
+        "source": "companion/wwwroot/style.css :root --red",
+        "tonalRamp": [
+          "oklch(15.00% 0.1366 17.97)",
+          "oklch(26.43% 0.1366 17.97)",
+          "oklch(37.86% 0.1366 17.97)",
+          "oklch(49.29% 0.1366 17.97)",
+          "oklch(60.71% 0.1366 17.97)",
+          "oklch(72.14% 0.1366 17.97)",
+          "oklch(83.57% 0.1366 17.97)",
+          "oklch(95.00% 0.1366 17.97)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "blue": {
+        "role": "secondary",
+        "displayName": "Application blue",
+        "canonical": "#9ac9f5",
+        "source": "companion/wwwroot/style.css :root --blue",
+        "tonalRamp": [
+          "oklch(15.00% 0.0797 247.14)",
+          "oklch(26.43% 0.0797 247.14)",
+          "oklch(37.86% 0.0797 247.14)",
+          "oklch(49.29% 0.0797 247.14)",
+          "oklch(60.71% 0.0797 247.14)",
+          "oklch(72.14% 0.0797 247.14)",
+          "oklch(83.57% 0.0797 247.14)",
+          "oklch(95.00% 0.0797 247.14)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "green": {
+        "role": "secondary",
+        "displayName": "Connected green",
+        "canonical": "#7fe0a1",
+        "source": "companion/wwwroot/style.css :root --green",
+        "tonalRamp": [
+          "oklch(15.00% 0.1287 154.09)",
+          "oklch(26.43% 0.1287 154.09)",
+          "oklch(37.86% 0.1287 154.09)",
+          "oklch(49.29% 0.1287 154.09)",
+          "oklch(60.71% 0.1287 154.09)",
+          "oklch(72.14% 0.1287 154.09)",
+          "oklch(83.57% 0.1287 154.09)",
+          "oklch(95.00% 0.1287 154.09)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "primary-ink": {
+        "role": "neutral",
+        "displayName": "Cyan button text",
+        "canonical": "#101e22",
+        "source": "companion/wwwroot/style.css",
+        "tonalRamp": [
+          "oklch(15.00% 0.0208 217.76)",
+          "oklch(26.43% 0.0208 217.76)",
+          "oklch(37.86% 0.0208 217.76)",
+          "oklch(49.29% 0.0208 217.76)",
+          "oklch(60.71% 0.0208 217.76)",
+          "oklch(72.14% 0.0208 217.76)",
+          "oklch(83.57% 0.0208 217.76)",
+          "oklch(95.00% 0.0208 217.76)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "field": {
+        "role": "neutral",
+        "displayName": "Inset field",
+        "canonical": "#131922",
+        "source": "companion/wwwroot/style.css",
+        "tonalRamp": [
+          "oklch(15.00% 0.0201 258.34)",
+          "oklch(26.43% 0.0201 258.34)",
+          "oklch(37.86% 0.0201 258.34)",
+          "oklch(49.29% 0.0201 258.34)",
+          "oklch(60.71% 0.0201 258.34)",
+          "oklch(72.14% 0.0201 258.34)",
+          "oklch(83.57% 0.0201 258.34)",
+          "oklch(95.00% 0.0201 258.34)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "danger-surface": {
+        "role": "neutral",
+        "displayName": "Destructive control",
+        "canonical": "#39242b",
+        "source": "companion/wwwroot/style.css",
+        "tonalRamp": [
+          "oklch(15.00% 0.0338 357.79)",
+          "oklch(26.43% 0.0338 357.79)",
+          "oklch(37.86% 0.0338 357.79)",
+          "oklch(49.29% 0.0338 357.79)",
+          "oklch(60.71% 0.0338 357.79)",
+          "oklch(72.14% 0.0338 357.79)",
+          "oklch(83.57% 0.0338 357.79)",
+          "oklch(95.00% 0.0338 357.79)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "danger-outline": {
+        "role": "neutral",
+        "displayName": "Destructive outline",
+        "canonical": "#67404c",
+        "source": "companion/wwwroot/style.css",
+        "tonalRamp": [
+          "oklch(15.00% 0.0568 359.88)",
+          "oklch(26.43% 0.0568 359.88)",
+          "oklch(37.86% 0.0568 359.88)",
+          "oklch(49.29% 0.0568 359.88)",
+          "oklch(60.71% 0.0568 359.88)",
+          "oklch(72.14% 0.0568 359.88)",
+          "oklch(83.57% 0.0568 359.88)",
+          "oklch(95.00% 0.0568 359.88)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Scratchpad paper",
+        "canonical": "#f6f3e9",
+        "source": "companion/wwwroot/pen.css .pen-paper",
+        "tonalRamp": [
+          "oklch(15.00% 0.0136 92.98)",
+          "oklch(26.43% 0.0136 92.98)",
+          "oklch(37.86% 0.0136 92.98)",
+          "oklch(49.29% 0.0136 92.98)",
+          "oklch(60.71% 0.0136 92.98)",
+          "oklch(72.14% 0.0136 92.98)",
+          "oklch(83.57% 0.0136 92.98)",
+          "oklch(95.00% 0.0136 92.98)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "pen-graphite": {
+        "role": "drawing",
+        "displayName": "Graphite ink",
+        "canonical": "#1b2530",
+        "source": "companion/wwwroot/pen.js colors",
+        "tonalRamp": [
+          "oklch(15.00% 0.0252 251.20)",
+          "oklch(26.43% 0.0252 251.20)",
+          "oklch(37.86% 0.0252 251.20)",
+          "oklch(49.29% 0.0252 251.20)",
+          "oklch(60.71% 0.0252 251.20)",
+          "oklch(72.14% 0.0252 251.20)",
+          "oklch(83.57% 0.0252 251.20)",
+          "oklch(95.00% 0.0252 251.20)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "pen-blue": {
+        "role": "drawing",
+        "displayName": "Blue ink",
+        "canonical": "#295a95",
+        "source": "companion/wwwroot/pen.js colors",
+        "tonalRamp": [
+          "oklch(15.00% 0.1099 254.66)",
+          "oklch(26.43% 0.1099 254.66)",
+          "oklch(37.86% 0.1099 254.66)",
+          "oklch(49.29% 0.1099 254.66)",
+          "oklch(60.71% 0.1099 254.66)",
+          "oklch(72.14% 0.1099 254.66)",
+          "oklch(83.57% 0.1099 254.66)",
+          "oklch(95.00% 0.1099 254.66)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "pen-berry": {
+        "role": "drawing",
+        "displayName": "Berry ink",
+        "canonical": "#8a355b",
+        "source": "companion/wwwroot/pen.js colors",
+        "tonalRamp": [
+          "oklch(15.00% 0.1229 355.19)",
+          "oklch(26.43% 0.1229 355.19)",
+          "oklch(37.86% 0.1229 355.19)",
+          "oklch(49.29% 0.1229 355.19)",
+          "oklch(60.71% 0.1229 355.19)",
+          "oklch(72.14% 0.1229 355.19)",
+          "oklch(83.57% 0.1229 355.19)",
+          "oklch(95.00% 0.1229 355.19)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "pen-green": {
+        "role": "drawing",
+        "displayName": "Green ink",
+        "canonical": "#36704f",
+        "source": "companion/wwwroot/pen.js colors",
+        "tonalRamp": [
+          "oklch(15.00% 0.0814 156.72)",
+          "oklch(26.43% 0.0814 156.72)",
+          "oklch(37.86% 0.0814 156.72)",
+          "oklch(49.29% 0.0814 156.72)",
+          "oklch(60.71% 0.0814 156.72)",
+          "oklch(72.14% 0.0814 156.72)",
+          "oklch(83.57% 0.0814 156.72)",
+          "oklch(95.00% 0.0814 156.72)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      },
+      "pen-ochre": {
+        "role": "drawing",
+        "displayName": "Ochre ink",
+        "canonical": "#a85a16",
+        "source": "companion/wwwroot/pen.js colors",
+        "tonalRamp": [
+          "oklch(15.00% 0.1265 55.20)",
+          "oklch(26.43% 0.1265 55.20)",
+          "oklch(37.86% 0.1265 55.20)",
+          "oklch(49.29% 0.1265 55.20)",
+          "oklch(60.71% 0.1265 55.20)",
+          "oklch(72.14% 0.1265 55.20)",
+          "oklch(83.57% 0.1265 55.20)",
+          "oklch(95.00% 0.1265 55.20)"
+        ],
+        "tonalRampUsage": "Synthesized metadata for swatch exploration only; not an implemented UI scale."
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default interface text; bundled Manrope variable font, 200–800."
+      },
+      "display": {
+        "displayName": "Tablet header brand",
+        "purpose": "Final .topbar h1 treatment; 24px at 761–1100px; hidden in full-pad mode."
+      },
+      "headline": {
+        "displayName": "Ink workspace heading",
+        "purpose": "Workspace task title."
+      },
+      "title": {
+        "displayName": "Desktop header",
+        "purpose": "22px default; 19px at max-width 1000px; 18px at max-width 620px."
+      },
+      "key-label": {
+        "displayName": "Large tablet key",
+        "purpose": "Density and responsive rules override the large landscape value."
+      },
+      "label": {
+        "displayName": "Field label",
+        "purpose": "Form labels and controls."
+      },
+      "help": {
+        "displayName": "Supporting copy",
+        "purpose": "Instructions and state explanations."
+      },
+      "navigation": {
+        "displayName": "Desktop task navigation",
+        "purpose": "Compact grouped navigation."
+      }
+    },
+    "spacingMeta": {
+      "note": "Observed recurring literal sizes, not existing --spacing-* CSS properties or an enforced scale.",
+      "sources": {
+        "tight": "style.css page/row gaps",
+        "compact": "style.css fields and compact gaps",
+        "control-gap": "style.css buttons and small grid gaps",
+        "small": "style.css quiet/primary button radius-adjacent spacing and row gaps",
+        "medium": "style.css form/key gaps",
+        "section": "console.css sidebar top padding",
+        "large": "console.css content padding; pen.css drawing/notes gap",
+        "editor-columns": "editor.css preview/inspector gap",
+        "content": "console.css overview section padding"
+      }
+    },
+    "shadows": [
+      {
+        "name": "notice",
+        "value": "0 8px 28px #0008",
+        "purpose": "Transient notice only."
+      },
+      {
+        "name": "fader-thumb",
+        "value": "0 3px 6px #0005",
+        "purpose": "Physical fader affordance."
+      },
+      {
+        "name": "floating-handwriting",
+        "value": "0 5px 20px #0005",
+        "purpose": "Android text-field handwriting shortcut."
+      }
+    ],
+    "motion": [
+      {
+        "name": "key-feedback",
+        "value": "background-color .12s ease-out, transform .12s ease-out, border-color .12s ease-out",
+        "purpose": "Operational key feedback."
+      },
+      {
+        "name": "editor-feedback",
+        "value": "background .12s ease-out, outline-color .12s ease-out",
+        "purpose": "Editor hover/selection feedback."
+      },
+      {
+        "name": "pressed-key-scale",
+        "value": "scale(.965)",
+        "purpose": "Operational key press."
+      }
+    ],
+    "accessibility": {
+      "focus": "Base button/link/input/select/textarea: 3px solid var(--cyan), offset 3px; workspace fallback: 2px; canvas: 3px solid #295a95, offset -5px.",
+      "reducedMotion": "Transitions disabled and smooth scrolling removed when prefers-reduced-motion: reduce.",
+      "targets": {
+        "principalTablet": "48px minimum height",
+        "newEditorAndPen": "44px minimum height",
+        "desktopSidebar": "42px default, 44px narrow",
+        "editorSelection": "28px default, 32px narrow",
+        "editorDrag": "30px"
+      },
+      "state": "Use labels and aria-current/aria-pressed alongside color."
+    },
+    "breakpoints": [
+      {
+        "name": "editor-compact",
+        "value": "1100px",
+        "query": "(max-width:1100px)"
+      },
+      {
+        "name": "tablet-compact-and-ink-stack",
+        "value": "1050px",
+        "query": "(max-width:1050px)"
+      },
+      {
+        "name": "desktop-sidebar-compact",
+        "value": "1000px",
+        "query": "(max-width:1000px)"
+      },
+      {
+        "name": "editor-stack-and-tablet-narrow",
+        "value": "760px",
+        "query": "(max-width:760px)"
+      },
+      {
+        "name": "short-landscape",
+        "value": "650px",
+        "query": "(max-height:650px) and (min-width:761px)"
+      },
+      {
+        "name": "desktop-top-navigation",
+        "value": "620px",
+        "query": "(max-width:620px)"
+      },
+      {
+        "name": "pen-narrow",
+        "value": "580px",
+        "query": "(max-width:580px)"
+      }
+    ],
+    "layout": {
+      "desktop": {
+        "sidebar": "216px",
+        "header": "72px",
+        "compactSidebar": "184px"
+      },
+      "editor": {
+        "columns": "minmax(320px,1.3fr) minmax(280px,1fr)",
+        "gap": "28px",
+        "compactColumns": "minmax(240px,1fr) minmax(230px,.9fr)",
+        "compactGap": "18px",
+        "previewDensities": [
+          12,
+          24,
+          40
+        ]
+      },
+      "pen": {
+        "columns": "minmax(0,3fr) minmax(240px,1fr)",
+        "gap": "24px",
+        "paperAspectRatio": "8/5"
+      },
+      "reviewViewports": [
+        {
+          "width": 1280,
+          "height": 720,
+          "surface": "desktop"
+        },
+        {
+          "width": 900,
+          "height": 620,
+          "surface": "desktop"
+        },
+        {
+          "width": 1280,
+          "height": 800,
+          "surface": "tablet"
+        },
+        {
+          "width": 800,
+          "height": 600,
+          "surface": "tablet"
+        },
+        {
+          "width": 390,
+          "surface": "narrow fallback"
+        }
+      ]
+    },
+    "groups": [
+      {
+        "name": "Base studio",
+        "sources": [
+          "style.css"
+        ],
+        "components": [
+          "button-primary",
+          "button-quiet",
+          "button-danger",
+          "input",
+          "studio-key",
+          "status-badge"
+        ]
+      },
+      {
+        "name": "Grouped navigation",
+        "sources": [
+          "console.css",
+          "modes.css"
+        ],
+        "components": [
+          "navigation-current"
+        ]
+      },
+      {
+        "name": "Visual editor and recovery",
+        "sources": [
+          "editor.css",
+          "macro-editor.css",
+          "readiness.css"
+        ],
+        "components": [
+          "editor-key"
+        ]
+      },
+      {
+        "name": "Live controls",
+        "sources": [
+          "tablet-workflows.css"
+        ],
+        "components": [
+          "button-quiet"
+        ]
+      },
+      {
+        "name": "Ink and notes",
+        "sources": [
+          "pen.css",
+          "pen.js"
+        ],
+        "components": [
+          "pen-paper",
+          "button-quiet"
+        ]
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Save or confirm the main task.",
+      "html": "<button class=\"ds-primary\">Save changes</button>",
+      "css": ".ds-primary{font-family:Manrope,system-ui,sans-serif;font-size:16px;font-weight:700;border:1px solid var(--outline,#354151);border-radius:12px;min-height:48px;padding:10px 18px;display:inline-flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;touch-action:manipulation;background:var(--cyan,#78dce8);color:#101e22;border-color:transparent}.ds-primary:hover{background:var(--cyan,#78dce8)}.ds-primary:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-primary:disabled{opacity:.55;cursor:wait}"
+    },
+    {
+      "name": "Quiet button",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Secondary action alongside the working content.",
+      "html": "<button class=\"ds-quiet\">Undo</button>",
+      "css": ".ds-quiet{font-family:Manrope,system-ui,sans-serif;font-size:16px;font-weight:700;border:1px solid var(--outline,#354151);border-radius:12px;min-height:48px;padding:10px 18px;display:inline-flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;touch-action:manipulation;background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-quiet:hover{background:var(--surface-high,#252d38)}.ds-quiet:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-quiet:disabled{opacity:.55;cursor:wait}"
+    },
+    {
+      "name": "Danger button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Explicit destructive or replacement action.",
+      "html": "<button class=\"ds-danger\">Delete page</button>",
+      "css": ".ds-danger{font-family:Manrope,system-ui,sans-serif;font-size:16px;font-weight:700;border:1px solid var(--outline,#354151);border-radius:12px;min-height:48px;padding:10px 18px;display:inline-flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;touch-action:manipulation;background:#39242b;color:var(--red,#ff8e93);border-color:#67404c}.ds-danger:hover{background:#39242b}.ds-danger:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-danger:disabled{opacity:.55;cursor:wait}"
+    },
+    {
+      "name": "Labeled field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A configured value with an ordinary text-entry fallback.",
+      "html": "<label class=\"ds-field\">Page name<input value=\"Stream controls\" maxlength=\"30\"></label>",
+      "css": ".ds-field{font-family:Manrope,system-ui,sans-serif;display:flex;flex-direction:column;gap:8px;font-size:13px;font-weight:700;color:var(--secondary,#b8c3d1);min-width:0}.ds-field input{font-family:Manrope,system-ui,sans-serif;background:#131922;border:1px solid var(--outline,#354151);border-radius:10px;min-height:48px;padding:11px 13px;color:var(--ink,#f5f7fa);font-size:15px;caret-color:var(--cyan,#78dce8)}.ds-field input::placeholder{color:var(--secondary,#b8c3d1);opacity:1}.ds-field input:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}"
+    },
+    {
+      "name": "Grouped desktop navigation",
+      "kind": "nav",
+      "refersTo": "navigation-current",
+      "description": "Task group with one explicit current location.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Create\"><h2>Create</h2><button aria-current=\"page\">Board editor</button><button>Profiles</button><button>Ink &amp; notes</button></nav>",
+      "css": ".ds-nav{font-family:Manrope,system-ui,sans-serif;width:192px;background:var(--surface,#1c222b);padding:12px;color:var(--ink,#f5f7fa)}.ds-nav h2{font-size:12px;font-weight:600;line-height:1.5;color:var(--secondary,#b8c3d1);margin:0 12px 6px}.ds-nav button{font-family:Manrope,system-ui,sans-serif;width:100%;display:flex;align-items:center;justify-content:flex-start;min-height:42px;padding:9px 12px;border:0;border-radius:8px;background:transparent;color:var(--ink,#f5f7fa);font-size:13px;font-weight:700;text-align:left;cursor:pointer}.ds-nav button:hover{background:var(--surface-high,#252d38)}.ds-nav button[aria-current=page]{background:var(--surface-high,#252d38);color:var(--cyan,#78dce8)}.ds-nav button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-nav button:disabled{opacity:.55;cursor:wait}"
+    },
+    {
+      "name": "Status badge",
+      "kind": "chip",
+      "refersTo": "status-badge",
+      "description": "Short supporting status, always expressed in words.",
+      "html": "<span class=\"ds-badge\">Saved</span>",
+      "css": ".ds-badge{font-family:Manrope,system-ui,sans-serif;display:inline-block;padding:5px 9px;border-radius:6px;background:var(--surface-high,#252d38);color:var(--secondary,#b8c3d1);font-size:12px}"
+    },
+    {
+      "name": "Studio key",
+      "kind": "button",
+      "refersTo": "studio-key",
+      "description": "Operational tablet key using the final studio treatment; full-pad density rules override dimensions.",
+      "html": "<button class=\"ds-key\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z\"></path></svg><span>Open app</span></button>",
+      "css": ".ds-key{font-family:Manrope,system-ui,sans-serif;border:1px solid var(--outline,#354151);background:var(--surface,#1c222b);border-radius:16px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;padding:12px 8px;color:var(--blue,#9ac9f5);min-height:78px;min-width:0;cursor:pointer;transition:background-color .12s ease-out,transform .12s ease-out,border-color .12s ease-out}.ds-key svg{width:clamp(32px,5vw,72px);height:clamp(32px,5vw,72px);max-width:60%;max-height:45%;min-height:22px;flex-shrink:1;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}.ds-key span{color:var(--ink,#f5f7fa);font-size:clamp(13px,1.7vw,25px);font-weight:800;line-height:1.2;text-align:center;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;max-height:2.4em;flex-shrink:0}.ds-key:hover{background:var(--surface-high,#252d38)}.ds-key:active{transform:scale(.965);background:#293943}.ds-key:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-key:disabled{opacity:.55;cursor:wait}@media(prefers-reduced-motion:reduce){.ds-key{transition:none}}@media(min-width:1051px) and (min-height:651px){.ds-key span{font-size:clamp(16px,1.9vw,29px)}}@media(max-width:760px){.ds-key{padding:8px 6px;gap:6px}.ds-key svg{width:32px;height:32px}.ds-key span{font-size:13px}}"
+    },
+    {
+      "name": "Selected preview key",
+      "kind": "button",
+      "refersTo": "editor-key",
+      "description": "Editor selection; preview does not execute the action.",
+      "html": "<button class=\"ds-editor-key\" aria-pressed=\"true\" aria-label=\"Edit Scene\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z\"></path></svg><span>Scene</span><small>Selected</small></button>",
+      "css": ".ds-editor-key{font-family:Manrope,system-ui,sans-serif;width:100%;min-height:104px;border:1px solid var(--outline,#354151);border-radius:12px;background:var(--surface,#1c222b);color:var(--violet,#b7a0f9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:23px 9px 13px;overflow-wrap:anywhere;cursor:pointer}.ds-editor-key[aria-pressed=true]{outline:2px solid var(--cyan,#78dce8);outline-offset:1px}.ds-editor-key:hover{background:var(--surface-high,#252d38)}.ds-editor-key svg{width:32px;height:32px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.ds-editor-key>span{font-size:12px;line-height:1.35;font-weight:700;color:var(--ink,#f5f7fa)}.ds-editor-key>small{font-size:9px;color:var(--cyan,#78dce8)}.ds-editor-key:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-editor-key:disabled{opacity:.55;cursor:wait}@media(prefers-reduced-motion:no-preference){.ds-editor-key{transition:background .12s ease-out,outline-color .12s ease-out}}"
+    },
+    {
+      "name": "Pen tools and finger guard",
+      "kind": "custom",
+      "refersTo": "button-quiet",
+      "description": "Visible selected tool and persistent labeled touch preference.",
+      "html": "<div class=\"ds-pen-tools\" role=\"toolbar\" aria-label=\"Drawing tools\"><button aria-pressed=\"true\">Pen</button><button aria-pressed=\"false\">Eraser</button><label><input type=\"checkbox\" checked>Ignore fingers on canvas</label></div>",
+      "css": ".ds-pen-tools{font-family:Manrope,system-ui,sans-serif;display:flex;align-items:center;flex-wrap:wrap;gap:12px 20px;padding:12px 0;border-top:1px solid var(--outline,#354151);border-bottom:1px solid var(--outline,#354151);color:var(--ink,#f5f7fa)}.ds-pen-tools button{font-family:Manrope,system-ui,sans-serif;font-size:16px;font-weight:700;border:1px solid var(--outline,#354151);border-radius:12px;min-height:48px;padding:10px 18px;display:inline-flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;touch-action:manipulation;min-height:44px;padding:9px 14px;background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-pen-tools button:hover{background:var(--surface-high,#252d38)}.ds-pen-tools button[aria-pressed=true]{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent}.ds-pen-tools label{display:flex;gap:9px;align-items:center;font-size:13px;min-height:44px;margin-left:auto}.ds-pen-tools input{width:20px;height:20px;accent-color:var(--cyan,#78dce8);margin:0}.ds-pen-tools button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-pen-tools button:disabled{opacity:.55;cursor:wait}.ds-pen-tools input:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}"
+    },
+    {
+      "name": "Empty scratchpad paper",
+      "kind": "card",
+      "refersTo": "pen-paper",
+      "description": "Paper reserved for user ink; the empty hint is not a sample drawing.",
+      "html": "<section class=\"ds-paper\" aria-label=\"Empty drawing surface\"><div class=\"ds-paper-hint\"><strong>Room for your next idea</strong><span>Draw with your pen. Your strokes save here.</span></div></section>",
+      "css": ".ds-paper{font-family:Manrope,system-ui,sans-serif;position:relative;background:#f6f3e9;border-radius:12px;overflow:hidden;aspect-ratio:8/5;min-width:0}.ds-paper-hint{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:10px;color:#53606a;text-align:center;padding:24px}.ds-paper-hint strong{font-size:clamp(18px,2vw,26px);font-weight:650;color:#35434f}.ds-paper-hint span{font-size:14px}@media(max-width:580px){.ds-paper{border-radius:8px}.ds-paper-hint strong{font-size:17px}.ds-paper-hint span{font-size:12px}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "A working surface beside your PC",
+    "overview": "DeskWing retains the established studio interface: a near-black canvas, slate controls, bundled Manrope, authored line icons, and cyan emphasis. The direction is an extension of the working product. Large, legible controls and stable status positions support touch operation while the PC carries configuration and review.\n\nThe interface expands into four workspaces: Stream Studio, Computer Copilot, Ink & notes, and Second display. Each task gets a useful working area. The board editor shows the board beside its inspector; ink gets a quiet paper canvas; secondary Windows content gets an unobstructed view. Connection and save state remain explicit.",
+    "keyCharacteristics": [
+      "Dark, compact studio surfaces with clear boundaries.",
+      "One bundled type family and a small functional color vocabulary.",
+      "Large tablet controls, visible focus, and labels beside state colors.",
+      "Task-specific working areas with recoverable editing and readable status.",
+      "Paper appears only as the surface for user-created ink."
+    ],
+    "rules": [
+      {
+        "name": "The State Has Words Rule",
+        "body": "Pair connection, warning, selected, and error colors with a label, icon, outline, or explicit pressed/current state. A colored dot alone does not explain a state.",
+        "section": "colors"
+      },
+      {
+        "name": "The Working Area Rule",
+        "body": "Do not add elevation, illustration, or card framing that consumes the board, inspector, drawing, or display area without helping the current task.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do reuse the exact base palette, bundled Manrope, and existing authored icons.",
+      "Do keep task controls near the content they affect.",
+      "Do show explicit saved, selected, disabled, disconnected, and recovery states.",
+      "Do preserve keyboard focus, readable labels, reduced motion, and narrow layouts.",
+      "Do treat drawings, key images, and shared desktop pixels as user content."
+    ],
+    "donts": [
+      "Don't introduce a second visual identity for editor, ink, or recovery screens.",
+      "Don't use color as the only explanation of state.",
+      "Don't make editor preview keys perform live actions.",
+      "Don't hide save failures, draft conflicts, or source availability behind a toast alone.",
+      "Don't decorate the canvas with sample ink that could be mistaken for a saved drawing.",
+      "Don't visually promise full palm rejection, built-in handwriting recognition, or a full-motion second display."
+    ]
+  }
+}

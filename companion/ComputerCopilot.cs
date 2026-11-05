@@ -10,6 +10,7 @@ public sealed record CopilotPreset(string Id,string Label,string[] Applications,
 public sealed record CopilotSettings(bool Enabled,bool Automatic,string ManualPresetId,CopilotPreset[] Presets);
 public sealed record CopilotActionRequest(string PresetId,string ControlId,string ContextToken);
 public sealed record CopilotPresetRequest(string PresetId);
+public sealed record CopilotFollowRequest(bool Automatic);
 public sealed record CopilotForeground(string Application,bool Available,long WindowId=0,int ProcessId=0);
 public sealed record CopilotForegroundInfo(string Application,bool Available);
 public sealed record CopilotCapabilities(bool ContextualControls,bool DisplayCapture,bool ExtendedDisplay,string DisplayNote);
@@ -75,6 +76,14 @@ public sealed class ComputerCopilot
         lock(gate) {
             if(!settings.Presets.Any(p=>p.Id==id))throw new ArgumentException("Choose an existing Computer controls preset.");
             Persist(settings with{ManualPresetId=id,Automatic=false});
+        }
+    }
+    public void Follow(bool automatic)
+    {
+        lock(gate){
+            if(!settings.Enabled)throw new InvalidOperationException("Enable Computer controls in the PC settings first.");
+            var pinned=automatic?settings.ManualPresetId:SnapshotLocked().ActivePresetId;
+            Persist(settings with{Automatic=automatic,ManualPresetId=pinned});
         }
     }
     private CopilotForeground Foreground()

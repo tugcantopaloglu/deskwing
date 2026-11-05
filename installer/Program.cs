@@ -20,7 +20,7 @@ try {
     if(args.Contains("--verify-payload")){Console.WriteLine("PASS embedded payload paths and SHA-256 checksums ("+entries.Count+" files).");return;}
     if(args.Contains("--update-running")){RunningUpdate.Apply(entries,args,testMode,Inside);return;}
     if(!args.Contains("--quiet")) {
-        Console.WriteLine("Tablet Deck Studio installer\nInstall to: "+install+"\nExit the companion from its tray menu before updating. No apps are launched by this installer.\nType INSTALL to continue, or close this window:");
+        Console.WriteLine("DeskWing installer\nInstall to: "+install+"\nExisting Tablet Deck pairing and settings are retained. Exit the companion from its tray menu before updating. No apps are launched by this installer.\nType INSTALL to continue, or close this window:");
         if(Console.ReadLine()!="INSTALL")return;
     }
     var parent=Directory.GetParent(install)?.FullName??throw new IOException("Choose an application folder, not a drive root.");
@@ -69,21 +69,14 @@ static List<ZipArchiveEntry> Verify(ZipArchive archive)
 static InstallManifest ReadManifest(string root)
 {
     var path=Path.Combine(root,".tabletdeck-install.json");
-    if(!File.Exists(path))throw new IOException("This folder is not a managed Tablet Deck installation. Choose an empty, new destination.");
+    if(!File.Exists(path))throw new IOException("This folder is not a managed DeskWing / Tablet Deck installation. Choose an empty, new destination.");
     var saved=JsonSerializer.Deserialize<InstallManifest>(File.ReadAllText(path))??throw new IOException("Invalid install record.");
     if(saved.Id!="TabletDeckStudio"||!Path.GetFullPath(saved.Root).Equals(root,StringComparison.OrdinalIgnoreCase)||saved.Files.Length>2000)throw new IOException("Install record does not match this folder.");
     foreach(var file in saved.Files)Inside(root,file);return saved;
 }
 static void Shortcut(string root,bool create)
 {
-    var type=Type.GetTypeFromProgID("WScript.Shell")??throw new IOException("Windows shortcut support is unavailable.");
-    dynamic shell=Activator.CreateInstance(type)!;
-    var target=Path.Combine(root,"Windows","TabletDeck-Companion.exe");
-    try{foreach(var folder in new[]{Environment.GetFolderPath(Environment.SpecialFolder.Programs),Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)}){
-        var shortcut=Path.Combine(folder,"Tablet Deck Studio.lnk");dynamic link=shell.CreateShortcut(shortcut);
-        try{if(create){if(File.Exists(shortcut)&&!Path.GetFileName((string)link.TargetPath).Equals("TabletDeck-Companion.exe",StringComparison.OrdinalIgnoreCase))throw new IOException("An unrelated shortcut already uses the Tablet Deck name.");link.TargetPath=target;link.WorkingDirectory=Path.GetDirectoryName(target);link.Description="Tablet Deck Studio desktop app";link.IconLocation=Path.Combine(root,"Windows","TabletDeck.ico")+",0";link.WindowStyle=7;link.Save();}
-        else if(File.Exists(shortcut)&&string.Equals((string)link.TargetPath,target,StringComparison.OrdinalIgnoreCase))File.Delete(shortcut);}finally{System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link);}
-    }}finally{System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);}
+    InstalledShortcuts.Update(root,create,new[]{Environment.GetFolderPath(Environment.SpecialFolder.Programs),Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)});
 }
 static void Uninstall(string root,bool noShortcuts)
 {

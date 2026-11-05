@@ -8,7 +8,7 @@ using System.Text.Json.Nodes;
 using System.Diagnostics;
 using System.Globalization;
 
-var flagOptions=new HashSet<string>(StringComparer.Ordinal){"--self-test","--boards-self-test","--studio-self-test","--monitor-self-test","--extended-display-self-test","--live-soundpad-self-test","--update-self-test","--desktop-window-self-test","--audio-smoke-test","--hardening-self-test","--no-browser","--no-tray","--tray","--after-update"};
+var flagOptions=new HashSet<string>(StringComparer.Ordinal){"--self-test","--reliability-self-test","--aux-recovery-self-test","--boards-self-test","--studio-self-test","--monitor-self-test","--extended-display-self-test","--live-soundpad-self-test","--update-self-test","--desktop-window-self-test","--audio-smoke-test","--hardening-self-test","--no-browser","--no-tray","--tray","--after-update"};
 var valueOptions=new HashSet<string>(StringComparer.Ordinal){"--data-dir","--http-port","--https-port","--control-port"};
 for(var i=0;i<args.Length;i++){
     if(flagOptions.Contains(args[i]))continue;
@@ -16,6 +16,8 @@ for(var i=0;i<args.Length;i++){
     Console.Error.WriteLine("Unknown or incomplete command-line option. No companion or control panel was started.");Environment.ExitCode=2;return;
 }
 if(args.Contains("--self-test")) { SelfTests.Run();return; }
+if(args.Contains("--reliability-self-test")) {await ReliabilityTests.Run();return;}
+if(args.Contains("--aux-recovery-self-test")) {AuxRecoveryTests.Run();return;}
 if(args.Contains("--boards-self-test")) {BoardStorageTests.Run();return;}
 if(args.Contains("--studio-self-test")) {await StudioTests.Run();return;}
 if(args.Contains("--monitor-self-test")) {await MonitorTests.Run();return;}
@@ -106,10 +108,11 @@ app.Use(async (ctx,next)=>{
     }
 });
 app.UseDefaultFiles();app.UseStaticFiles();
-app.MapStudio(store,engine,fastCommands,autoProfiles,boardPacks,Principal,()=>pairing.Open(),NetworkAddresses,fingerprint,httpsPort,controlPort);
+app.MapStudio(store,engine,fastCommands,autoProfiles,boardPacks,Principal,()=>pairing.Open(),NetworkAddresses,fingerprint,httpsPort,controlPort,obs);
 app.MapPost("/api/monitor/frame",(PreviewRequest req,CancellationToken ct)=>livePreview.Frame(req,ct));
 app.MapGet("/api/computer",()=>computer.Snapshot());
 app.MapPost("/api/computer/preset",(CopilotPresetRequest req)=>{computer.SelectPreset(req.PresetId);return Results.Ok(new{ok=true});});
+app.MapPost("/api/computer/follow",(CopilotFollowRequest req)=>{computer.Follow(req.Automatic);return Results.Ok(new{ok=true});});
 app.MapPost("/api/computer/action",(CopilotActionRequest req)=>computer.Execute(req));
 app.MapGet("/api/computer/media",async(CancellationToken ct)=>computer.Settings.Enabled?await mediaSessions.Snapshot(ct):new MediaSessionsSnapshot([],"Enable Computer Copilot in the PC settings first."));
 app.MapPost("/api/computer/media/action",async(MediaSessionActionRequest req)=>{
@@ -153,6 +156,8 @@ app.MapPost("/api/admin/profiles",(ManageProfileRequest req)=>{
     fastCommands.ChangeBoard(()=>{switch(req.Operation){case "create":id=store.CreateProfile(req.Name,req.Duplicate);break;case "rename":store.RenameProfile(req.Id,req.Name);break;case "delete":if(!req.Confirmed)throw new ArgumentException("Confirm profile deletion first.");store.DeleteProfile(req.Id);break;default:throw new ArgumentException("Unknown profile operation.");}});
     return Results.Ok(new{ok=true,id});
 });
+app.MapGet("/api/admin/profiles/{id}/config",(string id)=>store.ProfileSnapshot(id));
+app.MapPost("/api/admin/profiles/transfer",(BoardTransferRequest req)=>{object? result=null;fastCommands.ChangeBoard(()=>result=store.TransferButtons(req));return Results.Ok(result);});
 app.MapGet("/api/admin/backups",()=>new{backups=store.Backups(),limit=20});
 app.MapPost("/api/admin/backups",()=>store.BackupNow());
 app.MapPost("/api/admin/backups/preview",(BackupRequest req)=>store.PreviewBackup(req.Id));
@@ -172,19 +177,19 @@ app.MapGet("/api/events",async (HttpContext ctx)=>{
     finally{stateUpdates.Unsubscribe(subscription.Id);}
 });
 app.MapGet("/api/apps",async ()=>new {apps=await appMixer.List()});
-app.MapPost("/api/apps",async (AppAudioRequest req)=>{await appMixer.Set(req.Id,req.Percent,req.Muted);return Results.Ok(new{ok=true});});
+app.MapPost("/api/apps",async (AppAudioRequest req)=>{await fastCommands.SetAppAudio(req);return Results.Ok(new{ok=true});});
 app.MapPost("/api/layout",(LayoutRequest req)=>{store.Reorder(req.Pages);return Results.Ok(new{ok=true});});
 app.MapSoundpadLibrary(SoundpadLibrary.Get);
 app.MapPost("/api/soundpad/play",async (SoundpadPlayRequest req,HttpContext ctx)=>{
-    if(req.Key.Length>0){if(req.Key.Length!=64||!req.Key.All(Uri.IsHexDigit))throw new ArgumentException("Invalid library sound identity.");await engine.Execute(new DeckAction{Kind="soundpadPlay",Target=req.Index.ToString(CultureInfo.InvariantCulture),Value=req.Output,SoundpadKey=req.Key});return Results.Ok(new{ok=true});}
+    if(req.Key.Length>0){if(req.Key.Length!=64||!req.Key.All(Uri.IsHexDigit))throw new ArgumentException("Invalid library sound identity.");await fastCommands.ExecuteConfigured(new DeckAction{Kind="soundpadPlay",Target=req.Index.ToString(CultureInfo.InvariantCulture),Value=req.Output,SoundpadKey=req.Key});return Results.Ok(new{ok=true});}
     var library=await SoundpadLibrary.Get(false,ctx.RequestAborted);
     if(!library.Sounds.Any(s=>s.Index==req.Index))throw new ArgumentException("This sound is no longer in the library. Refresh Soundpad.");
-    await engine.Execute(new DeckAction{Kind="soundpadPlay",Target=req.Index.ToString(CultureInfo.InvariantCulture),Value=req.Output});
+    await fastCommands.ExecuteConfigured(new DeckAction{Kind="soundpadPlay",Target=req.Index.ToString(CultureInfo.InvariantCulture),Value=req.Output});
     return Results.Ok(new{ok=true});
 });
 app.MapPost("/api/action",(ActionRequest req)=>fastCommands.Action(req));
-app.MapPost("/api/audio",async (AudioRequest req)=>{await engine.Volume(req.Channel,req.Db);return Results.Ok(new{ok=true});});
-app.MapPost("/api/mute",async (MuteRequest req)=>{await engine.Mute(req.Channel);return Results.Ok(new{ok=true});});
+app.MapPost("/api/audio",async (AudioRequest req)=>{await fastCommands.SetVolume(req);return Results.Ok(new{ok=true});});
+app.MapPost("/api/mute",async (MuteRequest req)=>{await fastCommands.ToggleMute(req);return Results.Ok(new{ok=true});});
 app.MapPost("/api/pair",(PairRequest req)=>{
     if(!pairing.Accept(req.Code)) return Results.Json(new{error="Pairing code expired or incorrect. Generate a new one on the PC."},statusCode:403);
     var token=Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
@@ -192,10 +197,10 @@ app.MapPost("/api/pair",(PairRequest req)=>{
     store.AddDevice(new(Guid.NewGuid().ToString("N"),name,Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token))),DateTimeOffset.UtcNow));
     return Results.Ok(new{token,fingerprint,name});
 });
-app.MapGet("/api/admin/info",()=>new {httpPort,httpsPort,controlPort,fingerprint,certificateCode=fingerprint[..24],addresses=NetworkAddresses(),lanAddresses=NetworkLanAddresses(),connectedTablets=fastControl.ConnectedDevices,dataDirectory=store.DirectoryPath,devices=store.Devices.Select(d=>new{d.Id,d.Name,d.Added,lastSeen=store.LastSeen(d),fastConnected=fastControl.Connected(d.TokenHash)})});
+app.MapGet("/api/admin/info",()=>new {httpPort,httpsPort,controlPort,fingerprint,certificateCode=fingerprint[..24],addresses=NetworkAddresses(),lanAddresses=NetworkLanAddresses(),connectedTablets=fastControl.ConnectedDevices,dataDirectory=store.DirectoryPath,deviceRecoveryWarning=store.DeviceRecoveryWarning,devices=store.Devices.Select(d=>new{d.Id,d.Name,d.Added,lastSeen=store.LastSeen(d),fastConnected=fastControl.Connected(d.TokenHash)})});
 app.MapPost("/api/admin/pairing",()=>new{code=pairing.Open(),expiresIn=300,certificateCode=fingerprint[..24]});
 app.MapPost("/api/admin/revoke",(RevokeRequest req)=>{var owner=store.Devices.FirstOrDefault(device=>device.Id==req.Id)?.TokenHash;store.Revoke(req.Id);if(owner is not null){holds.ReleaseOwner(owner);fastControl.Revoke(owner);}return Results.Ok(new{ok=true});});
-app.MapGet("/api/admin/desktop",()=>new{settings=desktop.Get(),startWithWindows=DesktopPreferences.StartsWithWindows(),usbStatus=usb.Status,update=updates.Status,installation=selfUpdate.Status,tabletUpdate=usbApkUpdate.Status});
+app.MapGet("/api/admin/desktop",()=>new{settings=desktop.Get(),recoveryWarning=desktop.RecoveryWarning,startWithWindows=DesktopPreferences.StartsWithWindows(),usbStatus=usb.Status,update=updates.Status,installation=selfUpdate.Status,tabletUpdate=usbApkUpdate.Status});
 app.MapPost("/api/admin/desktop",(DesktopRequest req)=>{DesktopPreferences.Validate(req.Settings);if(req.StartWithWindows is not null)DesktopPreferences.SetStartup(req.StartWithWindows.Value);desktop.Save(req.Settings);return Results.Ok(new{ok=true});});
 app.MapPost("/api/admin/updates",async (CancellationToken ct)=>await updates.Check(true,ct));
 app.MapGet("/api/admin/updates/status",()=>selfUpdate.Status);
@@ -210,10 +215,10 @@ app.MapPost("/api/admin/updates/install",(InstallUpdateRequest req,HttpContext c
 });
 app.MapPost("/api/admin/soundpad/remap",async (RemapRequest req,HttpContext ctx)=>{if(req.LinkLegacy&&!req.Confirmed)throw new ArgumentException("Verify existing Soundpad indices before linking old buttons.");return SoundpadBindings.Remap(store,await SoundpadLibrary.Get(true,ctx.RequestAborted),req.LinkLegacy);});
 app.MapGet("/api/admin/config",()=>{
-    var current=store.Config;var result=JsonSerializer.SerializeToNode(current,DataStore.Json)!.AsObject();result.Remove("profiles");result.Remove("favourites");result["obsPassword"]="";result["passwordConfigured"]=current.ObsPassword.Length>0;return result;
+    var snapshot=store.ActiveSnapshot();var current=snapshot.Config;var result=JsonSerializer.SerializeToNode(current,DataStore.Json)!.AsObject();result.Remove("profiles");result.Remove("favourites");result["obsPassword"]="";result["passwordConfigured"]=current.ObsPassword.Length>0;result["boardRevision"]=snapshot.Revision;return result;
 });
 app.MapPost("/api/admin/config",(ConfigRequest req)=>{
-    fastCommands.ChangeBoard(()=>store.SaveActive(req.Config,req.ReplacePassword));return Results.Ok(new{ok=true});
+    string? revision=null;fastCommands.ChangeBoard(()=>{store.SaveActive(req.Config,req.ReplacePassword,req.ExpectedRevision);revision=store.BoardRevision;});return Results.Ok(new{ok=true,boardRevision=revision});
 });
 app.MapPost("/api/admin/soundpad/import",async (SoundpadImportRequest req,HttpContext ctx)=>{
     if(req.Indices.Length is <1 or >120)throw new ArgumentException("Select between 1 and 120 sounds.");
@@ -233,11 +238,13 @@ app.MapPost("/api/admin/obs-settings",(ObsSettingsRequest req)=>{
     }));
     return Results.Ok(new{ok=true});
 });
-app.MapPost("/api/admin/import-scenes",async ()=>{
-    var expectedProfile=store.Config.ProfileId;
+app.MapPost("/api/admin/import-scenes",async (ImportScenesRequest? req)=>{
+    var initial=store.ActiveSnapshot();
+    var expectedProfile=req?.ProfileId??initial.Config.ProfileId;var expectedRevision=req?.ExpectedRevision??initial.Revision;
+    if(initial.Config.ProfileId!=expectedProfile||initial.Revision!=expectedRevision)throw new InvalidOperationException("The board changed. Reload before importing scenes.");
     await obs.Call("GetSceneList");
     fastCommands.ChangeBoard(()=>{
-    if(store.Config.ProfileId!=expectedProfile)throw new InvalidOperationException("The profile changed. Reload before importing scenes.");
+    if(store.Config.ProfileId!=expectedProfile||store.BoardRevision!=expectedRevision)throw new InvalidOperationException("The board changed. Reload before importing scenes.");
     var c=JsonSerializer.Deserialize<DeckConfig>(JsonSerializer.Serialize(store.Config,DataStore.Json),DataStore.Json)!;
     var page=c.Pages.FirstOrDefault(p=>p.Name=="Scenes");if(page==null) {page=new DeckPage{Name="Scenes",Icon="clapper"};c.Pages.Add(page);}
     page.LiveScenes=true;
@@ -272,7 +279,8 @@ record AudioRequest(string Channel,double Db);
 record MuteRequest(string Channel);
 record PairRequest(string Code,string? Name);
 record RevokeRequest(string Id);
-record ConfigRequest(DeckConfig Config,bool ReplacePassword=false);
+record ConfigRequest(DeckConfig Config,bool ReplacePassword=false,string? ExpectedRevision=null);
+record ImportScenesRequest(string? ProfileId=null,string? ExpectedRevision=null);
 record ObsSettingsRequest(int Port,string MicInput,string DesktopInput,string PasswordMode="keep",string Password="");
 record AppAudioRequest(string Id,double? Percent=null,bool? Muted=null);
 record LayoutRequest(PageOrder[] Pages);

@@ -13,7 +13,7 @@ async function run(){
  const pairing=(await admin('/api/admin/pairing',{})).data,token=(await tablet('/api/pair',{code:pairing.code,name:'Execution fixture'})).data.token;
  const config=(await admin('/api/admin/config')).data;
  const delay=(label,ms)=>({label,kind:'delay',target:String(ms)});
- config.pages[0].buttons=[{id:'macro',label:'Private-safe progress',kind:'macro',steps:[delay('First',0),{label:'Nested',kind:'macro',steps:[delay('Waiting',10000),delay('Never',10000)]}]},{id:'next',label:'Next',kind:'delay',target:'0'},{id:'fail',label:'Invalid delay',kind:'delay',target:'invalid'},{id:'confirmed',label:'Protected',kind:'macro',steps:[{kind:'stream',label:'Stream'}]}];
+ config.pages[0].buttons=[{id:'macro',label:'Private-safe progress',kind:'macro',steps:[delay('First',0),{label:'Nested',kind:'macro',steps:[delay('Waiting',10000),delay('Never',10000)]}]},{id:'next',label:'Next',kind:'delay',target:'0'},{id:'fail',label:'Missing fixture sound',kind:'sound',target:path.join(data,'missing-sound.wav')},{id:'confirmed',label:'Protected',kind:'macro',steps:[{kind:'stream',label:'Stream'}]}];
  check((await admin('/api/admin/config',{config})).status===200,'nested macro fixture saves');
  check((await tablet('/api/action',{id:'confirmed'},token)).status===409,'macro broadcast confirmation remains required');
  async function waitForStep(){for(let attempt=0;attempt<100;attempt++){const status=(await tablet('/api/execution',undefined,token)).data;if(status.active?.step===2)return status;await sleep(20);}throw Error('Macro did not reach wait step');}

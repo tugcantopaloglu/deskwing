@@ -1,0 +1,10 @@
+/* Task controls inherit the existing deck palette and retain pen/touch-sized targets. */
+.soundpad-board-views{grid-column:1/-1;display:flex;gap:6px;min-width:0}
+.soundpad-board-views button{min-height:44px;flex:1;padding:8px 14px;font-size:14px;white-space:normal}
+.soundpad-board-views button[aria-pressed=true],.computer-follow-buttons button[aria-pressed=true]{background:var(--surface-high);border-color:var(--cyan);color:var(--cyan)}
+.computer-follow{display:flex;align-items:center;justify-content:space-between;gap:12px 24px;margin:0 0 18px;flex-wrap:wrap}
+.computer-follow-buttons{display:flex;gap:6px;flex-shrink:0}
+.computer-follow-buttons button{min-height:44px;padding:8px 14px;font-size:13px}
+.computer-follow-description{color:var(--secondary);font-size:12px;line-height:1.5;margin:0;max-width:64ch;flex:1;min-width:180px}
+.computer-follow-buttons button:focus-visible,.soundpad-board-views button:focus-visible{outline:3px solid var(--cyan);outline-offset:3px}
+@media(max-width:760px){.soundpad-board-views{gap:5px}.soundpad-board-views button{font-size:13px;padding:8px}.computer-follow{gap:8px;margin-bottom:14px}.computer-follow-buttons{width:100%}.computer-follow-buttons button{flex:1}.computer-follow-description{flex-basis:100%}}

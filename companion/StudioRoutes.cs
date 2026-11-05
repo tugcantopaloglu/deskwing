@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Http.Features;
 namespace TabletDeck;
 internal static class StudioRoutes
 {
-    public static void MapStudio(this WebApplication app,DataStore store,DeckEngine engine,FastCommands commands,AutoProfiles profiles,BoardPacks packs,Func<HttpContext,string> principal,Func<string> pairingCode,Func<string[]> addresses,string fingerprint,int httpsPort,int controlPort){
+    public static void MapStudio(this WebApplication app,DataStore store,DeckEngine engine,FastCommands commands,AutoProfiles profiles,BoardPacks packs,Func<HttpContext,string> principal,Func<string> pairingCode,Func<string[]> addresses,string fingerprint,int httpsPort,int controlPort,ObsClient obs){
         app.MapGet("/api/ping",()=>new{pong=true});
         app.MapPost("/api/ping",()=>new{pong=true});
         app.MapPost("/api/profile-lock",(ProfileLockRequest req,HttpContext ctx)=>{commands.ProfileLock(principal(ctx),req.Active);return Results.Ok(new{ok=true});});
@@ -12,7 +12,14 @@ internal static class StudioRoutes
         app.MapPost("/api/soundpad/recent/clear",()=>{store.ClearRecents();return Results.Ok(new{ok=true});});
         app.MapGet("/api/admin/installed-apps",()=>new{apps=StudioTools.InstalledApps()});
         app.MapPost("/api/admin/pick-file",async (PickRequest req)=>Results.Ok(new{path=await StudioTools.PickFile(req.Kind)}));
-        app.MapPost("/api/admin/action-check",(ActionCheckRequest req)=>StudioTools.CheckTarget(req.Action));
+        app.MapPost("/api/admin/action-check",async (ActionCheckRequest req,HttpContext ctx)=>Results.Ok(await ProfileReadiness.CheckAction(req.Action,store.ActiveSnapshot().Config,(type,data,ct)=>obs.Call(type,data,ct),SoundpadLibrary.CurrentSounds,ctx.RequestAborted)));
+        app.MapGet("/api/admin/readiness",(Func<HttpContext,Task<IResult>>)(async ctx=>Results.Ok(await ProfileReadiness.Check(store.ActiveSnapshot().Config,(type,data,ct)=>obs.Call(type,data,ct),SoundpadLibrary.CurrentSounds,ctx.RequestAborted))));
+        app.MapGet("/api/admin/obs/targets",(Func<HttpContext,Task<IResult>>)(async ctx=>Results.Ok(await ProfileReadiness.Targets((type,data,ct)=>obs.Call(type,data,ct),ctx.Request.Query["scene"].ToString(),ctx.Request.Query["source"].ToString(),ctx.RequestAborted))));
+        app.MapPost("/api/admin/backups/compare",(BackupCompareRequest req)=>store.CompareBackup(req.Id));
+        app.MapPost("/api/admin/backups/restore-profile",(BackupProfileRestoreRequest req)=>{
+            if(!req.Confirmed)throw new ArgumentException("Review and confirm the new profile first.");
+            string? id=null;commands.ChangeBoard(()=>id=store.RestoreBackupProfile(req.Id,req.ProfileId,req.Name));return Results.Ok(new{ok=true,id});
+        });
         app.MapGet("/api/admin/automation",()=>profiles.Snapshot());
         app.MapPost("/api/admin/automation",(AutoProfileSettings req)=>{profiles.Save(req);return Results.Ok(new{ok=true});});
         app.MapPost("/api/admin/mixer",(MixerSettingsRequest req)=>{if(req.Channels is null)throw new ArgumentException("Choose mixer channels.");StudioTools.ValidateMixer(req.Channels);commands.ChangeBoard(()=>store.Modify(c=>c.MixerInputs=req.Channels));return Results.Ok(new{ok=true});});
@@ -35,6 +42,8 @@ internal static class StudioRoutes
 internal sealed record ProfileLockRequest(bool Active);
 internal sealed record PickRequest(string Kind);
 internal sealed record ActionCheckRequest(DeckAction Action);
+internal sealed record BackupCompareRequest(string Id);
+internal sealed record BackupProfileRestoreRequest(string Id,string ProfileId,string Name,bool Confirmed=false);
 internal sealed record MixerSettingsRequest(List<MixerChannel> Channels);
 internal sealed record QrRequest(string Mode,string Host="");
 internal sealed record PackManifestRequest(string ProfileId);

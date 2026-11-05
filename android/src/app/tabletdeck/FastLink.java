@@ -48,7 +48,10 @@ public final class FastLink implements AutoCloseable {
     public double roundTripMs(){return roundTrip;}
     public void pong(){synchronized(statsGate){if(pingAt!=0){roundTrip=(System.nanoTime()-pingAt)/1000000.0;pingAt=0;samples.addLast(roundTrip);while(samples.size()>120)samples.removeFirst();}}}
     public boolean send(String json) throws IOException {
-        synchronized(writeGate){if(!ready)return false;write(json);return true;}
+        return send(json,()->{});
+    }
+    public boolean send(String json,Runnable beforeCommit) throws IOException {
+        synchronized(writeGate){if(!ready)return false;beforeCommit.run();write(json);return true;}
     }
     private void write(String json) throws IOException {
         byte[] bytes=json.getBytes(StandardCharsets.UTF_8);if(bytes.length>16384)throw new IOException("Control request exceeds limit.");
@@ -58,6 +61,7 @@ public final class FastLink implements AutoCloseable {
     private void run(){
         long retry=250;
         while(running){
+            boolean sessionWasReady=false;
             try {
                 if(paused){waitFor(1000);continue;}
                 Settings settings=listener.settings();if(settings==null){waitFor(1000);continue;}
@@ -68,10 +72,10 @@ public final class FastLink implements AutoCloseable {
                 DataInputStream input=new DataInputStream(connection.getInputStream());
                 while(running&&!paused){int length=input.readInt();if(length<2||length>1024*1024)throw new IOException("Control response exceeds limit.");byte[] bytes=new byte[length];input.readFully(bytes);
                     String json=StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();
-                    if(listener.packet(json)){if(!ready){synchronized(statsGate){connects++;}event("connected");}ready=true;retry=250;}
+                    if(listener.packet(json)){synchronized(writeGate){if(running&&!paused&&socket==connection){if(!sessionWasReady){synchronized(statsGate){connects++;}event("connected");}sessionWasReady=true;ready=true;retry=250;}}}
                 }
             }catch(Exception ignored){/* HTTPS remains available; failures never replay controls. */}
-            finally{if(ready){synchronized(statsGate){disconnects++;}event("disconnected");}ready=false;pingAt=0;SSLSocket previous=socket;socket=null;if(previous!=null)try{previous.close();}catch(IOException ignored){}listener.disconnected();}
+            finally{if(sessionWasReady){synchronized(statsGate){disconnects++;}event("disconnected");}synchronized(writeGate){ready=false;output=null;pingAt=0;SSLSocket previous=socket;socket=null;if(previous!=null)try{previous.close();}catch(IOException ignored){}}listener.disconnected();}
             if(running){waitFor(retry);retry=Math.min(5000,retry*2);}
         }
     }

@@ -1,0 +1,31 @@
+.macro-composer{min-width:0;margin-top:12px}
+.macro-timing{margin:0 0 8px;font-weight:650;color:var(--cyan);font-variant-numeric:tabular-nums}
+.macro-help{max-width:68ch;margin-bottom:18px}
+.macro-step{min-width:0;border:0;border-top:1px solid var(--outline);margin:18px 0 0;padding:12px 0 18px}
+.macro-step-title{padding:0 8px 0 0;font-size:13px;font-weight:650;color:var(--secondary);font-variant-numeric:tabular-nums}
+.macro-step-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+.macro-step-head>strong{font-size:15px;overflow-wrap:anywhere}
+.macro-step-controls{display:flex;flex-wrap:wrap;gap:6px}
+.macro-step-controls button{min-height:44px;padding:8px 10px;font-size:12px}
+.macro-step-controls .macro-remove{color:var(--secondary)}
+.macro-step-controls .macro-remove:hover{color:#ffb4b4}
+.macro-drag{cursor:grab;touch-action:auto}
+.macro-drop-target{outline:2px solid var(--cyan);outline-offset:4px}
+.macro-step .macro-step-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.macro-step-fields>label{min-width:0}
+.macro-step-fields input,.macro-step-fields select{min-width:0;width:100%;min-height:44px}
+.macro-step-fields .wide{grid-column:1/-1}
+.macro-step-fields input[aria-invalid=true]{border-color:#ffb4b4}
+.macro-step-fields .macro-field-help{align-self:end;margin:0 0 6px}
+.macro-confirm{margin-top:12px}
+.macro-step-tools{gap:8px;margin-top:12px}
+.macro-step-tools button,.macro-add-actions button{min-height:44px}
+.macro-step-status:empty,.macro-status:empty{display:none}
+.macro-step-status{max-width:68ch;overflow-wrap:anywhere}
+.macro-error{color:#ffb4b4;font-size:14px;line-height:1.5}
+.macro-nested{margin-top:16px;padding-left:16px;border-left:1px solid var(--outline)}
+.macro-nested>summary{cursor:pointer;min-height:44px;display:list-item;align-content:center;color:var(--ink);font-weight:600}
+.macro-add-actions{align-items:center;flex-wrap:wrap}
+.macro-empty{margin:14px 0}
+@media(max-width:1050px){.macro-step .macro-step-fields{grid-template-columns:minmax(0,1fr)}.macro-step-controls button{font-size:12px}.macro-nested{padding-left:10px}}
+@media(prefers-reduced-motion:reduce){.macro-composer *{scroll-behavior:auto}}

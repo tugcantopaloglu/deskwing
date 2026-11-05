@@ -17,7 +17,7 @@ internal sealed class DesktopConsole : Forms.Form
     public DesktopConsole(string url,string directory)
     {
         address=new Uri(url);dataDirectory=directory;
-        Text="Tablet Deck Studio";Icon=AppIcon.Load();BackColor=Color.FromArgb(16,19,24);
+        Text="DeskWing";Icon=AppIcon.Load();BackColor=Color.FromArgb(16,19,24);
         StartPosition=Forms.FormStartPosition.CenterScreen;Size=new Size(1280,860);MinimumSize=new Size(900,620);AutoScaleMode=Forms.AutoScaleMode.Dpi;
         Controls.Add(web);Controls.Add(status);Shown+=async(_,_)=>{if(!initialized){initialized=true;await Initialize();}};
         FormClosing+=(_,e)=>{if(!exiting&&e.CloseReason==Forms.CloseReason.UserClosing){e.Cancel=true;Hide();}};
@@ -42,7 +42,7 @@ internal sealed class DesktopConsole : Forms.Form
                 using var chooser=new Forms.SaveFileDialog{FileName=Path.GetFileName(e.ResultFilePath),OverwritePrompt=true,AddExtension=true,Filter="Board files (*.json;*.deckpack)|*.json;*.deckpack|All files (*.*)|*.*"};
                 if(chooser.ShowDialog(this)!=Forms.DialogResult.OK){e.Cancel=true;return;}e.ResultFilePath=chooser.FileName;
             };
-            core.NavigationCompleted+=(_,e)=>{if(e.IsSuccess){status.Hide();web.Focus();}else ShowFailure("The local console could not load. Close this window and reopen Tablet Deck from its tray icon.",false);};
+            core.NavigationCompleted+=(_,e)=>{if(e.IsSuccess){status.Hide();web.Focus();}else ShowFailure("The local console could not load. Close this window and reopen DeskWing from its tray icon.",false);};
             core.ProcessFailed+=(_,_)=>ShowFailure("The desktop view stopped. Close this window and restart the companion from the tray.",false);
             core.Navigate(address.AbsoluteUri);
         }catch(WebView2RuntimeNotFoundException){ShowFailure("Install Microsoft Edge WebView2 Runtime to open the desktop console. Your tablet connection remains running.",true);}

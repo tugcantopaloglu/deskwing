@@ -34,7 +34,7 @@ async function setComputerMode(value){
   const next=value==='computer'?'computer':'studio',selector=computerNode('app-mode');
   if(next===computerMode){if(selector)selector.value=computerMode;return true;}
   if(!computerNavigationAllowed()){if(selector)selector.value=computerMode;return false;}
-  if(dirty){if(!await confirmAction('Discard changes?','Your unsaved changes will be lost when you change modes.')){if(selector)selector.value=computerMode;return false;}if(!computerNavigationAllowed()){if(selector)selector.value=computerMode;return false;}dirty=false;}
+  if(dirty){if(!await confirmAction('Discard changes?','Your unsaved changes will be lost when you change modes.')){if(selector)selector.value=computerMode;return false;}if(!computerNavigationAllowed()){if(selector)selector.value=computerMode;return false;}if(typeof DeckEditor!=='undefined'&&DeckEditor.isOpen())DeckEditor.discardDraft();dirty=false;}
   editing=false;if(panel.open)panel.close();stopComputerDisplayView();stopComputerJog();if(next==='studio')window.MediaTouchBar?.unmount();
   if(typeof setMonitorOpen==='function'&&typeof monitorOpen!=='undefined'&&monitorOpen)setMonitorOpen(false);
   computerMode=next;computerEpoch++;computerSignature='';document.body.classList.toggle('computer-mode',next==='computer');
@@ -50,7 +50,7 @@ function computerMatchesForeground(preset,snapshot=computerSnapshot){
   const normalize=value=>String(value||'').toLowerCase().replace(/\.exe$/,'');
   return snapshot?.foreground?.available===true&&preset.applications.some(app=>normalize(app)===normalize(snapshot.foreground.application));
 }
-function computerCanRun(control,preset,snapshot=computerSnapshot){return !computerSuspended&&computerReachable&&snapshot?.settings?.enabled===true&&!!snapshot.contextToken&&!!control.shortcut&&(control.global===true||computerMatchesForeground(preset,snapshot));}
+function computerCanRun(control,preset,snapshot=computerSnapshot){return !computerSuspended&&!computerChoosing&&computerReachable&&snapshot?.settings?.enabled===true&&!!snapshot.contextToken&&!!control.shortcut&&(control.global===true||computerMatchesForeground(preset,snapshot));}
 async function refreshComputer(){
   if(computerReadPending||computerSuspended||computerMode!=='computer'||document.hidden||panel.open)return;
   const epoch=computerEpoch;computerReadPending=true;
@@ -59,9 +59,28 @@ async function refreshComputer(){
   finally{computerReadPending=false;}
 }
 async function chooseComputerPreset(id){
-  if(!computerNavigationAllowed()||dirty||panel.open)return;computerChoosing=true;
-  try{await api('/api/computer/preset',{presetId:id});computerSignature='';notice('Layout selected. Automatic following is off until enabled in PC settings.');}
-  catch(error){notice(error.message,true);}finally{computerChoosing=false;await refreshComputer();}
+  if(preview){notice('Connect your tablet to choose its PC control layout.');return;}
+  if(!computerNavigationAllowed()||dirty||panel.open)return;
+  await writeComputerSelection('/api/computer/preset',{presetId:id},'Layout pinned. Choose Follow app to resume automatic switching.');
+}
+async function setComputerFollowing(automatic){
+  if(preview){notice('Connect your tablet to change how layouts follow your PC.');return;}
+  if(typeof automatic!=='boolean'||!computerSnapshot||!computerReachable||!computerNavigationAllowed()||dirty||panel.open||computerMode!=='computer')return;
+  if(computerSnapshot.settings.automatic===automatic)return;
+  await writeComputerSelection('/api/computer/follow',{automatic},automatic?'Layouts now follow supported PC apps.':'Current layout pinned. Choose Follow app to resume automatic switching.');
+}
+async function writeComputerSelection(path,body,message){
+  // Invalidate an older context read so it cannot restore the pre-selection mode.
+  const epoch=++computerEpoch;computerChoosing=true;computerSignature='';renderComputer();let applied=false;
+  try{await api(path,body);applied=true;const snapshot=await api('/api/computer');if(epoch===computerEpoch){computerSnapshot=snapshot;computerReachable=true;notice(message);}}
+  catch(error){if(epoch===computerEpoch){if(applied)computerReachable=false;notice((applied?'Layout saved, but its status could not refresh. ':'')+error.message,true);}}
+  finally{computerChoosing=false;computerSignature='';if(epoch===computerEpoch)renderComputer();}
+}
+function renderComputerFollowing(host,snapshot){
+  const row=computerText('section','computer-follow'),buttons=computerText('div','computer-follow-buttons');buttons.setAttribute('role','group');buttons.setAttribute('aria-label','Layout following');
+  for(const [automatic,label,id] of [[true,'Follow app','follow'],[false,'Pin layout','pin']]){const button=computerText('button','quiet',label);button.type='button';button.id='computer-'+id;button.dataset.computerFocus=id;button.setAttribute('aria-pressed',String(snapshot.settings.automatic===automatic));button.disabled=computerChoosing||computerSuspended||!computerReachable;button.onclick=()=>setComputerFollowing(automatic);buttons.append(button);}
+  const description=computerText('p','computer-follow-description',computerChoosing?'Updating layout selection…':snapshot.settings.automatic?'Following supported PC apps. Browser layouts stay manual.':'This layout stays selected when you change PC apps.');description.id='computer-follow-status';description.setAttribute('role','status');
+  row.append(buttons,description);host.append(row);
 }
 async function runComputerControl(presetId,controlId,button){
   const snapshot=computerSnapshot,preset=computerActivePreset(snapshot),control=preset?.controls.find(item=>item.id===controlId);
@@ -78,7 +97,7 @@ function renderComputer(error=''){
   if(busy)return;
   const snapshot=computerSnapshot,preset=computerActivePreset(),desktop=typeof desktopConsole!=='undefined'&&desktopConsole;
   if(window.MediaTouchBar?.isInteracting(preset?.id))return;
-  const signature=JSON.stringify([snapshot?.settings,snapshot?.activePresetId,snapshot?.foreground,snapshot?.status,snapshot?.capabilities,computerReachable,computerSuspended,desktop,error]);
+  const signature=JSON.stringify([snapshot?.settings,snapshot?.activePresetId,snapshot?.foreground,snapshot?.status,snapshot?.capabilities,computerReachable,computerSuspended,computerChoosing,desktop,error]);
   if(signature===computerSignature)return;computerSignature=signature;
   const focused=document.activeElement?.dataset?.computerFocus;
   const previousRail=host.querySelector('.computer-apps');if(previousRail)computerRailScroll=previousRail.scrollLeft;
@@ -90,6 +109,7 @@ function renderComputer(error=''){
   const status=computerText('p','computer-status',error?'Connection lost. '+error+' Refresh to reconnect.':!snapshot?'Checking your PC…':!snapshot.settings.enabled?'Computer Copilot is off. Enable it in the Windows app’s Copilot settings.':snapshot.status||'Ready');status.id='computer-status';status.setAttribute('role','status');host.append(status);
   if(!snapshot)return;
   if(desktop){renderComputerManagement(host,snapshot);return;}
+  renderComputerFollowing(host,snapshot);
   const rail=computerText('nav','computer-apps');rail.setAttribute('aria-label','App control layouts');
   for(const item of snapshot.settings.presets){const button=computerText('button','computer-app');button.type='button';button.append(computerIcon(item.id),computerText('span','',item.label));button.setAttribute('aria-pressed',String(item.id===preset?.id));button.dataset.computerFocus='preset-'+item.id;button.onclick=()=>chooseComputerPreset(item.id);rail.append(button);}host.append(rail);
   const context=computerText('div','computer-context');context.append(computerIcon(preset?.id),computerText('h3','',preset?.label||'Choose a layout'));const observed=snapshot.foreground?.available?snapshot.foreground.application:'No foreground app detected';context.append(computerText('span','',['spotify','youtube'].includes(preset?.id)?'Controls the selected player':observed+(snapshot.settings.automatic?' · Automatic context':' · Manual layout')));host.append(context);

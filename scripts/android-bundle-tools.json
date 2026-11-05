@@ -1,0 +1,16 @@
+[
+  {
+    "component": "bundletool",
+    "version": "1.18.3",
+    "file": "bundletool-all-1.18.3.jar",
+    "url": "https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar",
+    "sha256": "a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29"
+  },
+  {
+    "component": "aapt2",
+    "version": "9.5.1-16666295",
+    "file": "aapt2-9.5.1-16666295-windows.jar",
+    "url": "https://dl.google.com/dl/android/maven2/com/android/tools/build/aapt2/9.5.1-16666295/aapt2-9.5.1-16666295-windows.jar",
+    "sha256": "0cca28660dd8f8ac75c28023c14e929392e6d094ddac1564945d6ceca8fc6df8"
+  }
+]

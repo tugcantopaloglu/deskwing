@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#101318">
-  <title>Tablet Deck Studio</title>
-  <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="computer.css"><link rel="stylesheet" href="media-touchbar.css">
+  <title>DeskWing</title>
+  <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="computer.css"><link rel="stylesheet" href="media-touchbar.css"><link rel="stylesheet" href="editor.css"><link rel="stylesheet" href="macro-editor.css"><link rel="stylesheet" href="tablet-workflows.css"><link rel="stylesheet" href="readiness.css"><link rel="stylesheet" href="pen.css"><link rel="stylesheet" href="modes.css">
   <script src="vendor/purify.min.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="app.js" defer></script><script src="editor.js" defer></script><script src="macro-editor.js" defer></script>
   <script src="features.js" defer></script><script src="soundpad-board.js" defer></script>
   <script src="boards.js" defer></script>
   <script src="desktop.js" defer></script>
@@ -15,10 +15,10 @@
   <script src="monitor.js" defer></script>
   <script src="hardening.js" defer></script>
   <script src="latency.js" defer></script>
-<script src="media-touchbar.js" defer></script><script src="computer.js" defer></script></head>
+<script src="media-touchbar.js" defer></script><script src="computer.js" defer></script><script src="pen.js" defer></script><script src="modes.js" defer></script></head>
 <body>
   <header class="topbar">
-    <h1>Tablet Deck</h1><select id="app-mode" class="app-mode" aria-label="Tablet mode"><option value="studio">Stream Studio</option><option value="computer">Computer Copilot</option></select>
+    <h1>DeskWing</h1><select id="app-mode" class="app-mode" aria-label="Tablet mode"><option value="studio">Stream Studio</option><option value="computer">Computer Copilot</option><option value="pen">Ink &amp; notes</option><option value="display">Second display</option></select>
     <button id="connection" class="connection" aria-label="Connection settings"><span class="dot" id="obs-dot"></span><span id="obs-status">Connecting</span></button>
     <span id="transport" class="transport">Local control</span>
     <span id="stream-status" class="stream-status"><span class="dot"></span>Stream offline</span>
@@ -32,7 +32,7 @@
     <button id="arrange-cancel" class="quiet" hidden>Cancel</button>
     <button id="edit-button" class="quiet"></button>
   </header>
-  <main id="computer-workspace" hidden></main><main id="workspace" class="workspace">
+  <main id="pen-workspace" hidden></main><main id="computer-workspace" hidden></main><main id="workspace" class="workspace">
     <aside id="live-monitor" class="live-monitor" aria-label="OBS preview and stream chat" hidden>
       <div class="monitor-heading"><h2>Monitor</h2><button id="monitor-settings" class="quiet">Settings</button><button id="monitor-close" class="quiet" aria-label="Close monitor">Close</button></div>
       <section id="monitor-video" class="monitor-video" aria-label="Local OBS video preview">

@@ -1,0 +1,8 @@
+DeskWing.xcodeproj/
+build/
+DerivedData/
+Resources/www/
+www/
+__pycache__/
+*.xcuserstate
+xcuserdata/

@@ -81,6 +81,8 @@ public sealed partial class DataStore
     public string DirectoryPath { get; }
     public DeckConfig Config { get; private set; }=null!;
     public List<PairedDevice> Devices { get; private set; }
+    public string DeviceRecoveryWarning {get;private set;}="";
+    internal const int MaxPairedDevices=100;
     private readonly object gate = new();
     public DataStore(string path)
     {
@@ -94,7 +96,44 @@ public sealed partial class DataStore
         acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         new DirectoryInfo(DirectoryPath).SetAccessControl(acl);
         InitializeConfig();
-        Devices = Read<List<PairedDevice>>("devices.json") ?? [];
+        Devices = LoadDevices();
+    }
+    // Keep auxiliary reads bounded and deny concurrent writers while validating their bytes.
+    internal static T ReadAuxiliaryJson<T>(string path,int maxBytes) where T:class
+    {
+        using var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read);
+        if(input.Length>maxBytes)throw new ArgumentException("The saved settings exceed their size limit.");
+        return JsonSerializer.Deserialize<T>(input,Json)??throw new ArgumentException("The saved settings are empty.");
+    }
+    internal static void QuarantineAuxiliary(string path)
+    {
+        var preserved=Path.Combine(Path.GetDirectoryName(path)!,Path.GetFileNameWithoutExtension(path)+".corrupt-"+Guid.NewGuid().ToString("N")+".json");
+        // If preservation fails, do not replace the user's original file.
+        File.Copy(path,preserved);
+    }
+    private List<PairedDevice> LoadDevices()
+    {
+        var path=Path.Combine(DirectoryPath,"devices.json");
+        if(!File.Exists(path))return [];
+        try {
+            var devices=ReadAuxiliaryJson<List<PairedDevice>>(path,1024*1024);
+            ValidateDevices(devices);return devices;
+        }catch(Exception ex) when(ex is JsonException or ArgumentException) {
+            QuarantineAuxiliary(path);
+            Write("devices.json",new List<PairedDevice>());
+            DeviceRecoveryWarning="Saved tablet pairings were damaged and cleared. The original file was kept privately. Pair each trusted tablet again; previous tablet credentials are no longer accepted.";
+            return [];
+        }
+    }
+    private static void ValidateDevices(IReadOnlyList<PairedDevice> devices)
+    {
+        if(devices.Count>MaxPairedDevices)throw new ArgumentException("Keep at most 100 paired tablets. Revoke an unused tablet before pairing another.");
+        var ids=new HashSet<string>(StringComparer.Ordinal);
+        var hashes=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach(var device in devices) {
+            if(device is null||string.IsNullOrWhiteSpace(device.Id)||device.Id.Length>128||device.Id.Any(char.IsControl)||device.Name is null||device.Name.Length>80||device.Name.Any(char.IsControl)||device.TokenHash is not {Length:64}||!device.TokenHash.All(Uri.IsHexDigit)||device.Added==default||!ids.Add(device.Id)||!hashes.Add(device.TokenHash))
+                throw new ArgumentException("Invalid or duplicate tablet pairing record.");
+        }
     }
     private T? Read<T>(string file) => File.Exists(Path.Combine(DirectoryPath,file)) ? JsonSerializer.Deserialize<T>(File.ReadAllText(Path.Combine(DirectoryPath,file)), Json) : default;
     private void Write<T>(string file,T value)
@@ -135,7 +174,7 @@ public sealed partial class DataStore
             }
         });
     }
-    public void AddDevice(PairedDevice device) { lock(gate) { Devices = [..Devices,device]; Write("devices.json",Devices); } }
+    public void AddDevice(PairedDevice device) { lock(gate) { List<PairedDevice> next=[..Devices,device];ValidateDevices(next);Write("devices.json",next);Devices=next; } }
     private readonly Dictionary<string,DateTimeOffset> lastSeen=new(StringComparer.Ordinal);
     public DateTimeOffset? LastSeen(PairedDevice device){lock(gate)return lastSeen.TryGetValue(device.TokenHash,out var seen)?seen:null;}
     public void Revoke(string id) { lock(gate) {foreach(var device in Devices.Where(d=>d.Id==id))lastSeen.Remove(device.TokenHash); Devices=Devices.Where(x=>x.Id!=id).ToList();Write("devices.json",Devices); } }
@@ -187,6 +226,7 @@ public sealed partial class DataStore
         if(SoundpadClient.Supports(a.Kind)&&!(a.Kind=="soundpadPlay"&&a.Target.Length==0)) SoundpadClient.BuildCommand(a.Kind,a.Target,a.Value);
         if(a.SoundpadKey.Length>0&&(a.SoundpadKey.Length!=64||!a.SoundpadKey.All(Uri.IsHexDigit)))throw new ArgumentException("Invalid Soundpad binding. Reimport the sound from the library.");
         if(a.Kind=="holdHotkey") {if(depth>0||a.Confirm)throw new ArgumentException("Hold shortcuts must be standalone buttons without confirmation.");WindowsActions.ParseHotkey(a.Target);}
+        if(a.Kind=="delay"&&(!int.TryParse(a.Target,System.Globalization.NumberStyles.None,System.Globalization.CultureInfo.InvariantCulture,out var delay)||delay is <0 or >10000))throw new ArgumentException("Delay must be a whole number from 0 to 10000 milliseconds.");
         if(a.Kind=="voicemeeter")VoicemeeterClient.Validate(a.Target,a.Value);
         if(a.Kind=="app" && a.Target.Length>0 && (!Path.IsPathFullyQualified(a.Target)||!new[]{".exe",".lnk"}.Contains(Path.GetExtension(a.Target).ToLowerInvariant()))) throw new ArgumentException("App actions require an absolute .exe or .lnk path.");
         if(a.Kind=="url"&&a.Target.Length>0&&(!Uri.TryCreate(a.Target,UriKind.Absolute,out var u)||u.Scheme is not ("https" or "http"))) throw new ArgumentException("Website actions require http:// or https://.");

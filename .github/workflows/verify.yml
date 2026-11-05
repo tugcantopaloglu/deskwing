@@ -1,0 +1,123 @@
+name: Verify DeskWing
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-simulator:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Check Xcode and prepare the project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcode_major=$(xcodebuild -version | awk '/Xcode/{split($2,parts,"."); print parts[1]}')
+          if [ "$xcode_major" -lt 26 ]; then
+            echo 'Xcode 26 or newer is required for the iOS host.' >&2
+            exit 1
+          fi
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          python3 ios/sync-assets.py
+          cd ios
+          xcodegen generate
+      - name: Select an available iPad simulator
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          inventory = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '--json']))
+          candidates = [device for devices in inventory['devices'].values() for device in devices
+                        if device.get('isAvailable') and device.get('name', '').startswith('iPad')]
+          if not candidates:
+              raise SystemExit('No available iPad simulator was installed on the runner.')
+          chosen = candidates[0]
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as environment:
+              environment.write('DESKWING_SIMULATOR=' + chosen['udid'] + '\n')
+          print('Selected ' + chosen['name'])
+          PY
+      - name: Build and test the unsigned iOS simulator host
+        shell: bash
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          xcodebuild -project DeskWing.xcodeproj -scheme DeskWing \
+            -sdk iphonesimulator -configuration Debug \
+            -destination "platform=iOS Simulator,id=$DESKWING_SIMULATOR" \
+            -derivedDataPath "$RUNNER_TEMP/DeskWingDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/DeskWingTests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO test
+
+  windows-regression:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install locked test dependencies
+        run: npm ci --prefix tests
+      - name: Install test Chromium
+        working-directory: tests
+        run: npx --no-install playwright install chromium
+      - name: Select test Chromium
+        shell: pwsh
+        run: |
+          $browserPath = node -e "process.stdout.write(require('./tests/node_modules/playwright').chromium.executablePath())"
+          if (-not (Test-Path -LiteralPath $browserPath -PathType Leaf)) { throw 'Playwright Chromium was not installed.' }
+          "TABLETDECK_CHROME=$browserPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Ensure WebView2 for native window regressions
+        shell: pwsh
+        run: |
+          $runtimeKeys = @(
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+            'HKCU:\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          )
+          $installed = $runtimeKeys | ForEach-Object { (Get-ItemProperty -LiteralPath $_ -Name pv -ErrorAction SilentlyContinue).pv } | Where-Object { $_ -and $_ -ne '0.0.0.0' }
+          if (-not $installed) {
+            $bootstrapper = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebview2Setup.exe'
+            Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $bootstrapper
+            $signature = Get-AuthenticodeSignature -LiteralPath $bootstrapper
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation(?:,|$)') { throw 'WebView2 bootstrapper did not have a valid Microsoft signature.' }
+            $installer = Start-Process -FilePath $bootstrapper -ArgumentList '/silent','/install' -WindowStyle Hidden -PassThru -Wait
+            if ($installer.ExitCode -ne 0) { throw "WebView2 setup failed: $($installer.ExitCode)" }
+          }
+      - name: Build and run complete isolated regression
+        run: npm test --prefix tests
+      - name: Upload verification summary
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: verification-summary
+          path: .test-output/verification-*/summary.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+          # Do not upload runtime fixtures: they contain test credentials and keys.
