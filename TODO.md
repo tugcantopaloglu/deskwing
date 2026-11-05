@@ -61,6 +61,7 @@ Requested 2026-11-05: implement every inspection finding, improve the design, an
 - [x] Refresh Pen tablet target dimensions after PC resizing and apply exact session geometry before accepting pen input.
 - [x] Reduce pen batching delay and fix the diagnostic canvas's edge alignment and repeated repaint cost.
 - [x] Show the selected PC target live behind Pen tablet input so drawings are visible on the tablet.
+- [x] Prevent transient preview throttling from flashing the image or repeatedly opening fullscreen tools.
 
 Expanded pen evidence: shared ink passed 50 backend and 38 HTTP checks; native Windows receiver confirmed real position, pressure, tilt and clean release; 56 two-client/fullscreen browser checks passed. Independent visual review passed all 16 final captures. Microsoft retired standalone Whiteboard; physical testing uses the local diagnostic canvas unless a supported web/Teams account is available.
 
@@ -68,7 +69,9 @@ Physical pen checkpoint: user confirmed pressure and fullscreen operation after 
 
 Previous checkpoint: commit 0691c1a passed all 57 Windows CI suites and 9 iOS tests. User confirmed the drawing delay was fixed and then requested a live view of PC drawings on the tablet.
 
-Live pen-preview implementation: all ten affected suites passed against a fresh Windows publish, including 42 fake capture checks, 49 frontend checks and 153 rendered checks. Native own-window capture reproduced changed strokes and exact client edges at two sizes. Seven final visual captures passed review; the actual Snyk scan found zero new issues. The signed Android update and matching Windows companion are installed with pairing/data retained. Physical tablet preview and the new hosted CI results remain pending.
+Live pen-preview implementation: all ten affected suites passed against a fresh Windows publish, including 42 fake capture checks, 49 frontend checks and 153 rendered checks. Native own-window capture reproduced changed strokes and exact client edges at two sizes. Seven final visual captures passed review; the actual Snyk scan found zero new issues. Commit a9a85c9 passed all 58 Windows CI suites and 11 iOS tests. The signed Android update and matching Windows companion were installed with pairing/data retained. The user confirmed seeing PC drawings on the tablet, then reported frequent refreshing and fullscreen instability.
+
+Pen-preview correction: reproduced the client/server 84 ms scheduling collision, which cleared the image and reopened tools on brief throttling errors. The correction adds pacing margin, retains only a fresh same-session image for at most 1.5 seconds, and prevents transient errors reopening tools. All 58 controller and 155 rendered checks passed; a fresh actual Snyk scan found no new findings. The signed correction is installed; physical retest is pending.
 
 ## 9. High refresh Second display (added by user)
 - [ ] Replace the four-frame-per-second JPEG view with an actual video capture, transport and playback path targeting at least 60 fps.
