@@ -71,6 +71,7 @@ using var appMixer=new AppAudioMixer();
 using var holds=new HoldKeys();
 var fastCommands=new FastCommands(store,engine,holds,appMixer);
 using var windowsPen=new WindowsPen();fastCommands.ConfigurePen(windowsPen);
+var penPreview=new PenPreview(windowsPen);
 var inkWorkspace=new InkWorkspace(store.DirectoryPath);
 var computer=new ComputerCopilot(store.DirectoryPath,fastCommands.ExecuteConfigured);
 using var mediaSessions=new MediaSessions();
@@ -103,7 +104,7 @@ app.Use(async (ctx,next)=>{
         if(ctx.Request.Headers["Sec-Fetch-Site"]=="cross-site") {ctx.Response.StatusCode=403;return;}
         if(ctx.Request.Path.StartsWithSegments("/api/admin")&&!IsAdmin(ctx)) {ctx.Response.StatusCode=403;return;}
         if(ctx.Request.Path!="/api/pair"&&!IsAuthorized(ctx)) {ctx.Response.StatusCode=401;await ctx.Response.WriteAsJsonAsync(new{error="Pair this tablet with the companion first."});return;}
-        if(ctx.Request.Path=="/api/pen"&&ctx.Request.Method=="POST"){
+        if((ctx.Request.Path=="/api/pen"||ctx.Request.Path=="/api/pen/frame")&&ctx.Request.Method=="POST"){
             if(ctx.Request.ContentLength>FastCommands.PenRequestBytes){ctx.Response.StatusCode=413;await ctx.Response.WriteAsJsonAsync(new{error="Keep pen packets below 16 KB."});return;}
             var size=ctx.Features.Get<IHttpMaxRequestBodySizeFeature>();if(size is not null&&!size.IsReadOnly)size.MaxRequestBodySize=FastCommands.PenRequestBytes;
         }
@@ -122,6 +123,7 @@ app.UseDefaultFiles();app.UseStaticFiles();
 app.MapInk(inkWorkspace);
 app.MapGet("/api/pen",()=>windowsPen.Status);
 app.MapPost("/api/pen",(PenRequest req,HttpContext ctx)=>fastCommands.Pen(req,Principal(ctx)));
+app.MapPost("/api/pen/frame",async(PenPreviewRequest req,HttpContext ctx)=>Results.Ok(await penPreview.Frame(req,Principal(ctx),ctx.RequestAborted)));
 app.MapGet("/api/admin/pen",()=>windowsPen.AdminState());
 app.MapPost("/api/admin/pen",(PenSettings req)=>fastCommands.ConfigurePenSettings(req));
 app.MapStudio(store,engine,fastCommands,autoProfiles,boardPacks,Principal,()=>pairing.Open(),NetworkAddresses,fingerprint,httpsPort,controlPort,obs);

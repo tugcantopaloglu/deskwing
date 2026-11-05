@@ -12,6 +12,8 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
     private var assets: LocalAssetHandler?
     private var pc: PairedPC?
     private var client: PinnedClient?
+    private var penFrameClient: PinnedClient?
+    private var penFrames = PenPreviewRequests()
     private var pairingClient: PinnedClient?
     private var requests = BridgeRequests()
     private var generation = 0
@@ -67,7 +69,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         web.load(URLRequest(url: URL(string: "deskwing://app/index.html")!))
         UIApplication.shared.isIdleTimerDisabled = true
     }
-    deinit { NotificationCenter.default.removeObserver(self); client?.invalidate(); pairingClient?.invalidate(); displayProbe?.cancel(); nativeDisplay?.stop(reason: "Display host closed.") }
+    deinit { NotificationCenter.default.removeObserver(self); client?.invalidate(); pairingClient?.invalidate(); penFrameClient?.invalidate(); displayProbe?.cancel(); nativeDisplay?.stop(reason: "Display host closed.") }
     private func makeClient(_ pc: PairedPC) -> PinnedClient { PinnedClient(host: pc.host, port: pc.port, pin: pc.fingerprint, token: pc.token) }
     private func showFatal(_ message: String) {
         let label = UILabel(); label.text = message; label.numberOfLines = 0; label.textAlignment = .center
@@ -96,7 +98,12 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         }
         guard HostPolicy.allowed(path, method: method) else { fail(id, ticket: ticket, "This request is not allowed from the tablet."); return }
         guard foreground || HostPolicy.allowedInBackground(path, body: body) else { fail(id, ticket: ticket, "Controls are paused while DeskWing is in the background."); return }
+        if path == "/api/pen/frame" { requestPenFrame(id, ticket: ticket, body: body); return }
         guard let client else { fail(id, ticket: ticket, "Pair this tablet with your Windows PC first."); return }
+        if path == "/api/pen" {
+            let operation = body["operation"] as? String ?? ""
+            if operation == "begin" || (["end", "cancel"].contains(operation) && body["lease"] as? String == currentPenLease) { stopPenFrames() }
+        }
         let epoch = generation
         do {
             try client.send(path: path, method: method, body: body) { [weak self] result in
@@ -118,13 +125,44 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
                     }
                     if path == "/api/pen" {
                         if ["end", "cancel"].contains(body["operation"] as? String ?? ""), body["lease"] as? String == self.currentPenLease { self.currentPenLease = nil }
-                        else if body["operation"] as? String == "begin", let lease = response["lease"] as? String { self.currentPenLease = lease }
+                        else if body["operation"] as? String == "begin", let lease = response["lease"] as? String {
+                            self.stopPenFrames(); self.currentPenLease = lease; self.penFrames.activate(lease)
+                        }
                     }
                     self.complete(id, ticket: ticket, response)
                 case .failure(let error): self.fail(id, ticket: ticket, error.localizedDescription)
                 }
             }
         } catch { fail(id, ticket: ticket, error.localizedDescription) }
+    }
+    private func requestPenFrame(_ id: Int, ticket: UUID, body: [String: Any]) {
+        do {
+            let lease = try HostPolicy.penFrameLease(body)
+            guard foreground, presentedViewController == nil, let pc, lease == currentPenLease else { throw DeskError.message("Start pen input before requesting a PC preview.") }
+            let frameTicket = try penFrames.begin(lease)
+            if penFrameClient == nil {
+                penFrameClient = PinnedClient(host: pc.host, port: pc.port, pin: pc.fingerprint, token: pc.token, penPreviewOnly: true)
+            }
+            guard let preview = penFrameClient else { _ = penFrames.finish(frameTicket); throw DeskError.message("The PC preview is unavailable.") }
+            let epoch = generation
+            do {
+                try preview.send(path: "/api/pen/frame", method: "POST", body: body) { [weak self] result in
+                    guard let self else { return }
+                    let current = self.penFrames.finish(frameTicket)
+                    guard current, self.foreground, self.presentedViewController == nil, epoch == self.generation,
+                          self.currentPenLease == lease, self.penFrameClient === preview else {
+                        self.fail(id, ticket: ticket, "The PC preview stopped when the pen session changed."); return
+                    }
+                    switch result {
+                    case .success(let response): self.complete(id, ticket: ticket, response)
+                    case .failure(let error): self.fail(id, ticket: ticket, error.localizedDescription)
+                    }
+                }
+            } catch { _ = penFrames.finish(frameTicket); throw error }
+        } catch { fail(id, ticket: ticket, error.localizedDescription) }
+    }
+    private func stopPenFrames() {
+        penFrames.reset(); penFrameClient?.invalidate(); penFrameClient = nil
     }
     private func local(_ id: Int, ticket: UUID, path: String, body: [String: Any]) {
         if path == "/native/connection" || path == "/native/diagnostics/reset" { complete(id, ticket: ticket, connection()); return }
@@ -209,6 +247,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { old?.invalidate() }
     }
     private func releaseInputLeases() {
+        stopPenFrames()
         let keyboard = currentLease, pen = currentPenLease; currentLease = nil; currentPenLease = nil
         guard let client else { return }
         if let keyboard { try? client.send(path: "/api/hold", method: "POST", body: ["operation":"release", "lease":keyboard]) { _ in } }
@@ -232,6 +271,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         let text = body["text"] as? String ?? ""
         guard text.utf16.count <= 8000 else { throw DeskError.message("Handwriting fields support up to 8,000 characters.") }
         stopNativeDisplay(reason: "Display stopped when handwriting opened.")
+        stopPenFrames()
         setFullscreen(false, reason: "tool")
         let editor = PenInputController(text: text) { [weak self] text, cancelled in self?.complete(id, ticket: ticket, ["text":text,"cancelled":cancelled]) }
         handwriting = editor
@@ -242,6 +282,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         guard presentedViewController == nil else { throw DeskError.message("Finish the open sheet before exporting a drawing.") }
         let data = try PNGExport.decode(body["dataUrl"] as? String ?? "")
         stopNativeDisplay(reason: "Display stopped when export opened.")
+        stopPenFrames()
         setFullscreen(false, reason: "tool")
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("DeskWing-export-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -265,6 +306,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         let address = providerName == "twitch" ? "https://www.twitch.tv/popout/\(channel)/chat?popout=" : "https://kick.com/popout/\(channel)/chat"
         guard let url = URL(string: address) else { throw DeskError.message("Invalid provider address.") }
         stopNativeDisplay(reason: "Display stopped when chat opened.")
+        stopPenFrames()
         setFullscreen(false, reason: "tool")
         let sheet = SFSafariViewController(url: url); provider = sheet; present(sheet, animated: true)
         complete(id, ticket: ticket, ["ok":true])
@@ -376,15 +418,17 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         }
     }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        stopNativeDisplay(reason: "Display stopped when the page changed.")
-        setFullscreen(false, reason: "navigation")
+        resetWebSession(reason: "navigation")
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        stopNativeDisplay(reason: "Display stopped when the page restarted.")
-        setFullscreen(false, reason: "renderer")
+        resetWebSession(reason: "renderer")
+        webView.reload()
+    }
+    private func resetWebSession(reason: String) {
+        stopNativeDisplay(reason: "Display stopped when the page changed.")
+        setFullscreen(false, reason: reason)
         generation += 1; requests.reset(); handwriting?.cancel(); provider?.dismiss(animated: false)
         pairingClient?.invalidate(); pairingClient = nil
         releaseInputLeases(); client?.cancelPending(keepingReleases: true)
-        webView.reload()
     }
 }

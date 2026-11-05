@@ -5,7 +5,7 @@ public final class ControlRequestPolicyHarness {
     private static final long NOW = 10_000_000_000L;
     private static final String[] CONTROLS = {
         "/api/action", "/api/audio", "/api/mute", "/api/apps", "/api/hold",
-        "/api/soundpad/play", "/api/pen", "/api/computer/action", "/api/computer/media/action",
+        "/api/soundpad/play", "/api/pen", "/api/pen/frame", "/api/computer/action", "/api/computer/media/action",
         "/api/computer/preset", "/api/computer/follow", "/api/layout", "/api/profile",
         "/api/soundpad/favourites", "/api/soundpad/recent/clear"
     };
@@ -65,6 +65,22 @@ public final class ControlRequestPolicyHarness {
         }
         validate("/api/pen", "POST", "samples", false, NOW, NOW, 7, 7);
         check(true, "fresh foreground pen samples remain allowed");
+
+        // A preview can contain an operation-shaped field, but it never releases a lease.
+        // The exact /api/pen safety exemptions must not leak to /api/pen/frame.
+        for (String operation : new String[]{"", "begin", "samples", "renew", "end", "cancel", "release", "END", "Cancel"}) {
+            validate("/api/pen/frame", "POST", operation, false, NOW, NOW, 7, 7);
+            check(true, "fresh foreground pen frame allowed with operation " + operation);
+            reject("/api/pen/frame", operation, true, NOW, NOW, 7, 7,
+                "pen frame operation " + operation + " cannot bypass background restriction");
+            reject("/api/pen/frame", operation, false, NOW, NOW, 8, 7,
+                "pen frame operation " + operation + " cannot bypass generation restriction");
+            reject("/api/pen/frame", operation, false, NOW, NOW + ControlRequestPolicy.MAX_QUEUE_AGE_NANOS + 1, 7, 7,
+                "pen frame operation " + operation + " cannot bypass expiry restriction");
+        }
+        validate("/api/pen/frame", "POST", "", false, NOW, NOW + ControlRequestPolicy.MAX_QUEUE_AGE_NANOS, 7, 7);
+        check(true, "pen preview accepts exact two-second queue deadline");
+        reject("/api/pen/frame", "", false, NOW + 1, NOW, 7, 7, "pen preview rejects a future timestamp");
 
         for (String path : new String[]{"/api/ping", "/api/soundpad/library", "/api/monitor/frame", "/api/computer/display/frame", "/api/ink"}) {
             validate(path, "POST", "", true, 0, NOW, 8, 7);

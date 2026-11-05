@@ -22,6 +22,12 @@ public final class PenLeaseTracker<T> {
     }
 
     public synchronized void ended(String value){if(active!=null&&active.value.equals(value))active=null;}
+    /** A completed capture may only enter the UI while its original pen session is current. */
+    public synchronized boolean canDeliverPreview(String value,long submittedGeneration,long currentGeneration,
+                                                   long submittedPenGeneration,long currentPenGeneration,boolean foreground){
+        return foreground&&submittedGeneration==currentGeneration&&submittedPenGeneration==currentPenGeneration
+            &&active!=null&&active.value.equals(value);
+    }
     public synchronized Lease<T> take(){Lease<T> previous=active;active=null;return previous;}
     public synchronized Lease<T> take(String value){return active!=null&&active.value.equals(value)?take():null;}
     public synchronized Lease<T> takeIf(java.util.function.Predicate<T> predicate){return active!=null&&predicate.test(active.target)?take():null;}

@@ -161,7 +161,9 @@ final class DisplayVideoController: UIViewController {
 
     init(format: DisplayVideoFormat, sourceRefresh: Int, close: @escaping (String) -> Void) {
         self.format = format; self.sourceRefresh = sourceRefresh; self.close = close; self.builder = DisplaySampleBuilder(format: format)
-        super.init(nibName: nil, bundle: nil); modalPresentationStyle = .fullScreen; isModalInPresentation = true
+        super.init(nibName: nil, bundle: nil)
+        // Keep WKWebView attached: removing it can emit visibilitychange and cancel this very session.
+        modalPresentationStyle = .overFullScreen; modalPresentationCapturesStatusBarAppearance = true; isModalInPresentation = true
     }
     required init?(coder: NSCoder) { return nil }
     override var prefersStatusBarHidden: Bool { true }

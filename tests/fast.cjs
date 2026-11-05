@@ -30,6 +30,8 @@ async function run(){
  const link=await connect();check(info.controlPort===18944,'fast control port follows configured HTTPS port');
  check((await link.call('/api/ping')).result.pong,'persistent authenticated ping');
  check((await link.call('/api/admin/config')).error,'fast link rejects admin routes');
+ const previewReply=await link.call('/api/pen/frame',{lease:'not-a-live-lease'});check(previewReply.error==='This request is not allowed on the fast control link.'&&!previewReply.result,'preview frames cannot enter the persistent input channel');
+ check((await link.call('/api/ping')).result.pong,'rejecting a preview frame leaves the control channel responsive');
  check((await link.call('/api/action',{id:'missing'})).error,'fast actions require a configured action ID');
  check((await link.call('/api/action',{id:streamAction})).error&&!streaming,'fast streaming action still requires confirmation');
  check((await link.call('/api/action',{id:streamAction,confirmed:true})).result.ok&&streaming,'confirmed fast streaming action uses fixture OBS');

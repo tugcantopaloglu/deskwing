@@ -9,13 +9,19 @@ internal static class Program
     private static int Main(string[] args)
     {
         if(args.Contains("--geometry-self-test")){ManualInkGeometry.Verify();return 0;}
+        var preview=args.Contains("--preview-self-test");
         var manual=args.Contains("--manual");
-        if (!manual&&!args.Contains("--run-native")) {
-            Console.Error.WriteLine("Use --run-native for the automatic isolated diagnostic, or --manual for a drawing receiver without synthetic input.");
+        if (!manual&&!preview&&!args.Contains("--run-native")) {
+            Console.Error.WriteLine("Use --run-native for isolated pen injection, --preview-self-test for isolated window capture, or --manual for a drawing receiver.");
             return 2;
         }
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
+        if(preview) {
+            using var receiver=new PreviewReceiver();
+            Application.Run(receiver);
+            return receiver.Result;
+        }
         if(manual) {
             using var receiver=new ManualPenReceiver();
             Application.Run(receiver);

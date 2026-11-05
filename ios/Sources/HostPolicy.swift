@@ -23,6 +23,23 @@ struct BridgeRequests {
     mutating func reset() { active.removeAll() }
 }
 
+/// A preview belongs to one pen lease. An old response cannot clear a newer lease's in-flight slot.
+struct PenPreviewRequests {
+    private var lease: String?
+    private var pending: UUID?
+    mutating func activate(_ lease: String) { self.lease = lease; pending = nil }
+    mutating func begin(_ lease: String) throws -> UUID {
+        guard self.lease == lease else { throw DeskError.message("Start pen input before requesting a PC preview.") }
+        guard pending == nil else { throw DeskError.message("A PC preview is already in progress.") }
+        let ticket = UUID(); pending = ticket; return ticket
+    }
+    mutating func finish(_ ticket: UUID) -> Bool {
+        guard pending == ticket else { return false }
+        pending = nil; return true
+    }
+    mutating func reset() { lease = nil; pending = nil }
+}
+
 enum HostPolicy {
     static let getPaths: Set<String> = [
         "/api/computer/media", "/api/computer", "/api/computer/display", "/api/ping", "/api/mixer",
@@ -33,7 +50,7 @@ enum HostPolicy {
         "/api/computer/follow", "/api/computer/media/action", "/api/computer/action", "/api/computer/preset",
         "/api/computer/display/frame", "/api/monitor/frame", "/api/ping", "/api/profile-lock",
         "/api/soundpad/recent/clear", "/api/profile", "/api/soundpad/favourites", "/api/cancel", "/api/hold",
-        "/api/action", "/api/audio", "/api/mute", "/api/apps", "/api/layout", "/api/soundpad/play", "/api/soundpad/library", "/api/ink", "/api/pen"
+        "/api/action", "/api/audio", "/api/mute", "/api/apps", "/api/layout", "/api/soundpad/play", "/api/soundpad/library", "/api/ink", "/api/pen", "/api/pen/frame"
     ]
     static func validHost(_ host: String) -> Bool {
         let parts = host.split(separator: ".", omittingEmptySubsequences: false)
@@ -73,7 +90,8 @@ enum HostPolicy {
             (path == "/api/pen" && ["end", "cancel"].contains(body["operation"] as? String ?? ""))
     }
     static func maximumBodyBytes(_ path: String) -> Int {
-        path == "/api/ink" ? 4 * 1024 * 1024 : 16384
+        if path == "/api/pen/frame" { return 1024 }
+        return path == "/api/ink" ? 4 * 1024 * 1024 : 16384
     }
     static func maximumBridgeBytes(_ path: String) -> Int {
         if path == "/local/export-image" { return 12 * 1024 * 1024 }
@@ -91,10 +109,24 @@ enum HostPolicy {
         }
         return enabled
     }
+    static func penFrameLease(_ body: [String: Any]) throws -> String {
+        guard Set(body.keys).isSubset(of: ["lease", "width"]), let lease = body["lease"] as? String,
+              !lease.isEmpty, lease.utf8.count <= 128 else {
+            throw DeskError.message("A PC preview requires the active pen lease.")
+        }
+        if let width = body["width"] {
+            guard let number = width as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  number.doubleValue.isFinite, (160.0...1600.0).contains(number.doubleValue),
+                  number.doubleValue == Double(number.intValue) else {
+                throw DeskError.message("PC preview width must be a whole number from 160 to 1,600.")
+            }
+        }
+        return lease
+    }
     static func dispatchDeadline(_ path: String) -> TimeInterval { path == "/api/pen" ? 0.5 : 2 }
     static func needsDispatchDeadline(_ path: String, method: String, body: [String: Any]) -> Bool {
         method == "POST" && !allowedInBackground(path, body: body) &&
-            !["/api/ping", "/api/monitor/frame", "/api/computer/display/frame", "/api/soundpad/library"].contains(path)
+            !["/api/ping", "/api/monitor/frame", "/api/computer/display/frame", "/api/pen/frame", "/api/soundpad/library"].contains(path)
     }
     static func trustedPage(_ url: URL?) -> Bool {
         guard let url else { return false }

@@ -1,8 +1,33 @@
 import XCTest
 import CoreMedia
+import UIKit
+import WebKit
 @testable import DeskWing
 
 final class DisplayVideoTests: XCTestCase {
+    @MainActor
+    func testNativeViewerKeepsTheWebControlPageVisibleToItsLifecycle() async throws {
+        let priorWindow = UIApplication.shared.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(frame: UIScreen.main.bounds), host = UIViewController()
+        let web = WKWebView(frame: window.bounds)
+        window.rootViewController = host; host.view.addSubview(web); window.makeKeyAndVisible()
+        let viewer = DisplayVideoController(format: DisplayVideoFormat(width: 1280, height: 800, refreshRate: 60), sourceRefresh: 60) { _ in }
+        defer { viewer.stop(); viewer.dismiss(animated: false); window.isHidden = true; priorWindow?.makeKeyAndVisible() }
+        let loaded = expectation(description: "Isolated local web page loaded")
+        let navigation = DisplayTestNavigation { loaded.fulfill() }
+        web.navigationDelegate = navigation
+        web.loadHTMLString("<!doctype html><html><body>Isolated display lifecycle fixture</body></html>", baseURL: nil)
+        await fulfillment(of: [loaded], timeout: 15)
+        let before = try await web.evaluateJavaScript("document.visibilityState") as? String
+        XCTAssertEqual(before, "visible")
+        let presented = expectation(description: "Native video viewer presented")
+        host.present(viewer, animated: false) { presented.fulfill() }
+        await fulfillment(of: [presented], timeout: 10)
+        XCTAssertNotNil(web.window, "The control page must stay attached while the native viewer covers it.")
+        let after = try await web.evaluateJavaScript("document.visibilityState") as? String
+        XCTAssertEqual(after, "visible")
+        withExtendedLifetime(navigation) {}
+    }
     func testActualWindowsEncoderConfigurationsAcceptVisibleMacroblockCropping() throws {
         // Captured from the Windows Media Foundation encoder using synthetic frames only, 2026-11-05.
         // 900/1080 visible rows use 912/1088 coded rows; no PC content is part of these codec headers.
@@ -289,4 +314,10 @@ final class DisplayVideoTests: XCTestCase {
         inbox.offer(key)
         XCTAssertTrue(inbox.take().0.isEmpty)
     }
+}
+
+private final class DisplayTestNavigation: NSObject, WKNavigationDelegate {
+    private let loaded: () -> Void
+    init(_ loaded: @escaping () -> Void) { self.loaded = loaded }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded() }
 }

@@ -9,6 +9,8 @@ const captureOnly=new Set((process.env.TABLETDECK_CAPTURE_ONLY||'').split(',').f
 const origin='http://127.0.0.1:18997',target={id:'fixture-screen',kind:'screen',label:'Studio display',width:1920,height:1080};
 const targets=[target,{id:'fixture-whiteboard',kind:'window',label:'Microsoft Whiteboard',width:1600,height:900}];
 let browser,checks=0,inkRevision=0,penSequence=0,lease='',enabled=false,currentTarget=target;
+let previewJpeg='',frameSequence=0,frameInflight=0,maxFrameInflight=0,holdFrame=false;
+const pendingFrames=[],frameRequests=[];
 let sharedInk={workspaceId:'rendered-shared-ink',revision:'0'.repeat(64),document:{version:1,strokes:[],notes:'',penOnly:true,updatedAt:'2026-11-05T00:00:00.000Z'}};
 const failures=[],errors=[],unexpected=[],penPackets=[],inkRequests=[],captures=[];
 const check=(value,label)=>{checks++;if(value)console.log('PASS '+label);else{failures.push(label);console.error('FAIL '+label);}};
@@ -36,6 +38,12 @@ async function fixture(route){
    case '/api/admin/pen':{
     if(request.method()==='GET')return send({status:status(),targets});
     const body=request.postDataJSON();enabled=body.enabled===true;currentTarget=targets.find(item=>item.id===body.targetId)||target;lease='';return send(status());
+   }
+   case '/api/pen/frame':{
+    const body=request.postDataJSON();if(request.method()!=='POST'||body.lease!==lease||!lease)return send({error:'Pen preview requires the active lease'},409);
+    frameRequests.push(structuredClone(body));frameInflight++;maxFrameInflight=Math.max(maxFrameInflight,frameInflight);
+    const selected=structuredClone(currentTarget),sequence=++frameSequence;
+    try{if(holdFrame)await new Promise(resolve=>pendingFrames.push(resolve));return await send({image:previewJpeg,width:640,height:360,targetId:selected.id,targetWidth:selected.width,targetHeight:selected.height,sequence,capturedAt:new Date().toISOString()});}finally{frameInflight--;}
    }
    case '/api/pen':{
     if(request.method()==='GET')return send(status());
@@ -68,6 +76,12 @@ async function pageFor(desktop,search=''){
 }
 async function mode(page,value){await page.locator('#app-mode').selectOption(value);await page.waitForFunction(value=>DeskWorkspace.mode===value,value);}
 async function settle(page){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
+async function previewVisible(page,label){
+ await page.waitForFunction(()=>{const image=document.querySelector('.pen-tablet-preview');return image&&!image.hidden&&image.complete&&image.naturalWidth>0;});
+ const geometry=await page.locator('.pen-tablet-preview').evaluate(image=>{const box=image.getBoundingClientRect(),pad=image.closest('.pen-tablet-pad'),bounds=pad.getBoundingClientRect(),hit=document.elementFromPoint(bounds.x+bounds.width*.5,bounds.y+bounds.height*.5);return{fills:Math.abs(box.width-bounds.width)<=2&&Math.abs(box.height-bounds.height)<=2,pointerSafe:getComputedStyle(image).pointerEvents==='none'&&hit===pad,decoded:image.naturalWidth===640&&image.naturalHeight===360};});
+ check(geometry.decoded&&geometry.fills,label+' displays the decoded target preview across its input surface');check(geometry.pointerSafe,label+' keeps the preview behind the pen input hit target');
+}
+async function previewCleared(page,label){await page.waitForFunction(()=>{const image=document.querySelector('.pen-tablet-preview');return image&&image.hidden&&!image.getAttribute('src');});check(true,label+' clears the preview image and source immediately');}
 async function sync(page){const compact=await page.locator('#ink-window-tools').count()>0&&await page.locator('#pen-sync-now').isHidden();if(compact)await page.locator('#ink-window-tools').click();await page.locator('#pen-sync-now').click();await page.waitForFunction(()=>!document.querySelector('#pen-sync-now').disabled&&document.querySelector('#pen-sync-state').textContent==='Shared with your PC');if(compact)await page.locator('#ink-window-tools').click();}
 async function screenshot(page,name){if(captureOnly.size===0||captureOnly.has(name))await page.screenshot({path:path.join(output,name+'.png'),fullPage:true});}
 async function penStroke(page,selector,points){
@@ -94,6 +108,7 @@ async function capture(page,name,host,pad,controls){
 async function run(){
  fs.mkdirSync(output,{recursive:true});browser=await chromium.launch({headless:true,executablePath:process.env.TABLETDECK_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
  const desktop=await pageFor(true),tablet=await pageFor(false);await mode(desktop,'pen');await mode(tablet,'pen');await sync(desktop);await sync(tablet);
+ previewJpeg=await desktop.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=960;canvas.height=540;const paint=canvas.getContext('2d');paint.fillStyle='#f6f3e9';paint.fillRect(0,0,960,540);paint.fillStyle='#17232d';paint.fillRect(0,0,960,50);paint.fillStyle='#ecf5f7';paint.font='18px sans-serif';paint.fillText('PC drawing preview · synthetic test fixture',24,32);paint.strokeStyle='#d8ddd9';paint.lineWidth=1;for(let x=24;x<960;x+=40){paint.beginPath();paint.moveTo(x,68);paint.lineTo(x,520);paint.stroke();}for(let y=68;y<540;y+=40){paint.beginPath();paint.moveTo(16,y);paint.lineTo(944,y);paint.stroke();}paint.strokeStyle='#285e7e';paint.lineWidth=6;paint.lineCap='round';paint.beginPath();paint.moveTo(95,380);paint.lineTo(250,195);paint.lineTo(390,330);paint.lineTo(570,135);paint.lineTo(755,275);paint.stroke();paint.strokeStyle='#b35355';paint.lineWidth=5;paint.beginPath();paint.arc(570,135,42,0,Math.PI*2);paint.stroke();paint.beginPath();paint.moveTo(110,455);paint.lineTo(815,455);paint.lineTo(790,432);paint.moveTo(815,455);paint.lineTo(790,478);paint.stroke();paint.fillStyle='#344c5e';paint.font='20px sans-serif';paint.fillText('Sketch, refine, share',325,505);const reduced=document.createElement('canvas');reduced.width=640;reduced.height=360;reduced.getContext('2d').drawImage(canvas,0,0,640,360);return reduced.toDataURL('image/jpeg',.85);});
  check(await desktop.evaluate(()=>JSON.parse(localStorage.getItem('deskwing.pen.v1')||'{"strokes":[]}').strokes.length)===0,'PC begins with an empty shared scratchpad');
  await tablet.locator('#pen-notes').fill('Shared ideas\nSketch on the tablet. Review on the PC.');
  await penStroke(tablet,'#pen-canvas',[[.13,.66],[.28,.36],[.44,.62],[.61,.25],[.82,.47]]);
@@ -128,28 +143,32 @@ async function run(){
   check(await tablet.locator('#pen-notes').isVisible(),name+' can reveal editable notes');await tablet.locator('#pen-fullscreen-tools').click();await tablet.locator('#pen-fullscreen-notes').click();await tablet.locator('#pen-fullscreen').click();await tablet.waitForFunction(()=>!DeskPen.isFullscreen());
   check(await tablet.evaluate(()=>window.fixtureNativeRequests.filter(request=>request.path==='/local/fullscreen').at(-1)?.body.enabled===false),name+' restores native system bars on exit');
  }
- await desktop.setViewportSize({width:1280,height:800});await mode(desktop,'pentablet');await desktop.getByRole('combobox',{name:'Windows target',exact:true}).selectOption('fixture-screen');await desktop.getByRole('button',{name:'Enable pen input',exact:true}).click();await desktop.getByRole('button',{name:'Disable pen input',exact:true}).waitFor();
+ await desktop.setViewportSize({width:1280,height:800});await mode(desktop,'pentablet');await desktop.getByRole('combobox',{name:'Windows target',exact:true}).selectOption('fixture-screen');await desktop.getByRole('button',{name:'Enable pen & live view',exact:true}).click();await desktop.getByRole('button',{name:'Disable pen & live view',exact:true}).waitFor();
  check(enabled&&await desktop.locator('#console-title').innerText()==='Pen tablet','desktop target settings explicitly enable pen input and retain the correct header');await screenshot(desktop,'desktop-pen-tablet-settings');
  await tablet.setViewportSize({width:1280,height:800});await mode(tablet,'pentablet');await tablet.getByRole('button',{name:'Start pen session',exact:true}).waitFor();
  for(const [width,height,name]of [[1280,800,'tablet-pen-tablet-fullscreen'],[668,1070,'tablet-pen-tablet-fullscreen-portrait'],[390,844,'tablet-pen-tablet-fullscreen-narrow']]){
   await tablet.setViewportSize({width,height});await tablet.getByRole('button',{name:'Fullscreen',exact:true}).click();await tablet.locator('.pen-tablet-fullscreen').waitFor();const floating=tablet.locator('.pen-tablet-floating-controls');await floating.getByRole('button',{name:'Start pen',exact:true}).click();await tablet.locator('.pen-tablet-connected').waitFor();
   check(await tablet.locator('#pen-tablet-fullscreen-tools').isHidden()&&await tablet.locator('.pen-tablet-heading').isHidden(),name+' hides status and toolbar until requested');
   check(await tablet.locator('.pen-tablet-pad').evaluate(node=>{const box=node.getBoundingClientRect();return Math.abs(box.width-innerWidth)<=1&&Math.abs(box.height-innerHeight)<=1;}),name+' maps the full tablet surface by default');
+  await previewVisible(tablet,name+' Fill');
   await capture(tablet,name,'#pen-tablet-workspace','.pen-tablet-pad',[[floating.getByRole('button',{name:'Exit fullscreen',exact:true}),'Exit fullscreen'],[floating.getByRole('button',{name:'Stop pen',exact:true}),'Stop pen'],[floating.getByRole('button',{name:'Show tools',exact:true}),'Show tools']]);
-  await floating.getByRole('button',{name:'Stop pen',exact:true}).click();await tablet.waitForFunction(()=>!DeskPenTablet.isBusy());await floating.getByRole('button',{name:'Show tools',exact:true}).click();await tablet.getByRole('combobox',{name:'Surface mapping',exact:true}).selectOption('match');await settle(tablet);
-  check(await tablet.locator('.pen-tablet-pad').evaluate(node=>{const box=node.getBoundingClientRect();return Math.abs(box.width/box.height-16/9)<.01;}),name+' optionally matches PC proportions');await screenshot(tablet,name+'-tools');await tablet.getByRole('combobox',{name:'Surface mapping',exact:true}).selectOption('fill');
+  await floating.getByRole('button',{name:'Stop pen',exact:true}).click();await tablet.waitForFunction(()=>!DeskPenTablet.isBusy());await previewCleared(tablet,name+' Stop');await floating.getByRole('button',{name:'Show tools',exact:true}).click();await tablet.getByRole('combobox',{name:'Surface mapping',exact:true}).selectOption('match');await settle(tablet);
+  check(await tablet.locator('.pen-tablet-pad').evaluate(node=>{const box=node.getBoundingClientRect();return Math.abs(box.width/box.height-16/9)<.01;}),name+' optionally matches PC proportions');await screenshot(tablet,name+'-tools');await floating.getByRole('button',{name:'Start pen',exact:true}).click();await previewVisible(tablet,name+' Match');await capture(tablet,name+'-match','#pen-tablet-workspace','.pen-tablet-pad',[[floating.getByRole('button',{name:'Exit fullscreen',exact:true}),'Exit fullscreen'],[floating.getByRole('button',{name:'Stop pen',exact:true}),'Stop pen']]);await floating.getByRole('button',{name:'Stop pen',exact:true}).click();await previewCleared(tablet,name+' Match stop');await floating.getByRole('button',{name:'Show tools',exact:true}).click();await tablet.getByRole('combobox',{name:'Surface mapping',exact:true}).selectOption('fill');
   await floating.getByRole('button',{name:'Exit fullscreen',exact:true}).click();await tablet.locator('.pen-tablet-fullscreen').waitFor({state:'detached'});check(await tablet.evaluate(()=>window.fixtureNativeRequests.filter(request=>request.path==='/local/fullscreen').at(-1)?.body.enabled===false),name+' restores native system bars on exit');
  }
- await tablet.setViewportSize({width:1280,height:800});await tablet.getByRole('button',{name:'Start pen session',exact:true}).click();await tablet.waitForFunction(()=>DeskPenTablet.isBusy());
+ await tablet.setViewportSize({width:1280,height:800});await settle(tablet);await tablet.getByRole('button',{name:'Start pen session',exact:true}).click();await tablet.waitForFunction(()=>DeskPenTablet.isBusy()).catch(async error=>{console.error(JSON.stringify({penStatus:await tablet.locator('.pen-tablet-status').innerText(),previewStatus:await tablet.locator('.pen-tablet-preview-status').innerText(),leaseActive:!!lease,lastOperations:penPackets.slice(-4).map(packet=>packet.operation)}));throw error;});await previewVisible(tablet,'Windowed session');
  const callsBeforePalm=penPackets.length;await palm(tablet,'.pen-tablet-pad');await settle(tablet);check(penPackets.length===callsBeforePalm,'palm contacts on active Pen tablet produce zero native pen calls');
+ holdFrame=true;const holdDeadline=Date.now()+3000;while(!pendingFrames.length&&Date.now()<holdDeadline)await new Promise(resolve=>setTimeout(resolve,10));assert.ok(pendingFrames.length,'a preview frame is intentionally pending');const samplePacketsBefore=penPackets.filter(packet=>packet.operation==='samples').length;
  await penStroke(tablet,'.pen-tablet-pad',[[.2,.6],[.4,.35],[.6,.5]]);await tablet.waitForFunction(()=>document.querySelector('.pen-tablet-footer output').textContent.includes('Pressure'));
  await new Promise(resolve=>setTimeout(resolve,80));const samples=penPackets.filter(packet=>packet.operation==='samples').flatMap(packet=>packet.samples);
  check(samples.some(sample=>sample.phase==='down')&&samples.some(sample=>sample.phase==='up')&&samples.some(sample=>sample.pressure>0),'trusted Chromium pen events produce bounded pressure samples only in the fixture');
+ check(pendingFrames.length===1&&penPackets.filter(packet=>packet.operation==='samples').length>samplePacketsBefore,'pen packets continue while the preview frame response is blocked');check(maxFrameInflight===1,'preview capture never overlaps another frame request');
  const stopsBefore=penPackets.filter(packet=>packet.operation==='cancel').length;await mode(tablet,'pen');await tablet.waitForFunction(()=>!DeskPenTablet.isBusy());
  check(!lease&&penPackets.filter(packet=>packet.operation==='cancel').length===stopsBefore+1,'changing workspace cancels the native pen session exactly once');
+ await previewCleared(tablet,'Workspace change');const lateResponse=tablet.waitForResponse(response=>new URL(response.url()).pathname==='/api/pen/frame');holdFrame=false;pendingFrames.shift()();await lateResponse;await settle(tablet);await previewCleared(tablet,'Late frame after workspace change');
  check(await tablet.locator('#pen-notes').inputValue()==='Reviewed on the PC. Keep the next sketch simple.','returning from Pen tablet preserves shared scratchpad notes');
  check(unexpected.length===0,'all requests stay within known fixture routes: '+unexpected.join(', '));check(errors.length===0,'shared ink and Pen tablet have no browser JavaScript errors: '+errors.join('; '));
- fs.writeFileSync(path.join(output,'ink-rendered-results.json'),JSON.stringify({checks,failures,errors,unexpected,captures,inkRevision,penPackets,fixtureOnly:true,physicalPenTested:false,osInputInjected:false,nativeHandwritingTested:false},null,2));
+ fs.writeFileSync(path.join(output,'ink-rendered-results.json'),JSON.stringify({checks,failures,errors,unexpected,captures,inkRevision,penPackets,frameRequests,maxFrameInflight,syntheticPreview:true,fixtureOnly:true,physicalPenTested:false,osInputInjected:false,nativeHandwritingTested:false},null,2));
  assert.equal(failures.length,0,failures.join('\n'));console.log(checks+' ink checks passed; captures in '+output);
 }
-run().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{await browser?.close();});
+run().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{for(const resolve of pendingFrames)resolve();await browser?.close();});

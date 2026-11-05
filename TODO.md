@@ -60,7 +60,18 @@ Requested 2026-11-05: implement every inspection finding, improve the design, an
 - [x] Add a separate resizable PC Ink window and permit a smaller resizable main companion window.
 - [x] Refresh Pen tablet target dimensions after PC resizing and apply exact session geometry before accepting pen input.
 - [x] Reduce pen batching delay and fix the diagnostic canvas's edge alignment and repeated repaint cost.
+- [x] Show the selected PC target live behind Pen tablet input so drawings are visible on the tablet.
 
 Expanded pen evidence: shared ink passed 50 backend and 38 HTTP checks; native Windows receiver confirmed real position, pressure, tilt and clean release; 56 two-client/fullscreen browser checks passed. Independent visual review passed all 16 final captures. Microsoft retired standalone Whiteboard; physical testing uses the local diagnostic canvas unless a supported web/Teams account is available.
 
 Physical pen checkpoint: user confirmed pressure and fullscreen operation after the signed update; the PC received real Xiaomi pen strokes with changing pressure and tilt. User requested a further immersive fullscreen refinement and resizable PC windows. The 55-suite local aggregate passed; iOS build and 8 simulator tests passed for b683825. Final security rescan had zero new findings (7 pre-existing Low). Hosted Windows passed 54/55 suites; a cold-start timeout in a certificate-export test helper was raised, with focused ink/pen API checks still passing.
+
+Previous checkpoint: commit 0691c1a passed all 57 Windows CI suites and 9 iOS tests. User confirmed the drawing delay was fixed and then requested a live view of PC drawings on the tablet.
+
+Live pen-preview implementation: all ten affected suites passed against a fresh Windows publish, including 42 fake capture checks, 49 frontend checks and 153 rendered checks. Native own-window capture reproduced changed strokes and exact client edges at two sizes. Seven final visual captures passed review; the actual Snyk scan found zero new issues. The signed Android update and matching Windows companion are installed with pairing/data retained. Physical tablet preview and the new hosted CI results remain pending.
+
+## 9. High refresh Second display (added by user)
+- [ ] Replace the four-frame-per-second JPEG view with an actual video capture, transport and playback path targeting at least 60 fps.
+- [ ] Add 60 Hz and Match tablet refresh rate options using reported device capabilities, with the chosen rate applied to the virtual monitor and stream.
+- [ ] Show measured delivery/playback performance and verify the connected Xiaomi tablet, including stop, background, reconnect and sharing revocation.
+- [ ] Validate Windows, Android and iOS implementations, rerun security/CI and update packages and documentation.

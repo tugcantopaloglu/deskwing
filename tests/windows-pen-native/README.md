@@ -18,6 +18,8 @@ Manual mode never generates synthetic input. It remains open as **DeskWing pen t
 
 The noninteractive `--geometry-self-test` checks full-client edge mapping and normalized resize without creating a window or injecting input.
 
+The optional `--preview-self-test` opens its own temporary color-and-stroke window plus a nonactivating cover window. It captures only the test window through the production `PrintWindow` path and checks JPEG dimensions, all four client edges, updated strokes, two window sizes, and exclusion of the cover window's pixels. It never captures a display or user window and generates no pen input. Passing does not establish that a GPU-rendered application supports `PrintWindow`; some applications may return blank or incomplete previews.
+
 Resizing remaps saved strokes independently along both axes to keep them aligned with the full client area; changing the window's aspect ratio stretches existing shapes. Choose **Match PC proportions** on the tablet for proportionate new pen movement, and restart the pen session after arranging the PC window.
 
 This interactive hardware/API diagnostic is intentionally separate from unattended regression. Passing proves the native Windows API path on the tested PC; it does not certify compatibility with Photoshop, Microsoft Whiteboard, Wintab configurations or a particular tablet.

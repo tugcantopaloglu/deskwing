@@ -18,12 +18,13 @@ async function run(){
  const [httpPort,httpsPort,controlPort]=[...chosen];
  const log=fs.openSync(path.join(fixture,'service.log'),'w');
  child=spawn(executable,['--no-browser','--no-tray','--data-dir',fixture,'--http-port',String(httpPort),'--https-port',String(httpsPort),'--control-port',String(controlPort)],{windowsHide:true,stdio:['ignore',log,log]});
- async function api(route,body,headers={}){const response=await fetch(`http://127.0.0.1:${httpPort}${route}`,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json','X-Deck-Admin':session?.token||'',...headers},body:body===undefined?undefined:JSON.stringify(body)});const text=await response.text();let data;try{data=text?JSON.parse(text):{};}catch{data={};}return{status:response.status,data};}
+ async function api(route,body,headers={}){const response=await fetch(`http://127.0.0.1:${httpPort}${route}`,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json','X-Deck-Admin':session?.token||'',...headers},body:body===undefined?undefined:JSON.stringify(body)});const text=await response.text();let data;try{data=text?JSON.parse(text):{};}catch{data={};}return{status:response.status,data,headers:response.headers};}
  try{
   for(let i=0;i<100;i++){try{session=JSON.parse(fs.readFileSync(path.join(fixture,'admin-session.json'),'utf8'));if((await api('/api/pen')).status===200)break;}catch{}await sleep(100);}
   assert.ok(session,'isolated companion starts');
   check((await api('/api/pen',undefined,{'X-Deck-Admin':''})).status===401,'native pen status requires authentication');
   check((await api('/api/pen',{operation:'begin'}, {'X-Deck-Admin':''})).status===401,'native pen writes require authentication');
+  check((await api('/api/pen/frame',{lease:crypto.randomBytes(24).toString('hex')}, {'X-Deck-Admin':''})).status===401,'PC pen preview requires authentication before capture');
   const pin=(await api('/api/admin/pairing',{})).data;
   const pair=await api('/api/pair',{code:pin.code,name:'Isolated pen fixture'},{'X-Deck-Admin':''});assert.equal(pair.status,200);
   const tablet={'X-Deck-Admin':'',Authorization:'Bearer '+pair.data.token};
@@ -33,6 +34,15 @@ async function run(){
   check((await api('/api/admin/pen',undefined,tablet)).status===403,'tablet cannot enumerate PC target windows');
   check((await api('/api/admin/pen',{enabled:true,targetId:'invented'},tablet)).status===403,'tablet cannot enable native pen or select its PC target');
   check((await api('/api/pen',{operation:'begin',session:crypto.randomUUID()},tablet)).status===409,'begin is rejected before injection until local PC opt-in');
+  const previewRequest={lease:crypto.randomBytes(24).toString('hex'),width:1280};
+  const inactivePreview=await api('/api/pen/frame',previewRequest,tablet);
+  check(inactivePreview.status===409&&!('image'in inactivePreview.data),'paired tablet cannot capture a target before an active pen lease');
+  check(inactivePreview.headers.get('cache-control')?.includes('no-store'),'PC preview responses forbid cache storage');
+  check((await api('/api/pen/frame',{...previewRequest,targetId:'display:invented'},tablet)).status===409,'requesting an arbitrary preview target cannot bypass PC lease authority');
+  check((await api('/api/pen/frame',{},tablet)).status===400,'missing preview lease is rejected');
+  check((await api('/api/pen/frame',{...previewRequest,width:1601},tablet)).status===400,'oversized preview width is rejected before capture');
+  check((await api('/api/pen/frame',{...previewRequest,width:1.5},tablet)).status===400,'fractional preview width cannot bind to capture request');
+  check((await api('/api/pen/frame',previewRequest,{...tablet,Origin:'https://external.invalid'})).status===403,'cross-origin pen preview is rejected');
   check((await api('/api/pen',{operation:'samples',lease:'missing',sequence:1,elapsedMs:0,samples:[{phase:'down',x:.5,y:.5,pressure:.5}]},tablet)).status===409,'unowned samples cannot enter native input');
   check((await api('/api/pen',{},tablet)).status===400,'missing pen operation is refused safely');
   check((await api('/api/pen',{operation:'end',lease:'expired'},tablet)).status===200,'late end is idempotent without an active pen');
@@ -43,11 +53,17 @@ async function run(){
   const oversized=JSON.stringify({operation:'cancel',lease:'expired',padding:'x'.repeat(17000)});
   const large=await fetch(`http://127.0.0.1:${httpPort}/api/pen`,{method:'POST',headers:{...tablet,'Content-Type':'application/json'},body:oversized});await large.text();
   check(large.status===413,'known-length pen bodies above16KB are rejected before binding');
-  const streamed=await new Promise((resolve,reject)=>{const request=https.request({host:'127.0.0.1',port:httpsPort,path:'/api/pen',...fixtureTls(),method:'POST',headers:{Authorization:tablet.Authorization,'Content-Type':'application/json','Transfer-Encoding':'chunked'}},response=>{response.resume();response.on('end',()=>resolve(response.statusCode));});request.on('error',reject);request.setTimeout(15000,()=>request.destroy(Error('The chunked pen fixture timed out.')));request.write(oversized.slice(0,8000));request.end(oversized.slice(8000));});
+  const tls=fixtureTls();
+  const streamed=await new Promise((resolve,reject)=>{const request=https.request({host:'127.0.0.1',port:httpsPort,path:'/api/pen',...tls,method:'POST',headers:{Authorization:tablet.Authorization,'Content-Type':'application/json','Transfer-Encoding':'chunked'}},response=>{response.resume();response.on('end',()=>resolve(response.statusCode));});request.on('error',reject);request.setTimeout(15000,()=>request.destroy(Error('The chunked pen fixture timed out.')));request.write(oversized.slice(0,8000));request.end(oversized.slice(8000));});
   check(streamed===413,'streamed pen bodies above16KB are rejected before binding');
+  const oversizedPreview=JSON.stringify({...previewRequest,padding:'x'.repeat(17000)});
+  const largePreview=await fetch(`http://127.0.0.1:${httpPort}/api/pen/frame`,{method:'POST',headers:{...tablet,'Content-Type':'application/json'},body:oversizedPreview});await largePreview.text();
+  check(largePreview.status===413,'known-length preview bodies above16KB are rejected before capture');
+  const streamedPreview=await new Promise((resolve,reject)=>{const request=https.request({host:'127.0.0.1',port:httpsPort,path:'/api/pen/frame',...tls,method:'POST',headers:{Authorization:tablet.Authorization,'Content-Type':'application/json','Transfer-Encoding':'chunked'}},response=>{response.resume();response.on('end',()=>resolve(response.statusCode));});request.on('error',reject);request.setTimeout(15000,()=>request.destroy(Error('The chunked preview fixture timed out.')));request.write(oversizedPreview.slice(0,8000));request.end(oversizedPreview.slice(8000));});
+  check(streamedPreview===413,'streamed preview bodies above16KB are rejected before capture');
   check((await api('/api/pen',undefined,tablet)).data.active===false,'all boundary tests leave native pen inactive');
   check(!(await api('/api/admin/computer')).data.enabled,'native pen requests do not enable other PC control modes');
-  console.log(passed+' pen API checks passed; native input never enabled.');
+  console.log(passed+' pen API checks passed; native input and capture never enabled.');
  }finally{
   if(child&&child.exitCode===null){try{await api('/api/admin/shutdown',{});}catch{}await Promise.race([new Promise(resolve=>child.once('exit',resolve)),sleep(3000)]);if(child.exitCode===null)child.kill();}
   fs.closeSync(log);
