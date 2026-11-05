@@ -114,6 +114,8 @@ internal static class Program
         await BackpressureIsBounded();
         await PendingRawWriteRetainsSlot();
         await PairingRevokedDuringCapture();
+        await IdleHeartbeats();
+        await RevokeIdleHeartbeats();
         Console.WriteLine($"Display stream: {checks} fake authority, framing, refresh and backpressure checks passed. No real capture or driver writes.");
     }
 
@@ -185,6 +187,35 @@ internal static class Program
         finally{output.Release();}
         await Until(()=>scene.Producer.DisposeCalls==1,"pending network cancellation eventually disposes its sole producer");
     }
+    private static async Task IdleHeartbeats()
+    {
+        const ulong timestamp=987654321;
+        var header=DisplayStream.HeartbeatHeader(timestamp);
+        Check(header.Length==16&&BinaryPrimitives.ReadUInt32BigEndian(header)==0,"heartbeat is a header-only unit with no encoded payload");
+        Check(BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(4))==8&&BinaryPrimitives.ReadUInt64BigEndian(header.AsSpan(8))==timestamp,"heartbeat flag and monotonic-clock timestamp use the agreed wire format");
+        using var scene=new Scene();scene.Producer.ReturnNull=true;var lease=scene.Start();
+        using var cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var output=new AutoStopStream(cancellation,32+2*16);
+        await Ended(scene.Stream.StreamAsync(lease.Lease,"owner",output,()=>true,cancellation.Token));
+        var bytes=output.ToArray();
+        Check(bytes.Length==64,"a static source sends only the stream header and two heartbeat headers");
+        Check(BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(32))==0&&BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(48))==0,"idle capture never invents encoded frames or image payloads");
+        Check(BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(36))==8&&BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(52))==8,"idle packets cannot be counted as keyframes or decoder data");
+        Check(BinaryPrimitives.ReadUInt64BigEndian(bytes.AsSpan(56))>BinaryPrimitives.ReadUInt64BigEndian(bytes.AsSpan(40)),"successive idle heartbeats have increasing capture-clock timestamps");
+        Check(scene.Producer.Calls>2&&scene.Producer.DisposeCalls==1,"idle polling retains one producer and disposes it on cancellation");
+    }
+    private static async Task RevokeIdleHeartbeats()
+    {
+        foreach(var revoke in new[]{false,true})
+        {
+            using var scene=new Scene();scene.Producer.ReturnNull=true;var lease=scene.Start();var approved=true;
+            using var cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var output=new CallbackStream(length=>{if(length<48)return;if(revoke)scene.Stream.Revoke("owner");else approved=false;});
+            await Ended(scene.Stream.StreamAsync(lease.Lease,"owner",output,()=>approved,cancellation.Token));
+            Check(output.Length==48,(revoke?"explicit owner revocation":"pairing authorization loss")+" stops idle heartbeat output immediately after the current unit");
+            Check(scene.Producer.DisposeCalls==1,(revoke?"revoked":"unauthorized")+" idle stream closes its sole producer");
+        }
+    }
 
     private sealed class Scene : IDisposable
     {
@@ -207,13 +238,14 @@ internal static class Program
     {
         internal int Calls,DisposeCalls;
         internal long LastTimestamp;
+        internal bool ReturnNull;
         internal Action? DuringNext;
         public string EncoderName=>"Isolated fake encoder";
         public bool HardwareAccelerated=>false;
         public EncodedVideoFrame? Next(long timestamp100ns,CancellationToken cancellation)
         {
             cancellation.ThrowIfCancellationRequested();Interlocked.Increment(ref Calls);LastTimestamp=timestamp100ns;DuringNext?.Invoke();
-            return new(AccessUnit,true,timestamp100ns);
+            return ReturnNull?null:new(AccessUnit,true,timestamp100ns);
         }
         public void Dispose()=>Interlocked.Increment(ref DisposeCalls);
     }
@@ -222,6 +254,13 @@ internal static class Program
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer,CancellationToken cancellation=default)
         {
             await base.WriteAsync(buffer,cancellation);if(Length>=limit)stop.Cancel();
+        }
+    }
+    private sealed class CallbackStream(Action<long> afterWrite) : MemoryStream
+    {
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer,CancellationToken cancellation=default)
+        {
+            await base.WriteAsync(buffer,cancellation);afterWrite(Length);
         }
     }
     private sealed class BlockedOutputStream : MemoryStream

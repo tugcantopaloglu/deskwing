@@ -89,6 +89,17 @@ internal sealed class WindowsDisplayEncoder : IDisposable
         return ReadOutput(timestamp100ns);
     }
 
+    // The Windows encoder applies this request to the next ProcessInput and then resets it.
+    // Recovery callers use it after idle gaps so a decoder awaiting an IDR need not wait a full GOP.
+    internal void RequestKeyFrame()
+    {
+        ObjectDisposedException.ThrowIf(disposed,this);
+        if(Environment.CurrentManagedThreadId!=ownerThread)throw new InvalidOperationException("The video encoder must stay on its owning stream worker.");
+        if(transform is not MfNative.ICodecAPI codec)throw new InvalidOperationException("The Windows encoder cannot request a recovery frame.");
+        object value=(uint)1;
+        MfNative.Check(codec.SetValue(ref MfNative.ForceKeyFrame,ref value));
+    }
+
     private EncodedVideoFrame? ReadOutput(long fallbackTimestamp)
     {
         MfNative.Check(transform.GetOutputStreamInfo(0,out var info));

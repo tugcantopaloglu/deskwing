@@ -55,7 +55,7 @@ function options(args){
 function selectedSuites(settings){return suites.filter(suite=>settings.only?settings.only.includes(suite.name):settings.group==='all'?suite.group!=='installer':suite.group===settings.group);}
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function requireFile(file,label){if(!fs.statSync(file,{throwIfNoEntry:false})?.isFile())throw new Error(label+' is missing: '+file);return file;}
-function version(command,args,label){const result=spawnSync(command,args,{cwd:root,windowsHide:true,encoding:'utf8',timeout:30000});if(result.error||result.status!==0)throw new Error(label+' is unavailable. '+(result.error?.message||result.stderr||result.stdout));return (result.stdout+result.stderr).trim();}
+function version(command,args,label,timeout=30000){const result=spawnSync(command,args,{cwd:root,windowsHide:true,encoding:'utf8',timeout});if(result.error?.code==='ETIMEDOUT')throw new Error(label+' did not respond within '+(timeout/1000)+' seconds. Confirm the toolchain installation and retry.');if(result.error||result.status!==0)throw new Error(label+' is unavailable. '+(result.error?.message||result.stderr||result.stdout));return (result.stdout+result.stderr).trim();}
 function javaHome(){
   if(process.env.JAVA_HOME)return process.env.JAVA_HOME;
   if(process.env.JAVA_HOME_17_X64)return process.env.JAVA_HOME_17_X64;
@@ -81,7 +81,8 @@ async function main(){
   if(settings.list){for(const suite of selected)console.log(suite.group.padEnd(10)+suite.name);return;}
   if(process.platform!=='win32')throw new Error('The complete companion regression requires Windows x64. Use the Windows CI job or a Windows development machine.');
   if(Number(process.versions.node.split('.')[0])<22)throw new Error('Node.js 22 or newer is required.');
-  const sdk=version('dotnet',['--version'],'.NET SDK');if(Number(sdk.split('.')[0])<10)throw new Error('.NET SDK 10 or newer is required; selected '+sdk+'.');
+  // A hosted Windows image can exceed 30 seconds on its first SDK invocation.
+  const sdk=version('dotnet',['--version'],'.NET SDK',60000);if(Number(sdk.split('.')[0])<10)throw new Error('.NET SDK 10 or newer is required; selected '+sdk+'.');
   for(const packageName of ['acorn','playwright','ws','dompurify']){try{require.resolve(packageName);}catch{throw new Error('Missing test dependency '+packageName+'. Run npm ci --prefix tests.');}}
   for(const suite of selected){if(suite.script)requireFile(path.join(__dirname,suite.script),'Required suite');if(suite.project)requireFile(path.join(root,suite.project),'Required backend fixture');for(const source of suite.javaSources||[])requireFile(path.join(root,source),'Required Java fixture source');}
   const env={...process.env,TABLETDECK_HEADLESS:'0',TABLETDECK_CAPTURE_ONLY:''};

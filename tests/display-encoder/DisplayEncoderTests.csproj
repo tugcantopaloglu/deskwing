@@ -1,4 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
-  <ItemGroup><Compile Include="../../companion/WindowsDisplayEncoder.cs" Link="WindowsDisplayEncoder.cs"/><Compile Include="../../companion/WindowsMediaFoundation.cs" Link="WindowsMediaFoundation.cs"/></ItemGroup>
+  <ItemGroup><Compile Include="../../companion/WindowsDisplayEncoder.cs" Link="WindowsDisplayEncoder.cs"/><Compile Include="../../companion/WindowsMediaFoundation.cs" Link="WindowsMediaFoundation.cs"/><Compile Include="../../companion/WindowsDisplayCapture.cs" Link="WindowsDisplayCapture.cs"/><Compile Include="../../companion/WindowsDisplayCursor.cs" Link="WindowsDisplayCursor.cs"/><Compile Include="../../companion/WindowsDisplayCursorOverlay.cs" Link="WindowsDisplayCursorOverlay.cs"/><Compile Include="../../companion/WindowsDxgiCapture.cs" Link="WindowsDxgiCapture.cs"/></ItemGroup>
 </Project>

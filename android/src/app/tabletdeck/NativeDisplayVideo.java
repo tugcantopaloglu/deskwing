@@ -159,7 +159,10 @@ final class NativeDisplayVideo {
             String contentType=connection.getContentType();if(contentType==null||!contentType.split(";",2)[0].trim().equalsIgnoreCase(MIME))throw new IOException("The PC did not return a supported video stream.");
             try(DataInputStream input=new DataInputStream(new BufferedInputStream(connection.getInputStream(),65536))){
                 DisplayVideoProtocol.header(input,width,height,rate);
-                DisplayVideoProtocol.Unit first=DisplayVideoProtocol.unit(input);if(first.end()||!first.key())throw new IOException("The PC video did not begin with a complete picture.");
+                DisplayVideoProtocol.StreamState streamState=new DisplayVideoProtocol.StreamState(System.nanoTime());session.streamState=streamState;
+                DisplayVideoProtocol.Unit first;
+                while(true){guard(session);streamState.requireFirstPictureWithin(System.nanoTime());first=DisplayVideoProtocol.unit(input);streamState.requireFirstPictureWithin(System.nanoTime());if(!first.heartbeat())break;streamState.accept(first,false,System.nanoTime());}
+                if(first.end()||!first.key())throw new IOException("The PC video did not begin with a complete picture.");
                 byte[][] configuration=DisplayVideoProtocol.configuration(first.bytes);
                 DisplayVideoProtocol.validateConfiguration(configuration,width,height);
                 DisplayVideoProtocol.configurationOnly(first,true);
@@ -172,15 +175,16 @@ final class NativeDisplayVideo {
                 guard(session);if(Build.VERSION.SDK_INT>=31)surface.setFrameRate(rate,Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);else if(Build.VERSION.SDK_INT>=30)surface.setFrameRate(rate,Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
                 ui.post(()->{if(valid(session)){fit(session);try{Display current=display();session.complete(new JSONObject().put("started",true).put("targetRefreshRate",rate).put("currentRefreshRate",current==null?session.initialRefresh:current.getRefreshRate()).put("session",session.id));}catch(Exception ex){fail(session,ex);}}});
                 final MediaCodec decoderInstance=codec;output=new Thread(()->drain(session,decoderInstance),"DeskWing-display-output");output.start();
-                DisplayVideoProtocol.Unit unit=first;long previous=-1;boolean waitingForKey=false;
+                DisplayVideoProtocol.Unit unit=first;boolean waitingForKey=false;
                 while(valid(session)){
                     guard(session);if(session.decoderError!=null)throw session.decoderError;
                     if(unit.end())break;
+                    if(unit.heartbeat()){streamState.accept(unit,false,System.nanoTime());unit=DisplayVideoProtocol.unit(input);continue;}
                     byte[][] nextConfiguration=DisplayVideoProtocol.configurationIfPresent(unit.bytes);
                     if(unit.key()&&nextConfiguration==null)throw new IOException("The PC key frame is missing its video configuration.");
                     if(nextConfiguration!=null){DisplayVideoProtocol.validateConfiguration(nextConfiguration,width,height);if(!Arrays.equals(configuration[0],nextConfiguration[0])||!Arrays.equals(configuration[1],nextConfiguration[1]))throw new IOException("The PC video configuration changed. Start the display again.");}
                     boolean configOnly=DisplayVideoProtocol.configurationOnly(unit,nextConfiguration!=null);
-                    if(!configOnly){if(unit.presentationUs<=previous)throw new IOException("The PC returned an out-of-order video frame.");previous=unit.presentationUs;session.received.incrementAndGet();}
+                    if(streamState.accept(unit,configOnly,System.nanoTime()))session.received.incrementAndGet();
                     if(!waitingForKey||unit.key()){
                         int index=codec.dequeueInputBuffer(10000);
                         if(index>=0){ByteBuffer buffer=codec.getInputBuffer(index);if(buffer==null||buffer.capacity()<unit.bytes.length)throw new IOException("The tablet decoder cannot accept this video frame.");buffer.clear();buffer.put(unit.bytes);codec.queueInputBuffer(index,0,unit.bytes.length,unit.presentationUs,configOnly?MediaCodec.BUFFER_FLAG_CODEC_CONFIG:0);waitingForKey=false;}
@@ -215,9 +219,10 @@ final class NativeDisplayVideo {
         double incoming=(received-session.lastReceived)/seconds,shown=session.renderMetrics.framesPerSecond(now);
         session.statAt=now;session.lastReceived=received;session.lastRendered=rendered;
         Display display=display();float current=display==null?0:display.getRefreshRate();
-        String below=rendered>0&&shown+2<session.requestedRate?" · below target":"";
-        session.status.setText(rendered==0?"Waiting for video · target "+session.requestedRate+" Hz":String.format(Locale.ROOT,"≈%.0f fps shown · %.0f fps received\nTarget %d Hz · tablet %.0f Hz%s",shown,incoming,session.requestedRate,current,below));
-        if(++session.statisticsTicks%2==0)Log.i("DeskWingDisplay",String.format(Locale.ROOT,"requested_hz=%d screen_hz=%.2f received_count=%d rendered_count=%d sample_duration_ms=%.0f receive_fps=%.2f render_estimate_fps=%.2f dropped_count=%d",session.requestedRate,current,received,rendered,seconds*1000,incoming,shown,session.dropped.get()));
+        boolean still=rendered>0&&session.streamState!=null&&session.streamState.stillImage(now);
+        String below=rendered>0&&!still&&shown+2<session.requestedRate?" · below target":"";
+        session.status.setText(still?String.format(Locale.ROOT,"Still image · target %d Hz · tablet %.0f Hz",session.requestedRate,current):rendered==0?"Waiting for video · target "+session.requestedRate+" Hz":String.format(Locale.ROOT,"≈%.0f fps shown · %.0f fps received\nTarget %d Hz · tablet %.0f Hz%s",shown,incoming,session.requestedRate,current,below));
+        if(++session.statisticsTicks%2==0)Log.i("DeskWingDisplay",String.format(Locale.ROOT,"requested_hz=%d screen_hz=%.2f received_count=%d rendered_count=%d sample_duration_ms=%.0f receive_fps=%.2f render_estimate_fps=%.2f dropped_count=%d still_image=%s",session.requestedRate,current,received,rendered,seconds*1000,incoming,shown,session.dropped.get(),still));
         ui.postDelayed(session.statistics,1000);
     }
     private static boolean hardwareAvc(MediaCodecInfo info){
@@ -248,7 +253,7 @@ final class NativeDisplayVideo {
     private final class Session {
         final String id,mode;final int requestedRate;final float initialRefresh;final Connection connection;final Reply reply;final long epoch;
         final AtomicBoolean started=new AtomicBoolean(),replied=new AtomicBoolean();final AtomicLong received=new AtomicLong(),rendered=new AtomicLong(),dropped=new AtomicLong();final RenderedFrameMetrics renderMetrics=new RenderedFrameMetrics();
-        volatile boolean cancelled;volatile HttpsURLConnection pending;volatile String lease="";volatile int width,height;volatile Exception decoderError;
+        volatile boolean cancelled;volatile HttpsURLConnection pending;volatile String lease="";volatile int width,height;volatile Exception decoderError;volatile DisplayVideoProtocol.StreamState streamState;
         FrameLayout overlay;SurfaceView view;TextView status;Runnable statistics;DisplayManager manager;DisplayManager.DisplayListener listener;
         long statAt=System.nanoTime(),lastReceived,lastRendered;int statisticsTicks;
         Session(String id,String mode,int rate,float refresh,Connection connection,Reply reply,long epoch){this.id=id;this.mode=mode;requestedRate=rate;initialRefresh=refresh;this.connection=connection;this.reply=reply;this.epoch=epoch;}

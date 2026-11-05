@@ -12,6 +12,10 @@
     <Compile Include="../../companion/ExtendedDisplay.cs" Link="ExtendedDisplay.cs" />
     <Compile Include="../../companion/ExtendedDisplayTests.cs" Link="ExtendedDisplayTests.cs" />
     <Compile Include="../../companion/WindowsDisplayEncoder.cs" Link="WindowsDisplayEncoder.cs" />
+    <Compile Include="../../companion/WindowsDisplayCapture.cs" Link="WindowsDisplayCapture.cs" />
+    <Compile Include="../../companion/WindowsDxgiCapture.cs" Link="WindowsDxgiCapture.cs" />
+    <Compile Include="../../companion/WindowsDisplayCursor.cs" Link="WindowsDisplayCursor.cs" />
+    <Compile Include="../../companion/WindowsDisplayCursorOverlay.cs" Link="WindowsDisplayCursorOverlay.cs" />
     <Compile Include="../../companion/WindowsMediaFoundation.cs" Link="WindowsMediaFoundation.cs" />
   </ItemGroup>
 </Project>

@@ -40,7 +40,8 @@ final class NativeDisplaySession {
                     viewer = screen
                     let inbox = screen.inbox
                     let stream = DisplayVideoConnection(pc: pc, lease: newLease, format: format,
-                        receive: { unit in inbox.offer(unit) }, finish: { [weak self] reason in self?.stop(reason: reason) })
+                        receive: { unit in inbox.offer(unit) }, heartbeat: { inbox.noteHeartbeat() },
+                        finish: { [weak self] reason in self?.stop(reason: reason) })
                     connection = stream
                     presenter.present(screen, animated: false)
                     try stream.start()

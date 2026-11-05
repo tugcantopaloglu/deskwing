@@ -161,6 +161,30 @@ public final class DisplayVideoProtocolHarness {
         check(!DisplayVideoProtocol.configurationOnly(new DisplayVideoProtocol.Unit(0,0,pframe),false),"ordinary non-IDR remains a timestamped video picture");
         rejects(()->DisplayVideoProtocol.configurationOnly(new DisplayVideoProtocol.Unit(4,0,new byte[0]),false),IOException.class,"end packet is not interpreted as codec configuration");
     }
+    private static void heartbeatGuards() throws Exception {
+        DisplayVideoProtocol.Unit heartbeat=DisplayVideoProtocol.unit(input(packet(0,8,500_000,new byte[0])));
+        check(heartbeat.heartbeat()&&!heartbeat.key()&&!heartbeat.end()&&heartbeat.bytes.length==0,"empty standalone heartbeat is distinct from AVC and end packets");
+        rejects(()->DisplayVideoProtocol.unit(input(packet(1,8,0,new byte[]{0}))),IOException.class,"heartbeat payload is refused before decoding");
+        for(int flags=9;flags<=15;flags++){final int mixed=flags;rejects(()->DisplayVideoProtocol.unit(input(packet(0,mixed,0,new byte[0]))),IOException.class,"heartbeat cannot combine with video or end flags "+flags);}
+        rejects(()->DisplayVideoProtocol.unit(input(packet(0,8,-1,new byte[0]))),IOException.class,"negative heartbeat timestamp rejected");
+        rejects(()->DisplayVideoProtocol.configurationOnly(heartbeat,false),IOException.class,"heartbeat cannot enter the AVC decoder guard");
+        DisplayVideoProtocol.StreamState state=new DisplayVideoProtocol.StreamState(0);
+        check(!state.accept(heartbeat,false,500_000_000L)&&state.pictures()==0,"startup heartbeat does not increment received-video count");
+        check(!state.stillImage(600_000_000L),"heartbeats without an initial image cannot claim a still image");
+        state.requireFirstPictureWithin(4_999_999_999L);check(true,"first-picture deadline has a bounded startup allowance");
+        state.accept(new DisplayVideoProtocol.Unit(8,4_000_000,new byte[0]),false,4_000_000_000L);
+        rejects(()->state.requireFirstPictureWithin(5_000_000_000L),IOException.class,"heartbeats cannot extend the first-picture deadline");
+        check(state.accept(new DisplayVideoProtocol.Unit(1,1_000_000,IDR),false,5_000_000_000L),"video timestamps are independent of the later heartbeat clock");
+        check(state.pictures()==1,"one actual video picture increments the counter once");
+        check(!state.accept(new DisplayVideoProtocol.Unit(8,5_000_000,new byte[0]),false,5_500_000_000L)&&state.pictures()==1,"post-start heartbeat never increments video or decoder count");
+        check(state.stillImage(6_000_000_000L),"recent heartbeat identifies an unchanged already-rendered picture");
+        check(!state.stillImage(7_000_000_000L),"expired heartbeat cannot claim the image is still shared");
+        rejects(()->state.accept(new DisplayVideoProtocol.Unit(8,5_000_000,new byte[0]),false,6_000_000_000L),IOException.class,"replayed heartbeat timestamp rejected");
+        rejects(()->state.accept(new DisplayVideoProtocol.Unit(8,4_500_000,new byte[0]),false,6_000_000_000L),IOException.class,"decreasing heartbeat timestamp rejected");
+        check(state.accept(new DisplayVideoProtocol.Unit(0,1_100_000,new byte[]{0,0,0,1,0x61,1}),false,7_100_000_000L)&&!state.stillImage(7_200_000_000L),"new motion leaves the still-image status immediately");
+        rejects(()->state.accept(new DisplayVideoProtocol.Unit(0,1_050_000,new byte[]{0,0,0,1,0x61,1}),false,7_200_000_000L),IOException.class,"heartbeats do not weaken video timestamp ordering");
+        check(!state.accept(new DisplayVideoProtocol.Unit(2,0,join(SPS,PPS)),true,7_300_000_000L)&&state.pictures()==2,"configuration-only units remain outside received-video count");
+    }
     public static void main(String[] args) throws Exception {
         for(int[] dimensions:new int[][]{{1280,800},{1600,900},{1920,1080}}){
             for(int rate:new int[]{60,90,120,144,165,240}){
@@ -251,6 +275,7 @@ public final class DisplayVideoProtocolHarness {
         for(float invalid:new float[]{Float.NaN,Float.POSITIVE_INFINITY,Float.NEGATIVE_INFINITY,0,58.99f,240.51f})rejects(()->DisplayVideoProtocol.targetRate("match",invalid),IllegalArgumentException.class,"invalid active refresh rate rejected");
         for(String invalid:new String[]{null,"","120","MATCH","auto"})rejects(()->DisplayVideoProtocol.targetRate(invalid,120),IllegalArgumentException.class,"unsupported refresh mode rejected");
         configurationGuards();
+        heartbeatGuards();
         System.out.println(passed+" display-video protocol checks passed; no native decoder, capture, or network was used.");
     }
 }

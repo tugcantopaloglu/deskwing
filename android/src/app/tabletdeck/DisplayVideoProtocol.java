@@ -8,7 +8,7 @@ import java.util.UUID;
 /** Bounded DWV1 framing, independent of Android and suitable for hostile-input tests. */
 final class DisplayVideoProtocol {
     static final int MAX_ACCESS_UNIT=2*1024*1024;
-    static final int KEY_FRAME=1,CODEC_CONFIG=2,END=4;
+    static final int KEY_FRAME=1,CODEC_CONFIG=2,END=4,HEARTBEAT=8;
 
     static final class Header {
         final int width,height,refreshRate;
@@ -19,6 +19,7 @@ final class DisplayVideoProtocol {
         Unit(int flags,long presentationUs,byte[] bytes){this.flags=flags;this.presentationUs=presentationUs;this.bytes=bytes;}
         boolean key(){return (flags&KEY_FRAME)!=0;}
         boolean end(){return flags==END;}
+        boolean heartbeat(){return flags==HEARTBEAT;}
     }
     static Header header(DataInputStream input,int expectedWidth,int expectedHeight,int expectedRate) throws IOException {
         if(input.readInt()!=0x44575631||input.readUnsignedShort()!=1||input.readUnsignedShort()!=32)throw new IOException("The PC video protocol is unsupported.");
@@ -29,12 +30,33 @@ final class DisplayVideoProtocol {
     }
     static Unit unit(DataInputStream input) throws IOException {
         int length=input.readInt(),flags=input.readInt();long presentation=input.readLong();
-        if(length<0||length>MAX_ACCESS_UNIT||flags<0||(flags&~7)!=0||presentation<0)throw new IOException("The PC returned an invalid video frame.");
+        if(length<0||length>MAX_ACCESS_UNIT||flags<0||(flags&~15)!=0||presentation<0)throw new IOException("The PC returned an invalid video frame.");
+        if((flags&HEARTBEAT)!=0){if(flags!=HEARTBEAT||length!=0)throw new IOException("The PC returned an invalid video heartbeat.");return new Unit(flags,presentation,new byte[0]);}
         if((flags&END)!=0){if(flags!=END||length!=0)throw new IOException("The PC returned an invalid video ending.");return new Unit(flags,presentation,new byte[0]);}
         if(length<5)throw new IOException("The PC returned an empty video frame.");
         byte[] bytes=new byte[length];input.readFully(bytes);
         if(prefix(bytes,0)==0)throw new IOException("The PC returned unsupported video data.");
         return new Unit(flags,presentation,bytes);
+    }
+    /** Heartbeats prove an unchanged image is still shared; they are never video frames. */
+    static final class StreamState {
+        private final long startedAt;
+        private long heartbeatPts=-1,videoPts=-1,lastHeartbeatAt,lastVideoAt,pictures;
+        StreamState(long now){startedAt=now;}
+        synchronized void requireFirstPictureWithin(long now) throws IOException {
+            if(pictures==0&&now-startedAt>=5_000_000_000L)throw new IOException("The PC did not provide the first display picture in time. Start again.");
+        }
+        synchronized boolean accept(Unit unit,boolean configurationOnly,long now) throws IOException {
+            if(unit.heartbeat()){
+                if(unit.presentationUs<=heartbeatPts)throw new IOException("The PC returned an out-of-order display heartbeat.");
+                heartbeatPts=unit.presentationUs;lastHeartbeatAt=now;return false;
+            }
+            if(unit.end()||configurationOnly)return false;
+            if(unit.presentationUs<=videoPts)throw new IOException("The PC returned an out-of-order video frame.");
+            videoPts=unit.presentationUs;lastVideoAt=now;pictures++;return true;
+        }
+        synchronized boolean stillImage(long now){return pictures>0&&heartbeatPts>=0&&lastHeartbeatAt>=lastVideoAt&&now-lastVideoAt>=1_000_000_000L&&now-lastHeartbeatAt<1_500_000_000L;}
+        synchronized long pictures(){return pictures;}
     }
     /** SPS/PPS include the Annex-B start code required by MediaCodec's AVC codec-specific data. */
     static byte[][] configuration(byte[] data) throws IOException {

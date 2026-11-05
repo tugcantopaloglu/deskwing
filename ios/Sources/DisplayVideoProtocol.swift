@@ -22,10 +22,11 @@ struct DisplayVideoParser {
     private(set) var acceptedHeader = false
     private(set) var ended = false
     private var lastPresentation: UInt64?
+    private var lastHeartbeat: UInt64?
 
     init(expected: DisplayVideoFormat) { self.expected = expected }
 
-    mutating func append(_ bytes: Data, consume: (DisplayVideoUnit) throws -> Void) throws {
+    mutating func append(_ bytes: Data, heartbeat: (UInt64) -> Void = { _ in }, consume: (DisplayVideoUnit) throws -> Void) throws {
         guard !ended else { throw DeskError.message("The display stream already ended.") }
         // URLSession may combine multiple frames in one callback. Consume bounded pieces rather
         // than retaining an arbitrarily large callback while waiting for a claimed payload length.
@@ -35,11 +36,11 @@ struct DisplayVideoParser {
             guard buffer.count <= Self.maximumAccessUnit + 16 else { throw DeskError.message("The display packet is too large.") }
             let first = bytes.index(bytes.startIndex, offsetBy: offset), last = bytes.index(first, offsetBy: count)
             buffer.append(bytes.subdata(in: first..<last)); offset += count
-            try drain(consume: consume)
+            try drain(heartbeat: heartbeat, consume: consume)
             if ended && offset < bytes.count { throw DeskError.message("Unexpected data after the display stream ended.") }
         }
     }
-    private mutating func drain(consume: (DisplayVideoUnit) throws -> Void) throws {
+    private mutating func drain(heartbeat: (UInt64) -> Void, consume: (DisplayVideoUnit) throws -> Void) throws {
         if !acceptedHeader {
             guard buffer.count >= 32 else { return }
             guard Array(buffer.prefix(4)) == Array("DWV1".utf8), number(4, 2) == 1, number(6, 2) == 32,
@@ -52,7 +53,12 @@ struct DisplayVideoParser {
         }
         while buffer.count >= 16 {
             let length = Int(number(0, 4)), flags = number(4, 4), presentation = number(8, 8)
-            guard length <= Self.maximumAccessUnit, flags & ~UInt64(7) == 0 else { throw DeskError.message("The display frame exceeds its limits.") }
+            guard length <= Self.maximumAccessUnit, flags & ~UInt64(15) == 0 else { throw DeskError.message("The display frame exceeds its limits.") }
+            if flags & 8 != 0 {
+                guard flags == 8, length == 0, presentation <= UInt64(Int64.max),
+                      lastHeartbeat.map({ presentation > $0 }) ?? true else { throw DeskError.message("The display heartbeat is invalid.") }
+                lastHeartbeat = presentation; buffer.removeFirst(16); heartbeat(presentation); continue
+            }
             if flags & 4 != 0 {
                 guard flags == 4, length == 0, buffer.count == 16 else { throw DeskError.message("The display end packet is invalid.") }
                 buffer.removeAll(keepingCapacity: false); ended = true; return

@@ -8,6 +8,7 @@ final class DisplayVideoConnection: NSObject, URLSessionDataDelegate {
     private let lease: String
     private var parser: DisplayVideoParser
     private let receive: (DisplayVideoUnit) -> Void
+    private let heartbeat: () -> Void
     private let finish: (String) -> Void
     private let lock = NSLock()
     private var stopped = false
@@ -24,9 +25,9 @@ final class DisplayVideoConnection: NSObject, URLSessionDataDelegate {
     }()
 
     init(pc: PairedPC, lease: String, format: DisplayVideoFormat,
-         receive: @escaping (DisplayVideoUnit) -> Void, finish: @escaping (String) -> Void) {
+         receive: @escaping (DisplayVideoUnit) -> Void, heartbeat: @escaping () -> Void, finish: @escaping (String) -> Void) {
         self.pc = pc; self.lease = lease; self.parser = DisplayVideoParser(expected: format)
-        self.receive = receive; self.finish = finish
+        self.receive = receive; self.heartbeat = heartbeat; self.finish = finish
         super.init()
     }
     func start() throws {
@@ -89,7 +90,9 @@ final class DisplayVideoConnection: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard active else { return }
         do {
-            try parser.append(data) { [weak self] unit in guard let self, self.active else { return }; self.receive(unit) }
+            try parser.append(data, heartbeat: { [weak self] _ in guard let self, self.active else { return }; self.heartbeat() }) {
+                [weak self] unit in guard let self, self.active else { return }; self.receive(unit)
+            }
             if parser.ended { end("The PC ended this display session.") }
         } catch { end(error.localizedDescription) }
     }

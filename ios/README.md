@@ -20,6 +20,8 @@ Second display now requests a native, silent H.264 stream at 60 Hz or the tablet
 
 The native viewer clears its image, closes its video connection and releases the exact display lease on Exit, backgrounding, page replacement, pairing changes or host teardown. It never resumes automatically. A maximum of three queued units/four MiB prevents latency from accumulating; an overflow flushes decoding and waits for the next IDR with codec configuration. The stream parser validates the negotiated dimensions/rate, packet limits and timestamps. Windows pen injection remains a separate, explicitly enabled mode with its own lease and target controls. Native iOS playback and sustained frame rate require physical-device rehearsal; simulator compilation/tests alone do not establish them.
 
+Unchanged desktops send bounded zero-payload heartbeat records instead of repeated video frames. These records keep the connection alive without entering the decoder or inflating received FPS; after a second without a new picture, a live connection shows “Still image” with the target and screen refresh rates. Heartbeats cannot extend the five-second deadline for receiving the initial keyframe.
+
 ## Generate and build on a Mac
 
 Use Xcode 26 or newer with the iOS/iPadOS 26 SDK or newer for App Store upload. The app's deployment minimum is iOS 16; the upload SDK requirement and minimum supported OS are different settings. See [Apple's upcoming requirements](https://developer.apple.com/news/upcoming-requirements/).

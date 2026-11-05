@@ -13,6 +13,9 @@ final class DisplayFrameInbox {
     private var waitingForKeyframe = false
     private var received = 0
     private var dropped = 0
+    private var heartbeatPending = false
+    func noteHeartbeat() { lock.lock(); if !stopped { heartbeatPending = true }; lock.unlock() }
+    func takeHeartbeat() -> Bool { lock.lock(); defer { lock.unlock() }; let value = heartbeatPending; heartbeatPending = false; return value }
     func offer(_ unit: DisplayVideoUnit) {
         lock.lock(); defer { lock.unlock() }
         guard !stopped else { return }
@@ -42,7 +45,7 @@ final class DisplayFrameInbox {
     func waitForKeyframe() {
         lock.lock(); dropped += units.count; units.removeAll(keepingCapacity: true); bytes = 0; waitingForKeyframe = true; resync = true; lock.unlock()
     }
-    func stop() { lock.lock(); stopped = true; units.removeAll(); bytes = 0; lock.unlock() }
+    func stop() { lock.lock(); stopped = true; units.removeAll(); bytes = 0; heartbeatPending = false; lock.unlock() }
 }
 
 enum DisplayH264Format {
@@ -157,6 +160,10 @@ final class DisplayVideoController: UIViewController {
     private var received = 0
     private var dropped = 0
     private var reportedAt: CFTimeInterval = 0
+    private var startedAt: CFTimeInterval = 0
+    private var lastVideoAt: CFTimeInterval = 0
+    private var lastHeartbeatAt: CFTimeInterval = 0
+    private var receivedFirstKeyframe = false
     private(set) var currentRefreshRate = 0
 
     init(format: DisplayVideoFormat, sourceRefresh: Int, close: @escaping (String) -> Void) {
@@ -196,9 +203,12 @@ final class DisplayVideoController: UIViewController {
     @objc private func exitPressed() { close("closed") }
     @objc private func tick(_ link: CADisplayLink) {
         guard !ended else { return }
+        if startedAt == 0 { startedAt = link.timestamp }
         let interval = link.targetTimestamp - link.timestamp
         if interval > 0 { currentRefreshRate = Int((1 / interval).rounded()) }
         let (units, resync, count, lost) = inbox.take(); received += count; dropped += lost
+        if count > 0 { lastVideoAt = link.timestamp }
+        if inbox.takeHeartbeat() { lastHeartbeatAt = link.timestamp }
         if resync { displayLayer.flushAndRemoveImage(); builder.reset() }
         do {
             for unit in units {
@@ -207,18 +217,25 @@ final class DisplayVideoController: UIViewController {
                 else { ready = displayLayer.isReadyForMoreMediaData }
                 guard ready else { displayLayer.flushAndRemoveImage(); builder.reset(); inbox.waitForKeyframe(); dropped += 1; break }
                 if let (sample, changed) = try builder.sample(unit) {
+                    if unit.keyframe { receivedFirstKeyframe = true }
                     if changed { displayLayer.flushAndRemoveImage() }
                     if #available(iOS 17, *) { displayLayer.sampleBufferRenderer.enqueue(sample) }
                     else { displayLayer.enqueue(sample) }
                 }
             }
             if displayLayer.status == .failed { throw DeskError.message("The tablet could not decode this video. Start the display again.") }
+            if !receivedFirstKeyframe && link.timestamp - startedAt > 5 {
+                throw DeskError.message("The PC did not send the first display image in time. Start the display again.")
+            }
         } catch { close(error.localizedDescription); return }
         if reportedAt == 0 { reportedAt = link.timestamp }
         let elapsed = link.timestamp - reportedAt
         if elapsed >= 1 {
             let rate = Int((Double(received) / elapsed).rounded())
-            status.text = " \(rate) fps received · \(currentRefreshRate) Hz screen\n Target \(format.refreshRate) Hz · source \(sourceRefresh) Hz" + (dropped > 0 ? " · \(dropped) frames dropped " : " ")
+            let still = receivedFirstKeyframe && displayLayer.isReadyForDisplay && lastVideoAt > 0 &&
+                link.timestamp - lastVideoAt >= 1 && lastHeartbeatAt > 0 && link.timestamp - lastHeartbeatAt <= 1.5
+            let activity = still ? "Still image" : "\(rate) fps received"
+            status.text = " \(activity) · \(currentRefreshRate) Hz screen\n Target \(format.refreshRate) Hz · source \(sourceRefresh) Hz" + (dropped > 0 ? " · \(dropped) frames dropped " : " ")
             received = 0; dropped = 0; reportedAt = link.timestamp
         }
     }

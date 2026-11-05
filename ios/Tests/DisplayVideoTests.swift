@@ -6,6 +6,30 @@ import WebKit
 
 final class DisplayVideoTests: XCTestCase {
     @MainActor
+    func testHeartbeatsCannotExtendTheFirstImageDeadline() async throws {
+        let priorWindow = UIApplication.shared.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(frame: UIScreen.main.bounds), host = UIViewController()
+        window.rootViewController = host; window.makeKeyAndVisible()
+        let closed = expectation(description: "First image deadline remains absolute")
+        var reason = "", fulfilled = false
+        let viewer = DisplayVideoController(format: DisplayVideoFormat(width: 1280, height: 800, refreshRate: 60), sourceRefresh: 60) { message in
+            if !fulfilled { fulfilled = true; reason = message; closed.fulfill() }
+        }
+        let inbox = viewer.inbox
+        let heartbeats = Task { @MainActor in
+            for _ in 0..<40 {
+                guard !Task.isCancelled else { return }
+                inbox.noteHeartbeat()
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
+        defer { heartbeats.cancel(); viewer.stop(); viewer.dismiss(animated: false); window.isHidden = true; priorWindow?.makeKeyAndVisible() }
+        host.present(viewer, animated: false)
+        await fulfillment(of: [closed], timeout: 8)
+        XCTAssertTrue(reason.contains("first display image"), reason)
+        XCTAssertEqual(inbox.take().2, 0, "Heartbeats must not become received video frames.")
+    }
+    @MainActor
     func testNativeViewerKeepsTheWebControlPageVisibleToItsLifecycle() async throws {
         let priorWindow = UIApplication.shared.windows.first(where: \.isKeyWindow)
         let window = UIWindow(frame: UIScreen.main.bounds), host = UIViewController()
@@ -133,6 +157,7 @@ final class DisplayVideoTests: XCTestCase {
     func testRejectsUnknownFlagsOversizeAndMalformedEnd() {
         let invalid = [
             packet(picture, flags: 8),
+            packet(picture, flags: 16),
             packet(picture, length: UInt64(DisplayVideoParser.maximumAccessUnit) + 1),
             packet(Data(), flags: 0),
             packet(Data([0, 0, 1]), flags: 0),
@@ -172,6 +197,54 @@ final class DisplayVideoTests: XCTestCase {
             XCTAssertThrowsError(try parser.append(header() + packet(picture, flags: flags,
                 presentation: UInt64.max)) { _ in consumed += 1 })
             XCTAssertEqual(consumed, 0)
+        }
+    }
+
+    func testHeartbeatFragmentsRemainSeparateFromVideoTimestampsAndFrames() throws {
+        let wire = header() + packet(picture) + packet(Data(), flags: 8, presentation: 500_000)
+            + packet(picture, flags: 0, presentation: 16_667)
+            + packet(Data(), flags: 8, presentation: 1_000_000) + end
+        for split in 0...wire.count {
+            var parser = DisplayVideoParser(expected: format), hearts: [UInt64] = [], pictures: [UInt64] = []
+            if split > 0 {
+                try parser.append(wire.prefix(split), heartbeat: { hearts.append($0) }) {
+                    pictures.append($0.presentationMicroseconds)
+                }
+            }
+            if split < wire.count {
+                try parser.append(wire.suffix(wire.count - split), heartbeat: { hearts.append($0) }) {
+                    pictures.append($0.presentationMicroseconds)
+                }
+            }
+            try parser.finish()
+            XCTAssertEqual(hearts, [500_000, 1_000_000], "Split at byte \(split)")
+            XCTAssertEqual(pictures, [0, 16_667], "A heartbeat must not enter the video decoder.")
+        }
+    }
+
+    func testHeartbeatRejectsMixedFlagsPayloadAndTimestampOverflow() {
+        var invalid = [UInt64(9), 10, 12, 15].map { packet(Data(), flags: $0, presentation: 500_000) }
+        invalid.append(packet(Data([0]), flags: 8, presentation: 500_000))
+        invalid.append(packet(Data(), flags: 8, presentation: UInt64(Int64.max) + 1))
+        invalid.append(packet(Data(), flags: 8, presentation: UInt64.max))
+        for (index, bytes) in invalid.enumerated() {
+            var parser = DisplayVideoParser(expected: format), heartbeats = 0, pictures = 0
+            XCTAssertThrowsError(try parser.append(header() + bytes, heartbeat: { _ in heartbeats += 1 }) {
+                _ in pictures += 1
+            }, "Invalid heartbeat \(index)")
+            XCTAssertEqual(heartbeats, 0)
+            XCTAssertEqual(pictures, 0)
+        }
+    }
+
+    func testHeartbeatReplayOrBackwardTimestampCannotRefreshActivity() {
+        for next in [UInt64(500_000), 499_999] {
+            var parser = DisplayVideoParser(expected: format), hearts: [UInt64] = [], pictures = 0
+            let wire = header() + packet(Data(), flags: 8, presentation: 500_000)
+                + packet(Data(), flags: 8, presentation: next)
+            XCTAssertThrowsError(try parser.append(wire, heartbeat: { hearts.append($0) }) { _ in pictures += 1 })
+            XCTAssertEqual(hearts, [500_000])
+            XCTAssertEqual(pictures, 0)
         }
     }
 
@@ -312,6 +385,33 @@ final class DisplayVideoTests: XCTestCase {
         inbox.offer(key)
         inbox.stop()
         inbox.offer(key)
+        XCTAssertTrue(inbox.take().0.isEmpty)
+    }
+
+    func testInboxHeartbeatDoesNotCountAsVideoAndCannotSurviveStop() {
+        let inbox = DisplayFrameInbox()
+        XCTAssertFalse(inbox.takeHeartbeat())
+        inbox.noteHeartbeat(); inbox.noteHeartbeat()
+        let empty = inbox.take()
+        XCTAssertTrue(empty.0.isEmpty)
+        XCTAssertFalse(empty.1)
+        XCTAssertEqual(empty.2, 0)
+        XCTAssertEqual(empty.3, 0)
+        XCTAssertTrue(inbox.takeHeartbeat())
+        XCTAssertFalse(inbox.takeHeartbeat())
+
+        inbox.offer(DisplayVideoUnit(bytes: picture, keyframe: true, configuration: false, presentationMicroseconds: 0))
+        inbox.noteHeartbeat()
+        XCTAssertTrue(inbox.takeHeartbeat())
+        let video = inbox.take()
+        XCTAssertEqual(video.0.count, 1)
+        XCTAssertEqual(video.2, 1)
+        XCTAssertEqual(video.3, 0)
+
+        inbox.noteHeartbeat()
+        inbox.stop()
+        inbox.noteHeartbeat()
+        XCTAssertFalse(inbox.takeHeartbeat())
         XCTAssertTrue(inbox.take().0.isEmpty)
     }
 }

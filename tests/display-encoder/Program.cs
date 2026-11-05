@@ -11,6 +11,9 @@ Reject(()=>WindowsDisplayEncoder.Validate(1280,801,60),"odd height");
 Reject(()=>WindowsDisplayEncoder.Validate(1280,800,59),"rate below60");
 Reject(()=>WindowsDisplayEncoder.Validate(1280,800,241),"unbounded rate");
 Reject(()=>WindowsDisplayEncoder.Validate(5000,3000,60),"unbounded dimensions");
+Reject(()=>WindowsDisplayCapture.ValidateDimensions(1281,800),"odd capture width");
+Reject(()=>WindowsDisplayCapture.ValidateDimensions(1280,801),"odd capture height");
+Reject(()=>WindowsDisplayCapture.ValidateDimensions(5000,3000),"unbounded capture");
 byte[] Solid(byte b,byte g,byte r){var frame=new byte[16];for(var i=0;i<frame.Length;i+=4){frame[i]=b;frame[i+1]=g;frame[i+2]=r;frame[i+3]=255;}return frame;}
 var nv12=new byte[6];
 WindowsDisplayEncoder.BgraToNv12(Solid(0,0,0),8,2,2,nv12);Check(nv12.SequenceEqual(new byte[]{16,16,16,16,128,128}),"black limitedrange BT709");
@@ -24,7 +27,35 @@ Check(WindowsDisplayEncoder.ContainsNal(new byte[]{0,0,0,1,0x67,9,0,0,1,0x68,7},
 Check(!WindowsDisplayEncoder.ContainsNal(new byte[]{0,0,0,1},7),"truncated NAL");
 Check(Marshal.SizeOf<MfNative.OutputDataBuffer>()==(IntPtr.Size==8?32:16),"native output layout");
 Check(Marshal.SizeOf<MfNative.OutputStreamInfo>()==12,"native output info layout");
+Check(WindowsDisplayCursor.CalculatePlacement(1920,0,1280,800,2000,50,4,7)==new DisplayCursorPlacement(76,43),"cursor hotspot follows physical monitor position");
+Check(WindowsDisplayCursor.CalculatePlacement(-1280,-800,1280,800,-1280,-800,10,12)==new DisplayCursorPlacement(-10,-12),"negative monitor origin and off-edge icon clip");
+Check(WindowsDisplayCursor.CalculatePlacement(1920,0,1280,800,3199,799,0,0)==new DisplayCursorPlacement(1279,799),"last owned pixel includes cursor");
+Check(WindowsDisplayCursor.CalculatePlacement(1920,0,1280,800,3200,799,0,0) is null,"right edge excludes neighboring monitor cursor");
+Check(WindowsDisplayCursor.CalculatePlacement(1920,0,1280,800,3199,800,0,0) is null,"bottom edge excludes outside cursor");
+Check(WindowsDisplayCursor.CalculatePlacement(1920,0,1280,800,1919,10,100,100) is null,"outside anchor never overlays despite graphic overlap");
+Check(WindowsDisplayCursor.CalculatePlacement(int.MinValue,0,1280,800,int.MaxValue,5,0,0) is null,"cursor coordinate difference cannot overflow into owned monitor");
+Check(WindowsDisplayCursor.CalculatePlacement(0,0,1280,800,10,10,uint.MaxValue,0) is null,"oversized hotspot rejected");
+WindowsDisplayCursorOverlay.ValidateBuffer(new byte[16*16*4],16*4,16,16);
+Reject(()=>WindowsDisplayCursorOverlay.ValidateBuffer(new byte[16*16*4-1],16*4,16,16),"short cursor overlay buffer");
+Reject(()=>WindowsDisplayCursorOverlay.ValidateBuffer(new byte[16*16*4],16*4-1,16,16),"short cursor overlay stride");
+DxgiCaptureChecks.Run(Check);
 Console.WriteLine($"Display encoder pure checks: {checks} passed.");
+if(args.Contains("--native-resources")){
+    // Allocation/cleanup only. Capture is deliberately never called in this resource probe.
+    using(var warmup=new WindowsDisplayCapture(1280,800)){}
+    using var resourceProcess=Process.GetCurrentProcess();
+    var baseline=ResourceProbe.GetGuiResources(resourceProcess.Handle,0);
+    for(var index=0;index<100;index++)using(var capture=new WindowsDisplayCapture(1280,800)){}
+    for(var index=0;index<100;index++)using(var overlay=new WindowsDisplayCursorOverlay(1280,800)){}
+    var standardCursor=ResourceProbe.LoadCursor(IntPtr.Zero,new IntPtr(32512));
+    if(standardCursor==IntPtr.Zero)throw new Exception("Cannot load shared standard cursor for resource probe.");
+    for(var index=0;index<1000;index++){
+        if(WindowsDisplayCursor.GetPlacement(standardCursor,1920,0,1280,800,2000,50) is null)throw new Exception("Standard cursor hotspot was unavailable.");
+    }
+    var after=ResourceProbe.GetGuiResources(resourceProcess.Handle,0);
+    if(after!=baseline)throw new Exception($"GDI capture resources leaked: before={baseline}, after={after}.");
+    Console.WriteLine($"Persistent capture resource probe: 100 capture and 100 overlay allocations/disposals plus 1000 cursor bitmap queries, GDI handles {baseline} → {after}, no desktop capture.");
+}
 if(!args.Contains("--native"))return;
 
 // This opt-in probe generates synthetic pixels. It never captures any desktop/window or sends input.
@@ -32,6 +63,8 @@ var width=1280;var height=800;var rateArg=Array.IndexOf(args,"--rate");var rate=
 var widthArg=Array.IndexOf(args,"--width");if(widthArg>=0)width=int.Parse(args[widthArg+1]);
 var heightArg=Array.IndexOf(args,"--height");if(heightArg>=0)height=int.Parse(args[heightArg+1]);
 var countArg=Array.IndexOf(args,"--frames");var count=countArg>=0?int.Parse(args[countArg+1]):180;
+var forceKeyFrame=args.Contains("--force-idr");
+if(forceKeyFrame&&count<20)throw new ArgumentException("The forced recovery frame probe needs at least 20 frames.");
 var outputArg=Array.IndexOf(args,"--output");using var output=outputArg>=0?File.Create(Path.GetFullPath(args[outputArg+1])):null;
 var bgra=new byte[checked(width*height*4)];
 for(var y=0;y<height;y++)for(var x=0;x<width;x++){var p=(y*width+x)*4;bgra[p]=(byte)(x%256);bgra[p+1]=(byte)(y%256);bgra[p+2]=(byte)((x+y)%256);bgra[p+3]=255;}
@@ -40,13 +73,23 @@ var times=new List<double>();var frames=0;var keyframes=0;long bytes=0;
 for(var index=0;index<count;index++){
     // Change a vertical cursor stripe, providing actual inter-frame changes without touching the PC.
     var column=index%width;for(var y=0;y<height;y++){var p=(y*width+column)*4;bgra[p]=(byte)(index%256);bgra[p+1]=255;bgra[p+2]=0;}
-    var start=Stopwatch.GetTimestamp();var frame=encoder.Encode(bgra,width*4,index*10_000_000L/rate);var elapsed=Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+    if(forceKeyFrame&&index==17)encoder.RequestKeyFrame();
+    var timestamp=index*10_000_000L/rate+(forceKeyFrame&&index>=17?5_000_000:0);
+    var start=Stopwatch.GetTimestamp();var frame=encoder.Encode(bgra,width*4,timestamp);var elapsed=Stopwatch.GetElapsedTime(start).TotalMilliseconds;
     if(index>=10)times.Add(elapsed);
     if(frame is null)continue;
     frames++;if(frame.KeyFrame)keyframes++;bytes+=frame.Data.Length;output?.Write(frame.Data);
     if(frame.Data.Length>WindowsDisplayEncoder.MaximumFrameBytes||!WindowsDisplayEncoder.ContainsStartCode(frame.Data))throw new Exception("Native encoder returned invalid accessunit.");
-    if(frame.Timestamp100ns!=index*10_000_000L/rate)throw new Exception("Lowlatency encoder changed the capture timestamp.");
+    if(frame.Timestamp100ns!=timestamp)throw new Exception("Lowlatency encoder changed the capture timestamp.");
+    if(forceKeyFrame&&index==17&&(!frame.KeyFrame||!WindowsDisplayEncoder.ContainsNal(frame.Data,5)||!WindowsDisplayEncoder.ContainsNal(frame.Data,7)||!WindowsDisplayEncoder.ContainsNal(frame.Data,8)))throw new Exception("The first frame after a recovery request was not an IDR with SPS/PPS.");
     if(frame.KeyFrame&&(!WindowsDisplayEncoder.ContainsNal(frame.Data,7)||!WindowsDisplayEncoder.ContainsNal(frame.Data,8)))throw new Exception("Keyframe missingSPS/PPS.");
 }
 times.Sort();Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new{width,height,requestedRate=rate,inputFrames=count,encodedFrames=frames,keyframes,bytes,meanEncodeMs=times.Average(),p95EncodeMs=times[(int)((times.Count-1)*.95)],syntheticThroughputFps=1000/times.Average(),encoder=encoder.Name,hardware=encoder.HardwareAccelerated}));
 if(frames!=count)throw new Exception("Lowlatency native encoder did not emit one accessunitperinputframe.");
+if(forceKeyFrame)Console.WriteLine("Forced recovery IDR with SPS/PPS passed immediately after a 500 ms timestamp gap.");
+
+internal static class ResourceProbe
+{
+    [DllImport("user32.dll")] internal static extern uint GetGuiResources(IntPtr process,uint flags);
+    [DllImport("user32.dll",EntryPoint="LoadCursorW")] internal static extern IntPtr LoadCursor(IntPtr instance,IntPtr name);
+}

@@ -30,9 +30,10 @@ internal static class NativeCaptureProbe
             if(first is null||motion.HasExited)throw new InvalidOperationException("The motion fixture exited before capture: "+await motion.StandardError.ReadToEndAsync());
             Console.WriteLine(first);
             await Task.Delay(500);
-            using var video=new DisplayStream(display);
             foreach(var requested in new[]{60,120})
             {
+                var validation=new List<double>();var producing=new List<double>();var capturing=new List<double>();var encoding=new List<double>();NativeDisplayVideoProducer? producer=null;
+                using var video=new DisplayStream(display.CaptureVideoTarget,target=>{var timer=Stopwatch.StartNew();display.ValidateVideoTarget(target);validation.Add(timer.Elapsed.TotalMilliseconds);},(target,rate)=>{producer=new NativeDisplayVideoProducer(target,rate,(capture,encode)=>{capturing.Add(capture);encoding.Add(encode);},useDxgi:true);return new TimedProducer(producer,producing);});
                 var lease=video.Start(new(requested),"native-capture-probe");
                 using var cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(8));
                 using var sink=new Counter();
@@ -40,6 +41,7 @@ internal static class NativeCaptureProbe
                 catch(OperationCanceledException) when(cancellation.IsCancellationRequested){}
                 var sample=sink.Result(requested,created.RefreshRate);output.Add(sample);
                 Console.WriteLine(JsonSerializer.Serialize(sample));
+                Console.WriteLine(JsonSerializer.Serialize(new{requested,freshDesktopFrames=producer?.FreshDesktopFrames,capturedFrames=producer?.CapturedFrames,validationCalls=validation.Count,validationMeanMs=validation.Count>0?validation.Average():0,producerMeanMs=producing.Count>0?producing.Average():0,captureMeanMs=capturing.Count>0?capturing.Average():0,encodeMeanMs=encoding.Count>0?encoding.Average():0}));
             }
         }
         finally
@@ -61,23 +63,31 @@ internal static class NativeCaptureProbe
         }
     }
 
+    private sealed class TimedProducer(IDisplayVideoProducer inner,List<double> times):IDisplayVideoProducer
+    {
+        public string EncoderName=>inner.EncoderName;public bool HardwareAccelerated=>inner.HardwareAccelerated;
+        public EncodedVideoFrame? Next(long timestamp100ns,CancellationToken cancellation){var timer=Stopwatch.StartNew();var result=inner.Next(timestamp100ns,cancellation);times.Add(timer.Elapsed.TotalMilliseconds);return result;}
+        public void Dispose()=>inner.Dispose();
+    }
+
     private sealed class Counter : Stream
     {
         private readonly Stopwatch clock=Stopwatch.StartNew();
         private readonly List<double> intervals=[];
-        private int state,expectedPayload,frames;
+        private int state,expectedPayload,frames,warmFrames;
         private long totalBytes;
-        private double first,last;
+        private double first,last,warmFirst;
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer,CancellationToken cancellationToken=default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var bytes=buffer.Span;totalBytes+=bytes.Length;
             if(state==0){if(bytes.Length!=32||!bytes[..4].SequenceEqual("DWV1"u8))throw new InvalidOperationException("Missing video header.");state=1;}
-            else if(state==1){if(bytes.Length!=16)throw new InvalidOperationException("Missing frame header.");expectedPayload=checked((int)BinaryPrimitives.ReadUInt32BigEndian(bytes));state=2;}
+            else if(state==1){if(bytes.Length!=16)throw new InvalidOperationException("Missing frame header.");expectedPayload=checked((int)BinaryPrimitives.ReadUInt32BigEndian(bytes));if(BinaryPrimitives.ReadUInt32BigEndian(bytes[4..])==8){if(expectedPayload!=0)throw new InvalidOperationException("Invalid heartbeat.");return ValueTask.CompletedTask;}state=2;}
             else
             {
                 if(bytes.Length!=expectedPayload)throw new InvalidOperationException("Partial encoded frame.");
                 var time=clock.Elapsed.TotalSeconds;if(frames==0)first=time;else intervals.Add((time-last)*1000);
+                if(time-first>=1){if(warmFrames==0)warmFirst=time;warmFrames++;}
                 last=time;frames++;state=1;
             }
             return ValueTask.CompletedTask;
@@ -85,7 +95,7 @@ internal static class NativeCaptureProbe
         internal object Result(int requested,double source)
         {
             intervals.Sort();var elapsed=last-first;
-            return new{requestedRefreshRate=requested,sourceRefreshRate=source,frames,elapsedSeconds=Math.Round(elapsed,3),encodedAndFramedFps=Math.Round(elapsed>0?(frames-1)/elapsed:0,2),p95FrameGapMs=Math.Round(intervals.Count>0?intervals[(int)((intervals.Count-1)*.95)]:0,2),maximumFrameGapMs=Math.Round(intervals.Count>0?intervals[^1]:0,2),megabitsPerSecond=Math.Round(elapsed>0?totalBytes*8/elapsed/1000000:0,2),bytesRetained=0};
+            return new{requestedRefreshRate=requested,sourceRefreshRate=source,frames,elapsedSeconds=Math.Round(elapsed,3),encodedAndFramedFps=Math.Round(elapsed>0?(frames-1)/elapsed:0,2),afterOneSecondWarmupFps=Math.Round(warmFrames>1?(warmFrames-1)/(last-warmFirst):0,2),p95FrameGapMs=Math.Round(intervals.Count>0?intervals[(int)((intervals.Count-1)*.95)]:0,2),maximumFrameGapMs=Math.Round(intervals.Count>0?intervals[^1]:0,2),megabitsPerSecond=Math.Round(elapsed>0?totalBytes*8/elapsed/1000000:0,2),bytesRetained=0};
         }
         public override Task FlushAsync(CancellationToken cancellationToken)=>Task.CompletedTask;
         public override void Flush(){}

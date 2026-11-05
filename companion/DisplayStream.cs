@@ -1,8 +1,6 @@
 using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Microsoft.Win32.SafeHandles;
@@ -113,6 +111,7 @@ internal sealed class DisplayStream : IDisposable
             using var pacer=new VideoPacer();
             var framePeriod=Stopwatch.Frequency/(double)current.Rate;
             double next=0;
+            long heartbeatAt=0;
             var firstFrame=true;
             while(true)
             {
@@ -133,9 +132,20 @@ internal sealed class DisplayStream : IDisposable
                     Validate(current,stillAuthorized,ct);
                     Write(output,frame.Data,ct);
                     firstFrame=false;
+                    heartbeatAt=clock.ElapsedMilliseconds;
+                }
+                else if(clock.ElapsedMilliseconds-heartbeatAt>=500)
+                {
+                    // An unchanged DXGI desktop need not be recaptured or encoded. A bounded
+                    // heartbeat keeps the pinned connection alive without inventing video FPS.
+                    Validate(current,stillAuthorized,ct);
+                    Write(output,HeartbeatHeader((ulong)(clock.ElapsedTicks*(1000000.0/Stopwatch.Frequency))),ct);
+                    heartbeatAt=clock.ElapsedMilliseconds;
                 }
                 next+=framePeriod;
-                if(next<clock.ElapsedTicks)next=clock.ElapsedTicks;
+                // Keep the original cadence through a small overrun; the next capture is always
+                // fresh. Only abandon a missed interval once more than one whole period is late.
+                if(next<clock.ElapsedTicks-framePeriod)next=clock.ElapsedTicks;
             }
         }
         catch(PendingWriteException ex)
@@ -214,47 +224,63 @@ internal sealed class DisplayStream : IDisposable
         BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(4),keyFrame?1U:0U);BinaryPrimitives.WriteUInt64BigEndian(header.AsSpan(8),timestampMicroseconds);
         return header;
     }
+    internal static byte[] HeartbeatHeader(ulong timestampMicroseconds)
+    {
+        var header=new byte[16];BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(4),8);
+        BinaryPrimitives.WriteUInt64BigEndian(header.AsSpan(8),timestampMicroseconds);return header;
+    }
 }
 
 internal sealed class NativeDisplayVideoProducer : IDisplayVideoProducer
 {
     private readonly DisplayVideoTarget target;
     private readonly WindowsDisplayEncoder encoder;
-    private readonly Bitmap pixels;
-    private readonly Graphics graphics;
-    private readonly byte[] bgra;
+    private readonly WindowsDisplayCapture? capture;
+    private readonly WindowsDxgiCapture? gpuCapture;
+    private readonly WindowsDisplayCursorOverlay? cursorOverlay;
+    private readonly Action<double,double>? observeTimings;
+    private long lastEncodedTimestamp=-1;
     private readonly IntPtr previousDpi;
-    internal NativeDisplayVideoProducer(DisplayVideoTarget target,int refreshRate)
+    internal long FreshDesktopFrames {get;private set;}
+    internal long CapturedFrames {get;private set;}
+    internal NativeDisplayVideoProducer(DisplayVideoTarget target,int refreshRate,Action<double,double>? observeTimings=null,bool useDxgi=true)
     {
-        this.target=target;
+        this.target=target;this.observeTimings=observeTimings;
         previousDpi=SetThreadDpiAwarenessContext(new IntPtr(-4));
         if(previousDpi==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error(),"Cannot establish physical-pixel video coordinates.");
         try
         {
             encoder=new(target.Width,target.Height,refreshRate);
-            pixels=new(target.Width,target.Height,PixelFormat.Format32bppArgb);
-            graphics=Graphics.FromImage(pixels);bgra=new byte[checked(target.Width*target.Height*4)];
+            if(useDxgi)
+            {
+                try{gpuCapture=new(target.SourceName,target.X,target.Y,target.Width,target.Height);}
+                catch(NotSupportedException) when(refreshRate==60){capture=new(target.Width,target.Height);}
+                catch(NotSupportedException ex){throw new InvalidOperationException("This Windows display cannot provide the selected high refresh rate. Choose 60 Hz or use a compatible display driver.",ex);}
+                if(gpuCapture is not null)cursorOverlay=new(target.Width,target.Height);
+            }
+            else capture=new(target.Width,target.Height);
         }
-        catch{graphics?.Dispose();pixels?.Dispose();encoder?.Dispose();SetThreadDpiAwarenessContext(previousDpi);throw;}
+        catch{cursorOverlay?.Dispose();gpuCapture?.Dispose();capture?.Dispose();encoder?.Dispose();SetThreadDpiAwarenessContext(previousDpi);throw;}
     }
     public string EncoderName=>encoder.Name;
     public bool HardwareAccelerated=>encoder.HardwareAccelerated;
     public EncodedVideoFrame? Next(long timestamp100ns,CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();
-        graphics.CopyFromScreen(target.X,target.Y,0,0,pixels.Size,CopyPixelOperation.SourceCopy);
-        var locked=pixels.LockBits(new Rectangle(0,0,target.Width,target.Height),ImageLockMode.ReadOnly,PixelFormat.Format32bppArgb);
-        try
-        {
-            var stride=target.Width*4;
-            if(locked.Stride==stride)Marshal.Copy(locked.Scan0,bgra,0,bgra.Length);
-            else for(var row=0;row<target.Height;row++)Marshal.Copy(IntPtr.Add(locked.Scan0,row*locked.Stride),bgra,row*stride,stride);
-        }
-        finally{pixels.UnlockBits(locked);}
+        var captureStarted=observeTimings is null?0:Stopwatch.GetTimestamp();
+        var bgra=gpuCapture is not null?gpuCapture.Capture(cancellation):capture!.Capture(target.X,target.Y);
+        if(bgra is null)return null;
+        CapturedFrames++;if(gpuCapture?.WasUpdated==true)FreshDesktopFrames++;
+        if(gpuCapture?.SeparateCursorVisible==true)cursorOverlay!.Overlay(bgra,target.Width*4,target.X,target.Y);
+        var encodeStarted=observeTimings is null?0:Stopwatch.GetTimestamp();
         cancellation.ThrowIfCancellationRequested();
-        return encoder.Encode(bgra,target.Width*4,timestamp100ns);
+        if(lastEncodedTimestamp>=0&&timestamp100ns-lastEncodedTimestamp>=5_000_000)encoder.RequestKeyFrame();
+        var result=encoder.Encode(bgra,target.Width*4,timestamp100ns);
+        lastEncodedTimestamp=timestamp100ns;
+        observeTimings?.Invoke(Stopwatch.GetElapsedTime(captureStarted,encodeStarted).TotalMilliseconds,Stopwatch.GetElapsedTime(encodeStarted).TotalMilliseconds);
+        return result;
     }
-    public void Dispose(){try{graphics.Dispose();pixels.Dispose();encoder.Dispose();}finally{if(previousDpi!=IntPtr.Zero)SetThreadDpiAwarenessContext(previousDpi);}}
+    public void Dispose(){try{cursorOverlay?.Dispose();gpuCapture?.Dispose();capture?.Dispose();encoder.Dispose();}finally{if(previousDpi!=IntPtr.Zero)SetThreadDpiAwarenessContext(previousDpi);}}
     [DllImport("user32.dll",SetLastError=true)]private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
 }
 
