@@ -1,6 +1,16 @@
 # DeskWing high-refresh security review — 2026-11-05
 
-Final result: **no new Snyk findings**. The final root scan succeeded at **23:23:36 Europe/Istanbul** with seven pre-existing Low findings, zero Medium and zero High. Both separately scanned generated Media Foundation probes reported zero issues. No suppressions were added.
+Current status: **Second Display is deferred; its Android cleanup remains unverified work in progress.** The WIP root scan at **23:39:06 Europe/Istanbul** found no new Snyk issues: seven pre-existing Low findings, zero Medium and zero High. This static result does not clear the observed Android launch crash or establish release readiness. The stable main release is separate and retains its previously recorded scan.
+
+The prior root rescan at **23:23:36 Europe/Istanbul** also reported seven pre-existing Low findings, zero Medium and zero High. Both separately scanned generated Media Foundation probes reported zero issues. No suppressions were added.
+
+## Deferred Android cleanup checkpoint
+
+Physical launch of the high-refresh APK exposed `NetworkOnMainThreadException` in TLS socket closure through `FastLink.reset`, called from `MainActivity.resetWebDocument` during navigation. Independent review also identified a UI-thread `HttpsURLConnection.disconnect()` in `NativeDisplayVideo.stop`.
+
+The owner saved the unfinished cleanup at **`dd682302a51abd2abcbd5ba42b2a07967eb59606`**, changing `FastLink.java`, `NativeDisplayVideo.java`, and `tests/java/FastLinkHarness.java`, and adding `NetworkCloseQueue.java`. The user then deferred Second Display. Review, compilation, lifecycle/concurrency tests and physical retesting of this checkpoint were not completed. It must remain outside the stable release until that work is resumed and verified; StrictMode must not be weakened to hide the crash.
+
+The actual `snyk_code_scan` was invoked on the complete frozen high-refresh root after the checkpoint, using the same official MCP bridge described below. It succeeded with **7 Low / 0 Medium / 0 High**, matching the baseline exactly. Local evidence: `.test-output/snyk-high-refresh-cleanup-wip-2026-11-05.json`. No dependency input changed and no new scanner finding required remediation. No further implementation or device action was performed for this deferred checkpoint.
 
 ## Scope and actual scanner
 
@@ -26,7 +36,7 @@ The official cached Snyk CLI **1.1308.3** hosted `snyk mcp -t stdio`. JSON-RPC `
 - Android startup: an independent five-second watchdog covers partial header/access-unit reads and disconnects only its exact pending connection. Acceptance/expiry is atomic; heartbeats cannot satisfy or extend first-picture startup. This closes the per-read-timeout trickle gap found during final readback.
 - Main pen preview: monotonic elapsed-time checks discard a late native capture even if a timer callback is delayed. Temporary busy retries retain only the same session's image for at most 1,500 ms from its original request; hard errors and lease/target/lifecycle changes still clear immediately.
 
-Independent reviewers rechecked the repaired native and backend boundaries. No unresolved concrete manual finding remains in the final scanned source.
+Independent reviewers rechecked these repaired native and backend boundaries before the physical launch. The subsequent launch crash and unfinished cleanup review supersede the earlier manual-clearance status, as recorded above.
 
 ## Boundaries verified
 
