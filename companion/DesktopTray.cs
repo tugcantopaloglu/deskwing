@@ -10,7 +10,7 @@ public sealed class DesktopTray : IDisposable
     [DllImport("kernel32.dll")]private static extern IntPtr GetConsoleWindow();
     [DllImport("user32.dll")]private static extern bool ShowWindow(IntPtr window,int command);
     private readonly TaskCompletionSource<Forms.Control> ready=new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private DesktopConsole? console;
+    private DesktopConsole? console,inkWindow;
     private readonly string editor,dataDirectory;
     private readonly Action checkOnOpen;
     public DesktopTray(string editor,string dataDirectory,DesktopPreferences preferences,ReleaseUpdates updates,Action stop,bool openWindow=false)
@@ -22,6 +22,7 @@ public sealed class DesktopTray : IDisposable
             using var control=new Forms.Control();_ = control.Handle;dispatcher=control;
             using var menu=new Forms.ContextMenuStrip();
             menu.Items.Add("Open DeskWing",null,(_,_)=>ShowConsole());
+            menu.Items.Add("Open ink window",null,(_,_)=>ShowInkWindow());
             var startup=new Forms.ToolStripMenuItem("Start with Windows"){Checked=DesktopPreferences.StartsWithWindows(),CheckOnClick=false};
             startup.Click+=(_,_)=>{try{DesktopPreferences.SetStartup(!startup.Checked);startup.Checked=DesktopPreferences.StartsWithWindows();}catch(Exception ex){Forms.MessageBox.Show(ex.Message,"DeskWing");}};menu.Items.Add(startup);
             var usb=new Forms.ToolStripMenuItem("Reconnect USB automatically"){Checked=preferences.Get().UsbReconnect,CheckOnClick=false};
@@ -35,11 +36,13 @@ public sealed class DesktopTray : IDisposable
             menu.Items.Add("Exit",null,(_,_)=>stop());
             ShowWindow(GetConsoleWindow(),0);
             ready.TrySetResult(control);if(openWindow)control.BeginInvoke(new Action(ShowConsole));
-            try{Forms.Application.Run();}finally{console?.Shutdown();updates.Found-=Notify;icon.Visible=false;dispatcher=null;}
+            try{Forms.Application.Run();}finally{console?.Shutdown();inkWindow?.Shutdown();updates.Found-=Notify;icon.Visible=false;dispatcher=null;}
         }){IsBackground=true,Name="DeskWing tray"};
         thread.SetApartmentState(ApartmentState.STA);thread.Start();
     }
     private void ShowConsole(){if(console is null||console.IsDisposed)console=new DesktopConsole(editor,dataDirectory);console.Open();checkOnOpen();}
+    private void ShowInkWindow(){if(inkWindow is null||inkWindow.IsDisposed)inkWindow=new DesktopConsole(DesktopConsole.InkWindowAddress(editor),dataDirectory,true);inkWindow.Open();}
     public async Task OpenConsole(){var control=await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));control.BeginInvoke(new Action(ShowConsole));}
+    public async Task OpenInkWindow(){var control=await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));var opened=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);control.BeginInvoke(new Action(()=>{try{ShowInkWindow();opened.TrySetResult();}catch(Exception ex){opened.TrySetException(ex);}}));await opened.Task.WaitAsync(TimeSpan.FromSeconds(5));}
     public void Dispose(){try{dispatcher?.BeginInvoke(new Action(Forms.Application.ExitThread));}catch(InvalidOperationException){}thread.Join(2000);}
 }

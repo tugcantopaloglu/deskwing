@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import CoreFoundation
 
 enum DeskError: LocalizedError {
     case message(String)
@@ -78,6 +79,17 @@ enum HostPolicy {
         if path == "/local/export-image" { return 12 * 1024 * 1024 }
         if path == "/api/ink" { return maximumBodyBytes(path) + 16384 }
         return 16384
+    }
+    static func requestedFullscreen(_ body: [String: Any], foreground: Bool, presentingTool: Bool) throws -> Bool {
+        guard body.count == 1, let value = body["enabled"] as? NSNumber,
+              CFGetTypeID(value) == CFBooleanGetTypeID() else {
+            throw DeskError.message("Full screen requires an enabled boolean.")
+        }
+        let enabled = value.boolValue
+        guard !enabled || (foreground && !presentingTool) else {
+            throw DeskError.message("Return to DeskWing and close the open sheet before entering full screen.")
+        }
+        return enabled
     }
     static func dispatchDeadline(_ path: String) -> TimeInterval { path == "/api/pen" ? 0.5 : 2 }
     static func needsDispatchDeadline(_ path: String, method: String, body: [String: Any]) -> Bool {

@@ -7,7 +7,8 @@ function check(condition,label){assert.ok(condition,label);passed++;console.log(
 async function port(){const server=net.createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const value=server.address().port;await new Promise(resolve=>server.close(resolve));return value;}
 function fixtureTls(){
  const script='$ErrorActionPreference="Stop"; $certificate=[System.Security.Cryptography.X509Certificates.X509Certificate2]::new([IO.File]::ReadAllBytes($env:DESKWING_PEN_TEST_PFX),$null,[System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet); try { [Console]::Write([Convert]::ToBase64String($certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))) } finally { $certificate.Dispose() }';
- const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,encoding:'utf8',timeout:15000,env:{...process.env,DESKWING_PEN_TEST_PFX:path.join(fixture,'companion.pfx')}});
+ // A cold hosted Windows runner can spend more than 15 seconds starting Windows PowerShell.
+ const result=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,encoding:'utf8',timeout:60000,env:{...process.env,DESKWING_PEN_TEST_PFX:path.join(fixture,'companion.pfx')}});
  if(result.error||result.status!==0)throw Error('Could not read the isolated test certificate: '+(result.error?.message||result.stderr));
  const certificate=new crypto.X509Certificate(Buffer.from(result.stdout.trim(),'base64'));
  return {ca:certificate.toString(),checkServerIdentity:(_host,peer)=>peer.raw?.equals(certificate.raw)?undefined:Error('The test companion certificate does not match its private fixture.')};

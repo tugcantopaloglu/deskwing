@@ -138,6 +138,21 @@ components:
     textColor: "{colors.secondary}"
     rounded: "{rounded.field}"
     padding: "14px 16px"
+  ink-tool-drawer:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+    padding: "16px"
+  pen-input-tools:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+    padding: "16px"
+  ink-window-tool-drawer:
+    backgroundColor: "{colors.canvas}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+    padding: "14px"
 ---
 
 # Design System: DeskWing
@@ -213,7 +228,11 @@ The desktop console has a 216px sidebar and 72px header. At 1000px or below the 
 
 The board editor uses a preview/inspector split: `minmax(320px, 1.3fr) minmax(280px, 1fr)`, with a 28px gap. At 1100px or below this becomes `minmax(240px, 1fr) minmax(230px, .9fr)` with an 18px gap. At 760px or below the inspector follows the preview vertically. Preview density choices are 12, 24, and 40; the preview paginates instead of growing without bounds.
 
-Ink uses a 3:1 drawing/notes split with a 24px gap. The paper has an 8:5 aspect ratio. At 1050px or below notes move beneath the drawing. At 580px or below toolbar spacing and paper corners tighten. Fullscreen hides unrelated app chrome, preserves a visible exit and sync state, and fits that same paper ratio into the available area. Show/Hide notes changes available space; it does not stretch the drawing. At 700px or below fullscreen notes move under the drawing. The canvas remains distinct from ordinary scrollable fields.
+Ink uses a 3:1 drawing/notes split with a 24px gap. The paper has an 8:5 aspect ratio. At 1050px or below notes move beneath the drawing. At 580px or below toolbar spacing and paper corners tighten. Immersive fullscreen has zero outer padding or reserved toolbar space: the paper fills the background, with floating tools/exit and an optional overlay drawer. The actual drawing preserves its ratio; unused paper-colored bands on other screen ratios are not drawable. Show/Hide notes changes available space without stretching the drawing. At 700px or below fullscreen notes move under the drawing.
+
+Pen tablet also removes permanent chrome in fullscreen. Its default Fill tablet mapping uses the whole input area and can stretch coordinates relative to a differently proportioned target. Match PC proportions fits the target ratio with inactive edges. Keep that user-visible distinction explicit.
+
+Both native PC windows use resizable/maximizable borders and a 620×480 minimum window size. Main DeskWing defaults to 1280×860; DeskWing Ink defaults to 1000×740. The separate ink view keeps the ordinary Windows caption and border, removes the application sidebar/header, and fits the paper into the full client area with zero outer padding. Floating tools and optional notes overlays preserve drawing space at smaller window sizes. Window sizing is independent of the shared document and is not persisted across newly created windows.
 
 Primary tablet and ordinary form controls use a 48px minimum height. New editor, pen, and live-filter controls commonly use 44px. Desktop sidebar controls use 42px at normal widths and 44px in the narrow layout; compact editor selection/drag affordances are smaller supporting targets. Preserve these distinctions instead of claiming every target is 44px.
 
@@ -221,7 +240,7 @@ Spacing tokens record recurring observed values, not an enforced mathematical sc
 
 ## Elevation & Depth
 
-Depth primarily comes from surface tone, a single-pixel outline, and spacing. Editor columns and readiness rows use dividers, not nested decorative cards. Shadows are confined to transient notices, the fader thumb, and the floating handwriting shortcut. A modal backdrop darkens the workspace; ordinary desktop task views are full-area panels with no radius or shadow.
+Depth primarily comes from surface tone, a single-pixel outline, and spacing. Editor columns and readiness rows use dividers, not nested decorative cards. Transient notices, the fader thumb, the floating handwriting shortcut, and immersive controls/tool drawers use small shadows to distinguish them from the working surface. A modal backdrop darkens the workspace; ordinary desktop task views are full-area panels with no radius or shadow.
 
 The key press uses a brief 120ms ease-out color/transform transition and a `.965` scale. Editor key hover/outline transitions use the same duration. Reduced-motion preferences remove transitions and smooth scrolling. Loading, saving, empty, disconnected, and conflict states must remain readable without animation.
 
@@ -259,15 +278,21 @@ Soundpad's **All**, **Favourites**, and **Recent** choices stay beside search an
 
 ### Ink & notes
 
-Keep Pen/Eraser, ink color, width, Undo/Redo/Clear, and **Ignore fingers on canvas** together above the paper. The palm control is persistent and labeled. The selected tool uses cyan and `aria-pressed`. Notes remain an ordinary labeled text area beside or beneath the canvas; handwriting is an entry method for that field. Local backup status and PC-sharing status are different messages. Explicit conflict controls explain both versions before replacing either one. The amber-outlined conflict panel stays readable in fullscreen.
+Keep Pen/Eraser, ink color, width, Undo/Redo/Clear, and **Ignore fingers on canvas** together above the paper in the normal view and together in the immersive tools drawer. The palm preference is persistent and labeled. The selected tool uses cyan and `aria-pressed`. Notes remain an ordinary labeled text area beside or beneath the canvas; handwriting is an entry method for that field. Local backup status and PC-sharing status are different messages. Explicit conflict controls explain both versions before replacing either one; in fullscreen they live in the tools drawer.
 
-Fullscreen keeps **Exit fullscreen**, the tool strip, and compact sync state available. Notes are optional through Show/Hide notes. Secondary explanation and, on narrow screens, Export may move out of the focused view; exiting fullscreen restores them. Keep the fixed paper ratio and preserve committed data when a partial stroke is cancelled.
+Fullscreen keeps only floating **Show tools** and **Exit fullscreen** controls visible by default, each at least 44px. Offline/conflict/save failures add an amber attention mark and an accessible attention label to Show tools. The drawer opens the ink controls, notes/export actions, local/sync state, and conflict recovery over the drawing. Export remains available there on narrow screens. Escape closes the drawer before leaving fullscreen. Keep the fixed paper ratio and preserve committed data when a partial stroke is cancelled.
+
+### Dedicated PC ink window
+
+DeskWing Ink opens directly onto the fitted paper, with floating **Show tools** and **Fullscreen** controls and an attention mark when sharing or saving needs review. This compact presentation does not automatically enter browser or native fullscreen. Show tools opens the drawing, export, sharing, and conflict controls in an overlay; **Show notes** opens a separate notes overlay with **Hide notes**. Drawing on the canvas or pressing Escape closes the overlays. Keep the ordinary window caption available for moving and resizing. The paper retains its 8:5 ratio, with unused paper-colored bands when the window proportions differ.
 
 ### Pen tablet
 
 Visually distinguish the live Windows input surface from the shared paper document. Show the selected display/application, readiness, and whether a pen session is active. Start/Stop and the fullscreen exit must remain discoverable. Pressure and other telemetry describe input samples; they are not evidence that a specific target app painted a stroke. A change of focus, geometry, connection, or lifecycle must visibly end the current session when the input contract requires it.
 
-The input pad uses the regular slate surface within an inset field-colored stage, fits the chosen target's aspect ratio, and adds a cyan border for an active connection. A small outlined cyan cursor becomes filled during contact. Keep its explanatory hint distinct from real app pixels: this mode does not show a target-app video. Fullscreen retains target/session controls and hides PC target configuration; entering or leaving fullscreen ends the old session before using the new pad geometry.
+The normal input pad uses the regular slate surface within an inset field-colored stage, fits the chosen target's aspect ratio, and adds a cyan border for an active connection. A small outlined cyan cursor becomes filled during contact. Keep its explanatory hint distinct from real app pixels: this mode does not show a target-app video.
+
+Immersive fullscreen removes stage padding, borders, corner radius, heading, and footer. Floating **Show tools**, **Start pen**/**Stop pen**, and **Exit fullscreen** remain at least 44px. Show tools reveals target/status/mapping details in a bounded overlay; Back to controls remains in the normal view. Fill tablet is the immersive default; Match PC proportions is an explicit alternative. Entering/leaving fullscreen or changing mapping ends the old session before using new coordinates.
 
 ### Second display
 

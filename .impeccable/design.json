@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-05T18:05:24.335Z",
+  "generatedAt": "2026-11-05T18:39:22.462Z",
   "title": "Design System: DeskWing",
   "extensions": {
     "sourceTokens": {
@@ -165,6 +165,24 @@
           "textColor": "{colors.secondary}",
           "rounded": "{rounded.field}",
           "padding": "14px 16px"
+        },
+        "ink-tool-drawer": {
+          "backgroundColor": "{colors.canvas}",
+          "textColor": "{colors.ink}",
+          "rounded": "{rounded.control}",
+          "padding": "16px"
+        },
+        "pen-input-tools": {
+          "backgroundColor": "{colors.canvas}",
+          "textColor": "{colors.ink}",
+          "rounded": "{rounded.control}",
+          "padding": "16px"
+        },
+        "ink-window-tool-drawer": {
+          "backgroundColor": "{colors.canvas}",
+          "textColor": "{colors.ink}",
+          "rounded": "{rounded.control}",
+          "padding": "14px"
         }
       }
     },
@@ -179,7 +197,10 @@
       "companion/wwwroot/pen.js",
       "companion/wwwroot/modes.css",
       "companion/wwwroot/pen-tablet.css",
-      "companion/wwwroot/pen-tablet.js"
+      "companion/wwwroot/pen-tablet.js",
+      "companion/wwwroot/ink-window.css",
+      "companion/wwwroot/ink-window.js",
+      "companion/DesktopConsole.cs"
     ],
     "colorMeta": {
       "canvas": {
@@ -620,6 +641,21 @@
         "name": "floating-handwriting",
         "value": "0 5px 20px #0005",
         "purpose": "Android text-field handwriting shortcut."
+      },
+      {
+        "name": "ink-floating-control",
+        "value": "0 2px 8px #0002",
+        "purpose": "Show tools and Exit fullscreen over the paper."
+      },
+      {
+        "name": "ink-tool-drawer",
+        "value": "0 6px 22px #0003",
+        "purpose": "Separates the optional tools overlay from the drawing."
+      },
+      {
+        "name": "pen-floating-control",
+        "value": "0 4px 16px #0005",
+        "purpose": "Session/exit controls over the mapped input surface."
       }
     ],
     "motion": [
@@ -719,13 +755,51 @@
           "inset": "0",
           "zIndex": 1100,
           "height": "100dvh",
-          "gap": "8px",
-          "padding": "max(10px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))",
+          "display": "block",
+          "padding": "0",
+          "gap": "0",
+          "background": "{colors.paper}",
           "paperAspectRatio": "8/5",
-          "paperRadius": "8px",
-          "notesColumns": "minmax(0,1fr) minmax(220px,26%)",
+          "paperRadius": "0",
+          "mapping": "Preserves existing drawing ratio. Fills a 16:10 viewport; other aspect ratios retain non-drawable paper-colored bands.",
+          "controls": {
+            "top": "max(10px,env(safe-area-inset-top))",
+            "right": "max(12px,env(safe-area-inset-right))",
+            "zIndex": 3,
+            "gap": "6px",
+            "minimumSize": "44px",
+            "fontSize": "13px",
+            "padding": "8px 12px",
+            "labels": [
+              "Show tools",
+              "Hide tools",
+              "Exit fullscreen"
+            ]
+          },
+          "drawer": {
+            "top": "calc(max(10px,env(safe-area-inset-top)) + 54px)",
+            "right": "max(12px,env(safe-area-inset-right))",
+            "width": "min(650px,calc(100% - 24px))",
+            "maxHeight": "calc(100dvh - 84px - env(safe-area-inset-bottom))",
+            "padding": "16px",
+            "border": "1px solid var(--outline)",
+            "borderRadius": "12px",
+            "background": "{colors.canvas}",
+            "overflow": "auto",
+            "initialState": "closed",
+            "contents": [
+              "Pen tools",
+              "Show notes / Hide notes",
+              "Export drawing",
+              "Local save and sharing state",
+              "Conflict recovery"
+            ]
+          },
+          "notesColumns": "minmax(0,1fr) minmax(240px,26%)",
+          "notesPadding": "72px 16px 16px",
           "narrowNotesRows": "minmax(120px,1fr) minmax(130px,40%)",
-          "exit": "Visible Exit fullscreen; Show/Hide notes; committed strokes retained, unfinished strokes cancelled."
+          "narrowNotesPadding": "12px",
+          "exit": "Floating Exit fullscreen; Escape closes tools first then exits. Partial stroke cancelled; committed data retained."
         }
       },
       "reviewViewports": [
@@ -760,19 +834,156 @@
         "stageMinHeight": "260px",
         "stageMaxHeight": "65vh",
         "stageBackground": "{colors.field}",
-        "padAspectRatio": "Selected Windows target width / height; fitted without distortion.",
+        "padAspectRatio": "Normal view fits target ratio. Fullscreen defaults to Fill tablet; Match PC proportions is optional.",
         "padRadius": "12px",
         "fullscreen": {
           "position": "fixed",
           "inset": "0",
           "zIndex": 1100,
           "height": "100%",
-          "gap": "10px",
-          "padding": "max(12px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))",
-          "stageMinHeight": "140px",
-          "narrowStageMinHeight": "100px",
-          "exit": "Visible Exit fullscreen and Back to controls; entering/exiting stops the session."
+          "width": "100%",
+          "display": "block",
+          "padding": "0",
+          "overflow": "hidden",
+          "stage": {
+            "position": "absolute",
+            "inset": "0",
+            "width": "100%",
+            "height": "100%",
+            "minHeight": "0",
+            "maxHeight": "none",
+            "borderRadius": "0"
+          },
+          "pad": {
+            "border": "0",
+            "borderRadius": "0",
+            "defaultMapping": "Fill tablet",
+            "alternativeMapping": "Match PC proportions",
+            "mappingTradeoff": "Fill tablet uses all coordinates and may stretch relative to the PC. Match PC proportions leaves inactive edges."
+          },
+          "controls": {
+            "top": "max(12px,env(safe-area-inset-top))",
+            "right": "max(12px,env(safe-area-inset-right))",
+            "gap": "6px",
+            "zIndex": 3,
+            "minWidth": "44px",
+            "minHeight": "44px",
+            "fontSize": "12px",
+            "padding": "10px 12px",
+            "labels": [
+              "Show tools",
+              "Hide tools",
+              "Start pen",
+              "Stop pen",
+              "Exit fullscreen"
+            ]
+          },
+          "drawer": {
+            "top": "calc(max(12px,env(safe-area-inset-top)) + 56px)",
+            "right": "max(12px,env(safe-area-inset-right))",
+            "width": "min(440px,calc(100% - 24px))",
+            "maxHeight": "calc(100% - max(12px,env(safe-area-inset-top)) - max(12px,env(safe-area-inset-bottom)) - 56px)",
+            "padding": "16px",
+            "border": "1px solid var(--outline)",
+            "borderRadius": "12px",
+            "background": "{colors.canvas}",
+            "initialState": "closed",
+            "contents": [
+              "Target",
+              "Session status",
+              "Refresh",
+              "Surface mapping"
+            ]
+          },
+          "exit": "Exit fullscreen remains floating; Back to controls is in normal view. Fullscreen/geometry/mapping changes end active pen session; restart explicitly."
         }
+      },
+      "desktopWindows": {
+        "nativeSource": "companion/DesktopConsole.cs",
+        "main": {
+          "title": "DeskWing",
+          "initialSize": {
+            "width": 1280,
+            "height": 860
+          },
+          "close": "Hides main window to tray."
+        },
+        "ink": {
+          "title": "DeskWing Ink",
+          "initialSize": {
+            "width": 1000,
+            "height": 740
+          },
+          "close": "Closes only the ink view.",
+          "entry": "Open ink window in main Ink & notes or tray; reuses an existing window.",
+          "document": "Same authenticated shared scratchpad, not a separate document.",
+          "padding": "0",
+          "canvasAspectRatio": "8/5",
+          "canvasPresentation": "Fits the whole client area without distorting the shared drawing; non-drawable paper-colored bands at other ratios.",
+          "automaticFullscreen": false,
+          "nativeChrome": "Ordinary Windows caption and resizable border remain.",
+          "controls": {
+            "top": "10px",
+            "right": "12px",
+            "zIndex": 4,
+            "gap": "6px",
+            "minHeight": "44px",
+            "padding": "8px 12px",
+            "fontSize": "13px",
+            "labels": [
+              "Show tools",
+              "Hide tools",
+              "Fullscreen"
+            ]
+          },
+          "drawer": {
+            "top": "64px",
+            "right": "12px",
+            "zIndex": 3,
+            "width": "min(650px,calc(100% - 24px))",
+            "maxHeight": "calc(100% - 76px)",
+            "padding": "14px",
+            "border": "1px solid var(--outline)",
+            "borderRadius": "12px",
+            "background": "{colors.canvas}",
+            "contents": [
+              "Drawing tools",
+              "Export",
+              "Sharing state",
+              "Conflict choices",
+              "Show notes"
+            ]
+          },
+          "notesOverlay": {
+            "top": "64px",
+            "right": "12px",
+            "bottom": "12px",
+            "zIndex": 2,
+            "width": "min(360px,calc(100% - 24px))",
+            "padding": "14px",
+            "gap": "10px",
+            "border": "1px solid var(--outline)",
+            "borderRadius": "12px",
+            "background": "{colors.canvas}",
+            "textareaMinHeight": "100px",
+            "close": "Hide notes, canvas pointerdown, or Escape"
+          },
+          "attention": {
+            "color": "{colors.amber}",
+            "size": "8px",
+            "shape": "circle",
+            "marginLeft": "8px"
+          }
+        },
+        "minimumSize": {
+          "width": 620,
+          "height": 480
+        },
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "dpiScaling": true,
+        "geometryPersistence": false
       }
     },
     "groups": [
@@ -829,7 +1040,8 @@
         "components": [
           "pen-paper",
           "pen-sync-conflict",
-          "button-quiet"
+          "button-quiet",
+          "ink-tool-drawer"
         ]
       },
       {
@@ -841,9 +1053,23 @@
         "components": [
           "pen-input-pad",
           "button-primary",
-          "button-danger"
+          "button-danger",
+          "pen-input-tools"
         ],
         "behavior": "PC selects a display/window; active session is explicit; fullscreen and interruptions stop input. No target-app image stream."
+      },
+      {
+        "name": "Dedicated PC ink window",
+        "sources": [
+          "ink-window.css",
+          "ink-window.js",
+          "companion/DesktopConsole.cs"
+        ],
+        "components": [
+          "pen-paper",
+          "ink-window-tool-drawer"
+        ],
+        "behavior": "Independent native sizing and ordinary Windows caption/border; shared ink document; canvas fills client area with floating tools and optional notes overlays; close only this view."
       }
     ],
     "inkStates": {
@@ -860,7 +1086,13 @@
         "Recovery copy"
       ],
       "fullDocumentReplacement": "Revision checked; no automatic merge; one local alternate recovery copy.",
-      "preference": "Ignore fingers remains device-local."
+      "preference": "Ignore fingers remains device-local.",
+      "fullscreenControls": [
+        "Show tools",
+        "Hide tools",
+        "Exit fullscreen"
+      ],
+      "fullscreenAttention": "Amber dot and aria-label on Show tools for offline/conflict/local-save error; open drawer for details."
     },
     "penInputStates": {
       "target": "Windows target",
@@ -870,12 +1102,26 @@
       "start": "Start pen session",
       "stop": "Stop pen",
       "fullscreen": [
-        "Fullscreen",
-        "Exit fullscreen",
-        "Back to controls"
+        "Show tools",
+        "Hide tools",
+        "Start pen",
+        "Stop pen",
+        "Exit fullscreen"
       ],
       "scope": "Pen-only input; no mouse/touch drawing; PC target app owns the resulting document.",
-      "telemetry": "X/Y and reported pressure describe input, not app delivery."
+      "telemetry": "X/Y and reported pressure describe input, not app delivery.",
+      "mapping": [
+        "Fill tablet",
+        "Match PC proportions"
+      ]
+    },
+    "nativeFullscreen": {
+      "route": "POST /local/fullscreen {enabled:boolean}",
+      "android": "Hides status/navigation bars with transient system-bar swipe behavior; removes WebView insets while enabled. Back/native tools/background restore previous normal UI; no automatic re-entry.",
+      "ios": "Requests hidden status bar, home-indicator auto-hide, and full-view constraints. Native tools/background/disconnect/navigation/renderer restart restore normal layout.",
+      "failure": "App-filling canvas remains with visible warning when system bars cannot be hidden.",
+      "lifecycle": "Native deskwing-fullscreen event carries enabled/reason; disabled event restores the web layout and ends pen input where applicable.",
+      "verification": "New immersive build requires fresh device checks. Earlier physical pen/fullscreen test and earlier iOS simulator build do not certify this changed UI."
     }
   },
   "components": [
@@ -966,6 +1212,14 @@
       "description": "A mapped input surface with target and explicit session controls; no target-app screenshot.",
       "html": "<section class=\"ds-pen-input\"><div class=\"ds-pen-target\"><strong>Selected Windows window</strong><p>Start a pen session when your Windows app is ready.</p></div><div class=\"ds-pen-actions\"><button class=\"ds-pen-start\">Start pen session</button><button class=\"ds-pen-exit\">Fullscreen</button><button class=\"ds-pen-exit\">Back to controls</button></div><div class=\"ds-pen-stage\"><div class=\"ds-pen-pad\"><p>Your pen controls the selected Windows screen or window.</p></div></div><output>X 0% · Y 0% · Pressure 0%</output></section>",
       "css": ".ds-pen-input{font-family:Manrope,system-ui,sans-serif;display:flex;flex-direction:column;gap:16px;padding:20px 24px 24px;background:var(--canvas,#101318);color:var(--ink,#f5f7fa)}.ds-pen-target strong{display:block;font-size:15px;overflow-wrap:anywhere}.ds-pen-target p{font-size:13px;line-height:1.6;color:var(--secondary,#b8c3d1);margin:5px 0 0}.ds-pen-actions{display:flex;flex-wrap:wrap;gap:8px}.ds-pen-actions button{font-family:Manrope,system-ui,sans-serif;min-height:44px;padding:10px 16px;font-size:13px;font-weight:700;border-radius:12px;cursor:pointer;border:1px solid var(--outline,#354151)}.ds-pen-start{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent!important}.ds-pen-exit{background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-pen-actions button:hover:enabled{filter:brightness(1.12)}.ds-pen-actions button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-pen-actions button:disabled{opacity:.5;cursor:default}.ds-pen-stage{display:flex;align-items:center;justify-content:center;min-height:260px;max-height:65vh;overflow:hidden;background:#131922;border-radius:12px}.ds-pen-pad{width:100%;aspect-ratio:8/5;position:relative;overflow:hidden;background:var(--surface,#1c222b);border:1px solid var(--outline,#354151);border-radius:12px}.ds-pen-pad p{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:28px;margin:0;text-align:center;color:var(--secondary,#b8c3d1);line-height:1.6;font-size:clamp(14px,1.5vw,18px)}.ds-pen-input output{font-size:12px;line-height:1.6;font-variant-numeric:tabular-nums;color:var(--secondary,#b8c3d1)}@media(max-width:580px){.ds-pen-input{padding:12px;gap:12px}.ds-pen-actions button{padding:10px 12px}.ds-pen-stage{min-height:220px}}"
+    },
+    {
+      "name": "Immersive ink controls",
+      "kind": "custom",
+      "refersTo": "ink-tool-drawer",
+      "description": "Floating controls over paper, with the optional drawer closed. The drawer carries tools, notes, export, sync, and conflict details.",
+      "html": "<div class=\"ds-immersive-ink\"><div class=\"ds-ink-floating\"><button class=\"ds-ink-tools\" aria-expanded=\"false\" aria-label=\"Show tools — ink sharing needs attention\">Show tools<span aria-hidden=\"true\"></span></button><button class=\"ds-ink-exit\">Exit fullscreen</button></div></div>",
+      "css": ".ds-immersive-ink{position:relative;min-height:260px;background:#f6f3e9;overflow:hidden}.ds-ink-floating{position:absolute;top:max(10px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));display:flex;gap:6px}.ds-ink-floating button{font-family:Manrope,system-ui,sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:44px;min-width:44px;font-size:13px;font-weight:700;padding:8px 12px;border:1px solid var(--outline,#354151);border-radius:12px;box-shadow:0 2px 8px #0002;cursor:pointer}.ds-ink-tools{background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-ink-tools:hover{background:var(--surface-high,#252d38)}.ds-ink-tools span{display:block;width:8px;height:8px;border-radius:50%;background:var(--amber,#ffd58a)}.ds-ink-exit{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent!important}.ds-ink-floating button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}"
     }
   ],
   "narrative": {

@@ -52,6 +52,23 @@ internal static class PenIntegrationTests
             commands.Pen(new(Operation:"cancel",Lease:third.Lease),"one");Check(!pen.Active,"late pen cancellation stays available and harmless during maintenance");
             commands.EndMaintenance();commands.Pen(Begin(),"one");commands.ConfigurePenSettings(new(false));Check(!pen.Active&&!pen.Status.Enabled,"PC disable ends the active session");
             Check(FastCommands.Supports("/api/pen"),"native pen route is allowlisted on persistent transport");
+            commands.ConfigurePenSettings(new(true,"fixture"));var closing=(WindowsPen.PenLease)commands.Pen(Begin(),"one");time+=10;
+            commands.Pen(new(Operation:"samples",Lease:closing.Lease,Sequence:1,ElapsedMs:10,Samples:[new("down",.5,.5,.6)]),"one");
+            var beforeShutdown=platform.Frames.Count;commands.BeginShutdown();
+            Check(commands.Maintenance&&!pen.Active&&!pen.Status.Enabled&&platform.Frames.Skip(beforeShutdown).Any(frame=>frame.Phase=="up"&&frame.Cancelled),"shutdown immediately disables the pen and releases an active fake contact");
+            await RejectAsync(()=>commands.Execute("/api/pen",JsonSerializer.SerializeToElement(new PenRequest(Operation:"renew",Lease:closing.Lease,Sequence:2,ElapsedMs:10),DataStore.Json),"one"),"existing fast pen lease cannot renew during shutdown grace");
+            await RejectAsync(()=>commands.Action(new(sound.Id)),"shutdown rejects new configured controls");
+            commands.Pen(new(Operation:"cancel",Lease:closing.Lease),"one");commands.ReleasePen("one",closing.Lease);commands.EndMaintenance();
+            Check(commands.Maintenance,"late release remains harmless and maintenance completion cannot reopen shutdown");
+            Reject(()=>commands.ConfigurePenSettings(new(true,"fixture")),"shutdown refuses re-enabling pen input");
+            var macroCommands=new FastCommands(store,engine,holds,mixer);var beforeSounds=soundCount;
+            var pendingMacro=macroCommands.ExecuteConfigured(new(){Kind="macro",Steps=[new(){Kind="delay",Target="10000"},sound]});
+            macroCommands.BeginShutdown();await RejectAsync(()=>pendingMacro,"shutdown cancels the running macro without waiting for its delay");
+            Check(soundCount==beforeSounds&&engine.Execution.Status.Active is null,"shutdown skips later macro steps and releases execution state");
+            var holdCommands=new FastCommands(store,engine,holds,mixer);var closingHold=(FastCommands.HoldLease)holdCommands.Hold(new("begin",hold.Id),"one");holdCommands.BeginShutdown();
+            Check(!holds.Active,"shutdown releases existing fake keyboard holds");
+            Reject(()=>holdCommands.Hold(new("renew",Lease:closingHold.Lease),"one"),"hold lease cannot renew during shutdown grace");
+            holdCommands.Hold(new("release",Lease:closingHold.Lease),"one");Check(!holds.Active,"hold release remains available after shutdown begins");
             Console.WriteLine(passed+" pen integration checks passed with fake native input only.");
         }finally{
             var full=Path.GetFullPath(root);var temp=Path.GetFullPath(Path.GetTempPath());

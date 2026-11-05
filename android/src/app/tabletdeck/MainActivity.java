@@ -55,6 +55,9 @@ public final class MainActivity extends Activity {
     private WebView web;
     private ChatPane chatPane;
     private NativePenTools penTools;
+    private NativeFullscreen fullscreen;
+    private boolean backPending;
+    private long backSequence;
     private SharedPreferences preferences;
     private final ExecutorService network=boundedExecutor(2,32);
     private final ExecutorService controls=boundedExecutor(3,16);
@@ -111,7 +114,11 @@ public final class MainActivity extends Activity {
         FrameLayout root=new FrameLayout(this);root.addView(web,new FrameLayout.LayoutParams(-1,-1));setContentView(root);
         chatPane=new ChatPane(this,root,web,event->{if(!closed)web.evaluateJavascript("if(window.monitorChatEvent)window.monitorChatEvent("+event.toString()+");",null);});
         penTools=new NativePenTools(this,this::deliver);
-        web.setOnApplyWindowInsetsListener((view,insets)->{view.setPadding(insets.getSystemWindowInsetLeft(),0,insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
+        fullscreen=new NativeFullscreen(this,web,(enabled,reason)->{
+            backSequence++;backPending=false;
+            if(!closed)web.evaluateJavascript("document.dispatchEvent(new CustomEvent('deskwing-fullscreen',{bubbles:true,detail:{enabled:"+enabled+",reason:"+JSONObject.quote(reason)+"}}));",null);
+        },this::handleBack);
+        web.setOnApplyWindowInsetsListener((view,insets)->{if(fullscreen.isEnabled())view.setPadding(0,0,0,0);else view.setPadding(insets.getSystemWindowInsetLeft(),0,insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
         web.loadUrl("https://"+UI_HOST+"/index.html");
         fastLink=new FastLink(new FastLink.Listener(){
             public FastLink.Settings settings() throws Exception {
@@ -141,9 +148,20 @@ public final class MainActivity extends Activity {
             final String requestedPath;final JSONObject request;
             try{request=new JSONObject(message);requestedPath=request.getString("path");}catch(Exception ignored){return;}
             try{BridgeRequestLimits.validate(requestedPath,request.optString("method","POST"),message,request.optJSONObject("body")==null?"{}":request.getJSONObject("body").toString());}catch(Exception ex){failRequest(request,friendly(ex));return;}
+            if(requestedPath.equals("/local/fullscreen")){
+                if(!request.optString("method","POST").equals("POST")){failRequest(request,"Fullscreen requires a POST request.");return;}
+                final long requestedGeneration=lifecycleGeneration.get();
+                runOnUiThread(()->{try{
+                    int id=request.getInt("id");
+                    JSONObject body=request.optJSONObject("body");
+                    boolean enabled=FullscreenPolicy.validateRequest(body==null?null:body.opt("enabled"),closed,paused,penTools.isOpen(),requestedGeneration,lifecycleGeneration.get());
+                    fullscreen.setEnabled(enabled,"request");
+                    deliver(id,new JSONObject().put("enabled",fullscreen.isEnabled()).put("supported",true));
+                }catch(Exception ex){failRequest(request,friendly(ex));}});return;
+            }
             if(requestedPath.equals("/local/handwriting")||requestedPath.equals("/local/export-image")){
                 if(!request.optString("method","POST").equals("POST")){failRequest(request,"Local pen tools require a POST request.");return;}
-                runOnUiThread(()->{try{if(paused||closed)throw new IllegalStateException("Open the tablet workspace before using pen tools.");penTools.request(request.getInt("id"),requestedPath,request.optJSONObject("body")==null?new JSONObject():request.getJSONObject("body"));}catch(Exception ex){failRequest(request,friendly(ex));}});return;
+                runOnUiThread(()->{try{if(paused||closed)throw new IllegalStateException("Open the tablet workspace before using pen tools.");fullscreen.setEnabled(false,"tool");penTools.request(request.getInt("id"),requestedPath,request.optJSONObject("body")==null?new JSONObject():request.getJSONObject("body"));}catch(Exception ex){failRequest(request,friendly(ex));}});return;
             }
             if(requestedPath.equals("/native/chat")){runOnUiThread(()->{try{deliver(request.getInt("id"),chatPane.command(request.getJSONObject("body")));}catch(Exception ex){try{deliver(request.getInt("id"),new JSONObject().put("error",ex.getMessage()));}catch(Exception ignored){}}});return;}
             final long submittedNanos=System.nanoTime(),submittedGeneration=lifecycleGeneration.get();
@@ -294,8 +312,19 @@ public final class MainActivity extends Activity {
             else if(wifiLock!=null&&wifiLock.isHeld())wifiLock.release();
         }catch(RuntimeException ignored){/* Unsupported Wi-Fi hardware keeps the normal transport. */}
     }
-    @Override public void onBackPressed(){web.evaluateJavascript("(function(){var d=document.querySelector('#confirm-dialog');if(d.open){d.close('cancel');return true;}if(document.querySelector('#panel').open){document.querySelector('#close-panel').click();return true;}return false;})()",result->{if("false".equals(result))finish();});}
-    @Override protected void onPause(){paused=true;lifecycleGeneration.incrementAndGet();cancelActivePen();if(penTools!=null)penTools.pause();updateWifiLock();if(chatPane!=null)chatPane.pause();if(fastLink!=null)fastLink.pause();if(web!=null){web.evaluateJavascript("if(window.penTabletSuspend)window.penTabletSuspend();if(typeof releaseDeckHold===\'function\')releaseDeckHold();if(window.monitorSuspend)window.monitorSuspend();if(window.penSuspend)window.penSuspend();",null);web.onPause();}super.onPause();}
+    private void handleBack(){
+        if(closed||paused||web==null)return;
+        if(fullscreen!=null&&fullscreen.isEnabled()){fullscreen.setEnabled(false,"back");return;}
+        if(backPending)return;
+        backPending=true;final long sequence=++backSequence,generation=lifecycleGeneration.get();
+        web.evaluateJavascript("(function(){var d=document.querySelector('#confirm-dialog');if(d&&d.open){d.close('cancel');return true;}var p=document.querySelector('#panel');if(p&&p.open){document.querySelector('#close-panel').click();return true;}return false;})()",result->{
+            if(sequence!=backSequence)return;backPending=false;
+            if(!closed&&!paused&&generation==lifecycleGeneration.get()&&!fullscreen.isEnabled()&&"false".equals(result))finish();
+        });
+    }
+    @Override public void onBackPressed(){handleBack();}
+    @Override public void onWindowFocusChanged(boolean hasFocus){super.onWindowFocusChanged(hasFocus);if(fullscreen!=null)fullscreen.windowFocusChanged(hasFocus);}
+    @Override protected void onPause(){paused=true;backSequence++;backPending=false;lifecycleGeneration.incrementAndGet();if(fullscreen!=null)fullscreen.setEnabled(false,"background");cancelActivePen();if(penTools!=null)penTools.pause();updateWifiLock();if(chatPane!=null)chatPane.pause();if(fastLink!=null)fastLink.pause();if(web!=null){web.evaluateJavascript("if(window.penTabletSuspend)window.penTabletSuspend();if(typeof releaseDeckHold===\'function\')releaseDeckHold();if(window.monitorSuspend)window.monitorSuspend();if(window.penSuspend)window.penSuspend();",null);web.onPause();}super.onPause();}
     @Override protected void onResume(){super.onResume();paused=false;updateWifiLock();if(chatPane!=null)chatPane.resume();if(fastLink!=null)fastLink.resume();if(web!=null){web.onResume();web.evaluateJavascript("if(window.monitorResume)window.monitorResume();if(window.penTabletResume)window.penTabletResume();",null);}}
-    @Override protected void onDestroy(){closed=true;lifecycleGeneration.incrementAndGet();cancelActivePen();if(penTools!=null)penTools.close();updateWifiLock();if(chatPane!=null)chatPane.hide();if(fastLink!=null)fastLink.close();network.shutdownNow();controls.shutdownNow();penControls.shutdownNow();urgent.shutdownNow();previews.shutdownNow();web.removeJavascriptInterface("DeckNative");web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){closed=true;lifecycleGeneration.incrementAndGet();if(fullscreen!=null)fullscreen.close();cancelActivePen();if(penTools!=null)penTools.close();updateWifiLock();if(chatPane!=null)chatPane.hide();if(fastLink!=null)fastLink.close();network.shutdownNow();controls.shutdownNow();penControls.shutdownNow();urgent.shutdownNow();previews.shutdownNow();web.removeJavascriptInterface("DeckNative");web.destroy();super.onDestroy();}
 }

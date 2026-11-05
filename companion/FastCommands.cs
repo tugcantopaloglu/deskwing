@@ -9,7 +9,7 @@ internal sealed class FastCommands(DataStore store,DeckEngine engine,HoldKeys ho
     private readonly object configurationGate=new();
     private readonly Dictionary<string,DateTimeOffset> profileLocks=new();
     private DateTimeOffset manualProfileUntil;
-    private bool maintenance;
+    private bool maintenance,shuttingDown;
     private int keyboardActions;
     private int activeControls;
     private WindowsPen? pen;
@@ -17,7 +17,17 @@ internal sealed class FastCommands(DataStore store,DeckEngine engine,HoldKeys ho
     public bool Maintenance{get{lock(configurationGate)return maintenance;}}
     public bool CanUpdateTablet{get{lock(configurationGate)return !maintenance&&activeControls==0&&engine.Execution.Status.Active is null&&!holds.Active&&!PenActive&&!profileLocks.Any(p=>p.Key!="admin"&&p.Value>DateTimeOffset.UtcNow);}}
     public void BeginMaintenance(){lock(configurationGate){if(activeControls>0||engine.Execution.Status.Active is not null||holds.Active||PenActive)throw new InvalidOperationException("Finish the running action, release held keys, and stop Pen tablet before installing.");pen?.CancelAll("The companion is restarting for an update.");maintenance=true;}}
-    public void EndMaintenance(){lock(configurationGate)maintenance=false;}
+    public void EndMaintenance(){lock(configurationGate){if(!shuttingDown)maintenance=false;}}
+    public void BeginShutdown()
+    {
+        lock(configurationGate){
+            // Admission closes before cleanup so a live fast link cannot renew input
+            // while the HTTP host waits for its graceful shutdown period.
+            shuttingDown=true;maintenance=true;
+            try{var active=engine.Execution.Status.Active;if(active is not null)engine.Execution.Cancel(active.Id);}
+            finally{try{pen?.Configure(new(false));}finally{holds.ReleaseAll();}}
+        }
+    }
     public void ProfileLock(string principal,bool active){lock(configurationGate){foreach(var key in profileLocks.Where(p=>p.Value<DateTimeOffset.UtcNow).Select(p=>p.Key).ToArray())profileLocks.Remove(key);if(active)profileLocks[principal]=DateTimeOffset.UtcNow.AddSeconds(12);else profileLocks.Remove(principal);}}
     public void ManualProfile(string id){lock(configurationGate){ChangeBoard(()=>store.SwitchProfile(id));manualProfileUntil=DateTimeOffset.UtcNow.AddSeconds(30);}}
     public bool AutoProfile(string id){lock(configurationGate){if(maintenance||activeControls>0||engine.Execution.Status.Active is not null||holds.Active||DateTimeOffset.UtcNow<manualProfileUntil||profileLocks.Values.Any(until=>until>DateTimeOffset.UtcNow))return false;if(store.Config.ProfileId!=id){store.SwitchProfile(id);engine.Invalidate();}return true;}}
@@ -43,7 +53,7 @@ internal sealed class FastCommands(DataStore store,DeckEngine engine,HoldKeys ho
             return service.Execute(request,principal);
         }
     }
-    private void RequireAvailable(){if(maintenance)throw new InvalidOperationException("The companion is restarting for an update. Try again after it reconnects.");}
+    private void RequireAvailable(){if(shuttingDown)throw new InvalidOperationException("The companion is closing. Reopen it before using controls.");if(maintenance)throw new InvalidOperationException("The companion is restarting for an update. Try again after it reconnects.");}
     private static bool UsesKeyboard(DeckAction action)=>action.Kind is "hotkey" or "holdHotkey"||action.Kind=="macro"&&action.Steps.Any(UsesKeyboard);
     private Task StartAction(DeckAction action)
     {
@@ -97,7 +107,7 @@ internal sealed class FastCommands(DataStore store,DeckEngine engine,HoldKeys ho
     public object Hold(HoldRequest request,string principal)
     {
         if(request.Operation=="release"){holds.Release(principal,request.Lease);return new{ok=true};}
-        if(request.Operation=="renew"){holds.Renew(principal,request.Lease);return new{ok=true};}
+        if(request.Operation=="renew"){lock(configurationGate){RequireAvailable();holds.Renew(principal,request.Lease);return new{ok=true};}}
         if(request.Operation!="begin")throw new ArgumentException("Unknown hold operation.");
         lock(configurationGate){RequireAvailable();if(keyboardActions>0||PenActive)throw new InvalidOperationException("Finish the keyboard action or macro and stop Pen tablet before holding a shortcut.");var action=store.Config.Pages.SelectMany(page=>page.Buttons).FirstOrDefault(action=>action.Id==request.Id);if(action?.Kind!="holdHotkey")throw new ArgumentException("Choose a configured hold shortcut button.");return new HoldLease(holds.Begin(principal,action.Target));}
     }

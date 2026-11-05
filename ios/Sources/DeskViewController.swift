@@ -21,6 +21,12 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
     private weak var handwriting: PenInputController?
     private weak var provider: SFSafariViewController?
     private var startupWarning: String?
+    private var fullscreenEnabled = false
+    private var insetWebConstraints: [NSLayoutConstraint] = []
+    private var fullWebConstraints: [NSLayoutConstraint] = []
+
+    override var prefersStatusBarHidden: Bool { fullscreenEnabled }
+    override var prefersHomeIndicatorAutoHidden: Bool { fullscreenEnabled }
 
     override func viewDidLoad() {
         super.viewDidLoad(); view.backgroundColor = UIColor(red: 16/255, green: 19/255, blue: 24/255, alpha: 1)
@@ -43,10 +49,13 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         }
         web = WKWebView(frame: .zero, configuration: configuration); web.navigationDelegate = self; web.uiDelegate = self
         web.isOpaque = false; web.backgroundColor = view.backgroundColor; web.scrollView.backgroundColor = view.backgroundColor
+        web.scrollView.contentInsetAdjustmentBehavior = .never
         web.allowsLinkPreview = false; web.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(web)
-        NSLayoutConstraint.activate([web.leadingAnchor.constraint(equalTo: view.leadingAnchor), web.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            web.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor), web.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)])
+        NSLayoutConstraint.activate([web.leadingAnchor.constraint(equalTo: view.leadingAnchor), web.trailingAnchor.constraint(equalTo: view.trailingAnchor)])
+        insetWebConstraints = [web.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor), web.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)]
+        fullWebConstraints = [web.topAnchor.constraint(equalTo: view.topAnchor), web.bottomAnchor.constraint(equalTo: view.bottomAnchor)]
+        NSLayoutConstraint.activate(insetWebConstraints)
         NotificationCenter.default.addObserver(self, selector: #selector(suspend), name: UIApplication.willResignActiveNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(resume), name: UIApplication.didBecomeActiveNotification, object: nil)
         web.load(URLRequest(url: URL(string: "deskwing://app/index.html")!))
@@ -114,6 +123,14 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
     private func local(_ id: Int, ticket: UUID, path: String, body: [String: Any]) {
         if path == "/native/connection" || path == "/native/diagnostics/reset" { complete(id, ticket: ticket, connection()); return }
         if path == "/native/chat", body["operation"] as? String == "hide" { provider?.dismiss(animated: true); complete(id, ticket: ticket, ["ok":true]); return }
+        if path == "/local/fullscreen" {
+            do {
+                let enabled = try HostPolicy.requestedFullscreen(body, foreground: foreground, presentingTool: presentedViewController != nil)
+                setFullscreen(enabled, reason: "request")
+                complete(id, ticket: ticket, ["enabled":fullscreenEnabled, "supported":true])
+            } catch { fail(id, ticket: ticket, error.localizedDescription) }
+            return
+        }
         guard foreground else { fail(id, ticket: ticket, "Open DeskWing before using this tool."); return }
         do {
             switch path {
@@ -167,6 +184,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         } catch { pairingClient = nil; pairing.invalidate(); throw error }
     }
     private func retireClient() {
+        setFullscreen(false, reason: "disconnect")
         generation += 1; releaseInputLeases()
         let old = client; old?.cancelPending(keepingReleases: true); client = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { old?.invalidate() }
@@ -178,6 +196,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         if let pen { try? client.send(path: "/api/pen", method: "POST", body: ["operation":"cancel", "lease":pen]) { _ in } }
     }
     @objc private func suspend() {
+        setFullscreen(false, reason: "background")
         UIApplication.shared.isIdleTimerDisabled = false
         foreground = false; generation += 1; pairingClient?.invalidate(); pairingClient = nil
         releaseInputLeases(); client?.cancelPending(keepingReleases: true); handwriting?.cancel()
@@ -192,6 +211,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         guard presentedViewController == nil else { throw DeskError.message("Finish the open sheet before using handwriting.") }
         let text = body["text"] as? String ?? ""
         guard text.utf16.count <= 8000 else { throw DeskError.message("Handwriting fields support up to 8,000 characters.") }
+        setFullscreen(false, reason: "tool")
         let editor = PenInputController(text: text) { [weak self] text, cancelled in self?.complete(id, ticket: ticket, ["text":text,"cancelled":cancelled]) }
         handwriting = editor
         let navigation = UINavigationController(rootViewController: editor); navigation.modalPresentationStyle = .formSheet
@@ -200,6 +220,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
     private func exportImage(_ id: Int, ticket: UUID, body: [String: Any]) throws {
         guard presentedViewController == nil else { throw DeskError.message("Finish the open sheet before exporting a drawing.") }
         let data = try PNGExport.decode(body["dataUrl"] as? String ?? "")
+        setFullscreen(false, reason: "tool")
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("DeskWing-export-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent(PNGExport.safeName(body["name"] as? String ?? ""))
@@ -221,6 +242,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         guard channel.range(of: pattern, options: .regularExpression) != nil else { throw DeskError.message("Enter a valid Twitch or Kick channel name.") }
         let address = providerName == "twitch" ? "https://www.twitch.tv/popout/\(channel)/chat?popout=" : "https://kick.com/popout/\(channel)/chat"
         guard let url = URL(string: address) else { throw DeskError.message("Invalid provider address.") }
+        setFullscreen(false, reason: "tool")
         let sheet = SFSafariViewController(url: url); provider = sheet; present(sheet, animated: true)
         complete(id, ticket: ticket, ["ok":true])
         let event: [String: Any] = ["session":body["session"] as? Int ?? 0, "state":"Chat opened in a separate provider viewer. It has no PC-control bridge."]
@@ -229,6 +251,19 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         }
     }
     private func fail(_ id: Int, ticket: UUID, _ message: String) { complete(id, ticket: ticket, ["error":String(message.prefix(1000))]) }
+    private func setFullscreen(_ enabled: Bool, reason: String) {
+        guard fullscreenEnabled != enabled else { return }
+        fullscreenEnabled = enabled
+        NSLayoutConstraint.deactivate(enabled ? insetWebConstraints : fullWebConstraints)
+        NSLayoutConstraint.activate(enabled ? fullWebConstraints : insetWebConstraints)
+        setNeedsStatusBarAppearanceUpdate()
+        setNeedsUpdateOfHomeIndicatorAutoHidden()
+        view.setNeedsLayout()
+        guard HostPolicy.trustedPage(web?.url),
+              let data = try? JSONSerialization.data(withJSONObject: ["enabled":enabled, "reason":reason]),
+              let json = String(data: data, encoding: .utf8) else { return }
+        web.evaluateJavaScript("document.dispatchEvent(new CustomEvent('deskwing-fullscreen',{detail:\(json)}));", completionHandler: nil)
+    }
     private func complete(_ id: Int, ticket: UUID, _ result: [String: Any]) {
         guard requests.finish(id, ticket: ticket) else { return }; sendDirect(id, result)
     }
@@ -248,7 +283,11 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
             alert.addAction(UIAlertAction(title: "OK", style: .default)); present(alert, animated: true)
         }
     }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        setFullscreen(false, reason: "navigation")
+    }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        setFullscreen(false, reason: "renderer")
         generation += 1; requests.reset(); handwriting?.cancel(); provider?.dismiss(animated: false)
         pairingClient?.invalidate(); pairingClient = nil
         releaseInputLeases(); client?.cancelPending(keepingReleases: true)

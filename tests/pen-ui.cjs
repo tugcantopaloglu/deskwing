@@ -505,6 +505,19 @@ async function fullscreenChecks() {
       assert.deepEqual(plain(p), [0.25, 0.5, 0.7]);
     }
   });
+  check('a small resizable ink window fits the paper without entering fullscreen or changing saved coordinates', () => {
+    const seed = goodDocument(), ui = canvasFixture(seed); let nativeCalls = 0, browserCalls = 0;
+    ui.document.body.classList.add('ink-window-mode');
+    ui.document.querySelector('.pen-drawing').getBoundingClientRect = () => ({ left: 0, top: 0, width: 580, height: 250 });
+    ui.runtime.nativeRequest = async () => { nativeCalls++; };
+    ui.document.getElementById('pen-workspace').requestFullscreen = async () => { browserCalls++; };
+    ui.runtime.DeskPen.resize();
+    const paper = ui.document.querySelector('.pen-paper');
+    assert.equal(paper.style.width, '400px'); assert.equal(paper.style.height, '250px');
+    assert.equal(ui.runtime.DeskPen.isFullscreen(), false);
+    ui.runtime.DeskPen.suspend();
+    assert.equal(nativeCalls, 0); assert.equal(browserCalls, 0); assert.deepEqual(ui.saved().strokes, seed.strokes);
+  });
   await asyncCheck('fullscreen can show notes and Escape keeps committed ink and notes', async () => {
     const seed = goodDocument(), ui = canvasFixture(seed);
     await ui.runtime.DeskPen.setFullscreen(true); assert.equal(ui.runtime.DeskPen.isFullscreen(), true);
@@ -536,6 +549,89 @@ async function fullscreenChecks() {
     ui.runtime.DeskPen.setActive(false); await Promise.resolve();
     assert.equal(ui.runtime.DeskPen.isFullscreen(), false); assert.equal(ui.runtime.DeskPen.isActive(), false);
     assert.deepEqual(ui.saved().strokes, seed.strokes);
+  });
+  await asyncCheck('native fullscreen uses the immersive bridge contract without requesting browser fullscreen', async () => {
+    const ui = canvasFixture(), calls = []; let browserRequests = 0;
+    ui.runtime.native = true;
+    ui.runtime.nativeRequest = async (...args) => { calls.push(plain(args)); return { enabled: args[1].enabled, supported: true }; };
+    ui.document.getElementById('pen-workspace').requestFullscreen = async () => { browserRequests++; };
+    await ui.runtime.DeskPen.setFullscreen(true);
+    assert.equal(ui.runtime.DeskPen.isFullscreen(), true); assert.equal(browserRequests, 0);
+    assert.deepEqual(calls, [['/local/fullscreen', { enabled: true }, 'POST', 10000]]);
+    await ui.runtime.DeskPen.setFullscreen(false);
+    assert.deepEqual(calls[1], ['/local/fullscreen', { enabled: false }, 'POST', 10000]);
+  });
+  await asyncCheck('pen cleanup only resets native immersive mode when the pen workspace owned it', async () => {
+    const ui = canvasFixture(), calls = [];
+    ui.runtime.native = true; ui.runtime.nativeRequest = async (route, body) => { calls.push({ route, ...plain(body) }); return { enabled: body.enabled, supported: true }; };
+    ui.runtime.DeskPen.setActive(false); await ui.runtime.DeskPen.setFullscreen(false); ui.runtime.DeskPen.suspend();
+    assert.equal(calls.length, 0);
+    ui.runtime.DeskPen.setActive(true); await ui.runtime.DeskPen.setFullscreen(true);
+    ui.runtime.DeskPen.setActive(false); await Promise.resolve(); ui.runtime.DeskPen.suspend(); await Promise.resolve();
+    assert.deepEqual(calls.map(call => call.enabled), [true, false]);
+    assert.equal(ui.runtime.DeskPen.isFullscreen(), false);
+  });
+  await asyncCheck('native back, tool and background exits clear fullscreen without echoing another bridge request', async () => {
+    for (const reason of ['back', 'tool', 'background']) {
+      const ui = canvasFixture(inkDocument('Keep committed note')), calls = [];
+      ui.runtime.native = true; ui.runtime.nativeRequest = async (...args) => { calls.push(args); return { enabled: args[1].enabled, supported: true }; };
+      await ui.runtime.DeskPen.setFullscreen(true); ui.dispatch('pointerdown');
+      await ui.emitDocument('deskwing-fullscreen', { detail: { enabled: false, reason } });
+      assert.equal(ui.runtime.DeskPen.isFullscreen(), false); assert.equal(ui.document.body.classList.contains('pen-fullscreen'), false);
+      assert.equal(ui.saved().strokes.length, 0); assert.equal(ui.saved().notes, 'Keep committed note'); assert.equal(calls.length, 1);
+      ui.runtime.DeskPen.setActive(false); await Promise.resolve(); assert.equal(calls.length, 1);
+    }
+  });
+  await asyncCheck('a late native enable acknowledgment cannot reopen fullscreen after Back', async () => {
+    const ui = canvasFixture(), calls = []; let resolveEnable;
+    ui.runtime.native = true; ui.runtime.nativeRequest = (...args) => { calls.push(args); return new Promise(resolve => { resolveEnable = resolve; }); };
+    const pending = ui.runtime.DeskPen.setFullscreen(true); assert.equal(typeof resolveEnable, 'function');
+    await ui.emitDocument('deskwing-fullscreen', { detail: { enabled: false, reason: 'back' } });
+    resolveEnable({ enabled: true, supported: true }); await pending;
+    assert.equal(ui.runtime.DeskPen.isFullscreen(), false); assert.equal(ui.document.body.classList.contains('pen-fullscreen'), false);
+    ui.runtime.DeskPen.suspend(); assert.equal(calls.length, 1);
+  });
+  await asyncCheck('a delayed native exit request cannot close a newer fullscreen entry but external Back still can', async () => {
+    const ui = canvasFixture(), calls = []; let resolveOldExit;
+    ui.runtime.native = true;
+    ui.runtime.nativeRequest = (...args) => {
+      calls.push(plain(args));
+      return args[1].enabled ? Promise.resolve({ enabled: true, supported: true }) : new Promise(resolve => { resolveOldExit = resolve; });
+    };
+    await ui.runtime.DeskPen.setFullscreen(true);
+    const oldExit = ui.runtime.DeskPen.setFullscreen(false); assert.equal(typeof resolveOldExit, 'function');
+    await ui.runtime.DeskPen.setFullscreen(true);
+    await ui.emitDocument('deskwing-fullscreen', { detail: { enabled: false, reason: 'request' } });
+    resolveOldExit({ enabled: false, supported: true }); await oldExit;
+    assert.equal(ui.runtime.DeskPen.isFullscreen(), true); assert.equal(ui.document.body.classList.contains('pen-fullscreen'), true);
+    assert.deepEqual(calls.map(call => call[1].enabled), [true, false, true]);
+    await ui.emitDocument('deskwing-fullscreen', { detail: { enabled: false, reason: 'back' } });
+    assert.equal(ui.runtime.DeskPen.isFullscreen(), false); assert.equal(calls.length, 3);
+  });
+  await asyncCheck('fullscreen starts with tools hidden and Escape closes the drawer before leaving the canvas', async () => {
+    const ui = canvasFixture(), toolbox = ui.document.getElementById('pen-toolbox'), toggle = ui.document.getElementById('pen-fullscreen-tools');
+    assert.equal(toolbox.hidden, false); await ui.runtime.DeskPen.setFullscreen(true);
+    assert.equal(toolbox.hidden, true); assert.equal(ui.runtime.DeskPen.hasFullscreenTools(), false); assert.equal(toggle.hidden, false);
+    await toggle.click(); assert.equal(toolbox.hidden, false); assert.equal(ui.runtime.DeskPen.hasFullscreenTools(), true);
+    assert.equal(toggle.attributes['aria-expanded'], 'true');
+    await ui.emitDocument('keydown', { key: 'Escape' });
+    assert.equal(ui.runtime.DeskPen.isFullscreen(), true); assert.equal(toolbox.hidden, true);
+    await ui.emitDocument('keydown', { key: 'Escape' });
+    assert.equal(ui.runtime.DeskPen.isFullscreen(), false); assert.equal(toolbox.hidden, false); assert.equal(toggle.hidden, true);
+  });
+  await asyncCheck('drawing on the fullscreen canvas closes its tools without losing the new stroke', async () => {
+    const ui = canvasFixture(); await ui.runtime.DeskPen.setFullscreen(true); ui.runtime.DeskPen.setFullscreenTools(true);
+    ui.dispatch('pointerdown'); ui.dispatch('pointermove', 'pen', 1, 120, 160); ui.dispatch('pointerup', 'pen', 1, 160, 200);
+    assert.equal(ui.runtime.DeskPen.hasFullscreenTools(), false); assert.equal(ui.document.getElementById('pen-toolbox').hidden, true);
+    assert.equal(ui.saved().strokes.length, 1); assert.ok(ui.saved().strokes[0].points.length >= 3);
+  });
+  await asyncCheck('unsupported native immersive mode leaves an explicit usable canvas fallback without browser calls', async () => {
+    const ui = canvasFixture(); let browserRequests = 0;
+    ui.runtime.native = true; ui.runtime.nativeRequest = async () => ({ enabled: false, supported: false });
+    ui.document.getElementById('pen-workspace').requestFullscreen = async () => { browserRequests++; };
+    await ui.runtime.DeskPen.setFullscreen(true);
+    assert.equal(ui.runtime.DeskPen.isFullscreen(), true); assert.equal(browserRequests, 0);
+    assert.match(ui.document.getElementById('pen-status').textContent, /system bars could not be hidden/);
   });
 }
 async function handwritingChecks() {

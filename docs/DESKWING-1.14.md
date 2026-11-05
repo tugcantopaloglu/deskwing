@@ -8,7 +8,7 @@ DeskWing brings Stream Studio, Computer Copilot, Ink & notes, Pen tablet, and Se
 | Draw inside Whiteboard on the web/in Teams, Photoshop, or another Windows pen-aware app | **Pen tablet** | The chosen Windows application's document; save it in that application. |
 | See a secondary Windows desktop on the tablet | **Second display** | A silent low-rate view; it does not forward input. |
 
-This guide describes 1.14.0 development behavior. It does not certify a published release or completed hardware rehearsal. Existing executable, APK, package, and configuration identities retain their TabletDeck names so upgrades can keep the established installation and pairing.
+This guide describes 1.14.0 development behavior. It does not certify a published release or every hardware/application workflow. Specific observed checks are recorded below. Existing executable, APK, package, and configuration identities retain their TabletDeck names so upgrades can keep the established installation and pairing.
 
 ## Build and edit a board
 
@@ -128,9 +128,25 @@ This sharing does not paint inside Whiteboard or Photoshop. Those applications n
 
 ### Use the scratchpad fullscreen
 
-Choose **Fullscreen** to give the paper most of the tablet. **Exit fullscreen**, the drawing tools, and compact sharing state remain available. **Show notes**/**Hide notes** controls the notes area. The 8:5 paper fits the available area with unused margins where necessary; it does not stretch or change stroke coordinates. Browser/system fullscreen may depend on the host, with an app-filling layout available as fallback.
+Choose **Fullscreen** for a paper surface without a reserved header, toolbar row, or outer padding. Small floating **Show tools** and **Exit fullscreen** buttons remain available. An amber attention mark on Show tools signals an offline, conflict, or save problem. Open Show tools for Pen/Eraser, width/color, undo, notes, export, saving/sharing status, and any conflict controls; choose **Hide tools** or return to drawing to close that overlay. **Show notes**/**Hide notes** adds or removes the notes area.
 
-Exit fullscreen or press Escape to return. Changing workspaces or backgrounding exits this focused view and cancels an unfinished stroke; completed ink is retained. On narrow fullscreen layouts, exit first to reach Export and secondary explanation. If a sync conflict appears, resolve it deliberately before assuming the two devices show the same work.
+The drawing keeps its existing 8:5 ratio so saved strokes do not distort. On a 16:10 tablet it can fill the immersive screen; on other ratios, any unused bands use the paper color but are not drawable. There is no zoom or pan mode. Notes reduce the space available for paper when visible.
+
+Choose Exit fullscreen to return. Escape closes the tools overlay first, then exits fullscreen. Workspace changes, backgrounding, and native tool dialogs leave immersive mode and cancel an unfinished stroke; completed ink is retained. Export remains available inside Show tools, including on narrow layouts. Open the tools overlay to check sharing or resolve a version conflict before assuming both devices show the same work.
+
+In the Android app, fullscreen also requests that the system status and navigation bars hide and removes their WebView padding. An edge swipe can reveal transient system bars. Android Back exits immersive mode first; opening native handwriting/export or backgrounding restores normal UI, and returning does not re-enter fullscreen automatically. The iOS host requests hidden status bars, home-indicator auto-hide, and full-view layout. Those are system-managed requests, not a permanent lockout of OS gestures. If native bar hiding fails, DeskWing keeps the app-filling canvas and shows a message. Verify the final immersive build on the actual device; the earlier physical fullscreen result predates this update.
+
+### Resize the PC and ink windows
+
+Both the main **DeskWing** window and the separate **DeskWing Ink** window have ordinary resizable borders, minimize/maximize controls, and a 620×480 minimum window size. Drag an edge or corner to resize either window. Main DeskWing opens at 1280×860 by default; DeskWing Ink opens at 1000×740. Window geometry is not saved across newly created windows.
+
+In the PC's Ink & notes view, choose **Open ink window**, or use **Open ink window** from the Windows tray menu. It opens the same shared scratchpad in an independent window without the main navigation/sidebar. Repeating the command brings the existing ink window forward. It is another view of the same drawing and notes, not a new document or a separate Windows pen-input receiver.
+
+The separate window opens onto the fitted paper with floating **Show tools** and **Fullscreen** buttons. Show tools exposes drawing controls, export, sharing status, and conflict choices; an amber attention mark flags a sharing or save problem. Choose **Show notes** for the notes overlay, then **Hide notes** to close it. Drawing on the canvas or pressing Escape also closes the overlays. This view keeps the ordinary Windows caption and resize border; it does not enter fullscreen automatically. The drawing retains its 8:5 ratio as the window changes size.
+
+Closing DeskWing Ink closes only that view. Open it again to load the current shared document and local recovery state. Closing the main DeskWing window continues to hide it to the tray; the companion keeps running. Check the save/share state before closing, particularly after disconnected editing or a conflict. The separate window uses the same synchronization and replacement rules as the main Ink & notes view.
+
+The window needs the normal desktop/tray companion. A headless companion cannot open it and returns guidance to restart in desktop mode. Dimensions follow Windows DPI scaling; reopening an existing window preserves its current size, while creating a new one uses its default size.
 
 ## Draw directly in a Windows application
 
@@ -141,10 +157,12 @@ Exit fullscreen or press Escape to return. Changing workspaces or backgrounding 
 1. Open the intended Windows drawing app and a disposable test document. Choose its drawing tool and, where the app offers an input mode, use its Windows Ink path. Use a brush configured to respond to pressure if you want to test pressure.
 2. Open **Pen tablet** in DeskWing on the PC. Under **Windows target**, choose a **Screen** or **Window** and select **Enable pen input**. If already enabled, **Use this target** applies a changed selection. This permission resets when the companion closes.
 3. A Screen target maps the pad across that Windows display. A Window target maps across the application's client area, including any toolbars inside it; keep that window visible, uncovered, in the foreground, and at a stable size. Arrange the window and focus the drawing app before starting.
-4. On the paired tablet, choose **Pen tablet**, then **Refresh** if needed. Confirm the selected target and choose **Fullscreen** if desired. Tap **Start pen session** only when the PC target is ready.
+4. On the paired tablet, choose **Pen tablet**, then **Refresh** if needed. Confirm the selected target and choose **Fullscreen** if desired. Tap **Start pen** in fullscreen, or **Start pen session** in the normal view, only when the PC target is ready.
 5. Draw with the pen and watch the Windows app. The tablet reports normalized coordinates and reported pressure; it does not verify the resulting brush mark. Use **Stop pen** when finished, and save the document in the Windows app. **Back to controls** leaves this workspace. **Disable pen input** on the PC revokes the enabled target.
 
-The surface maps to the target's aspect ratio. Hover, contact, pressure, tilt, barrel-button, and eraser information are forwarded when the tablet exposes them. The Windows implementation creates a synthetic pen with pressure values from 0 to 1024; that numeric range does not establish the pen's physical sensitivity or guarantee a target app's pressure response. Unsupported hardware or application settings can produce uniform strokes. This is a Windows Ink input path, not a bundled Wintab tablet driver.
+Outside fullscreen, the surface keeps the target's aspect ratio. Fullscreen defaults to **Fill tablet**, which maps the whole tablet area to the chosen PC target; shapes can stretch when those proportions differ. In **Show tools → Surface mapping**, choose **Match PC proportions** to preserve proportions with unused edges that do not control the pen. Changing mapping stops an active session; start again after the layout settles.
+
+Hover, contact, pressure, tilt, barrel-button, and eraser information are forwarded when the tablet exposes them. The Windows implementation creates a synthetic pen with pressure values from 0 to 1024; that numeric range does not establish the pen's physical sensitivity or guarantee a target app's pressure response. Unsupported hardware or application settings can produce uniform strokes. This is a Windows Ink input path, not a bundled Wintab tablet driver.
 
 For a Photoshop pressure check, Adobe documents **Brush Settings → Shape Dynamics → Control: Pen Pressure** and explains its Windows Ink versus Wintab paths. A Photoshop configuration forced to Wintab needs review before testing this Windows Ink implementation. These settings are test preparation, not Adobe certification of DeskWing. See [Adobe's tablet support guidance](https://helpx.adobe.com/photoshop/kb/tablet-support-faq-photoshop.html).
 
@@ -152,9 +170,11 @@ A window target must stay focused and uncovered. Moving/resizing it, closing it,
 
 Only one pen session can own the PC at a time. Connection failure, slow or stale input, tablet blur/backgrounding, native suspension, and workspace exit stop input and clear queued samples. The server's short lease expires if fresh activity/renewal stops. Sessions never restart automatically: correct the cause and tap **Start pen session** again. Completed drawing belongs to the target application; DeskWing does not replay a stopped input queue.
 
-**Fullscreen** and **Exit fullscreen** remain visible alongside **Back to controls**. Entering or leaving fullscreen stops the current input session because the pad geometry changes; explicitly start a fresh session after the layout settles. This differs from the shared scratchpad, which saves its own committed drawing document.
+Immersive fullscreen removes the heading, footer, reserved toolbars, and outer padding. Floating **Show tools**, **Start pen**/**Stop pen**, and **Exit fullscreen** remain available over the input area. Show tools exposes the target, status, Refresh, and Surface mapping; it does not reserve permanent canvas space. Exit fullscreen to reach **Back to controls**. Entering or leaving fullscreen stops the current input session because the pad geometry changes; explicitly start a fresh session after the layout settles. This differs from the shared scratchpad, which saves its own committed drawing document.
 
-Whiteboard on the web/in Teams and Photoshop are intended use cases, not certified outcomes from source or automated tests. Validate the exact Windows build, tablet/WebView, stylus, browser/app version, account access, input settings, and brush. Physical pressure, tilt, palm behavior, latency, and target-app delivery remain device/application rehearsal items.
+The same native system-bar behavior applies as in Ink & notes: Android Back/native tools/backgrounding restore normal UI, and a new input session must be started deliberately. A native bar-hiding error leaves the full-window surface available with explanatory guidance in Show tools.
+
+Whiteboard on the web/in Teams and Photoshop are intended use cases, not certified outcomes from source or automated tests. Validate the exact Windows build, tablet/WebView, stylus, browser/app version, account access, input settings, and brush. On 5 November 2026, the user drew with the Xiaomi tablet and pen through the Windows pen receiver: test strokes carried varying pressure and tilt, and the user reported pressure and fullscreen working. That receiver test does not establish Whiteboard/Photoshop delivery, complete palm rejection, or the later immersive layout changes.
 
 ## Convert handwriting to text on Android
 
@@ -164,7 +184,7 @@ The current native capability check uses Android's stylus-handwriting API on And
 
 Handwriting is text entry, not automatic recognition of the scratchpad drawing. If the destination field changes while the panel is open, DeskWing keeps the newer field rather than silently replacing it. Password fields are excluded, and the field's length limit still applies.
 
-**Privacy:** DeskWing does not send these strokes to its own remote OCR service. The installed keyboard performs recognition under that keyboard vendor's privacy policy, permissions, and settings. Its offline support is not guaranteed. Finished notes can synchronize to the paired PC. Choose and configure a keyboard appropriate for the text you enter. The exported PNG destination may also be a cloud-backed provider if you select one in Android's picker. The iOS source uses native text entry/Scribble, but that path still needs macOS compilation and physical-iPad validation.
+**Privacy:** DeskWing does not send these strokes to its own remote OCR service. The installed keyboard performs recognition under that keyboard vendor's privacy policy, permissions, and settings. Its offline support is not guaranteed. Finished notes can synchronize to the paired PC. Choose and configure a keyboard appropriate for the text you enter. The exported PNG destination may also be a cloud-backed provider if you select one in Android's picker. The iOS source uses native text entry/Scribble; a simulator build does not verify real Pencil or handwriting behavior on an iPad.
 
 ## Use Second display within its limits
 
@@ -188,15 +208,18 @@ Record the exact build, PC/Windows version, tablet model, Android/WebView versio
 - [ ] Draw slow and fast strokes, vary pressure, erase, undo/redo, and clear/undo. Rest a palm on the canvas and near controls with finger-ignore enabled, then try deliberate finger drawing with it disabled.
 - [ ] Rotate, background, lock, and resume during a stroke. Confirm no stray line appears and completed ink persists. Relaunch, export a PNG through the Android picker, cancel an export, and copy notes.
 - [ ] Open Ink & notes on both devices. Share a committed tablet stroke and notes to the PC, then a PC edit back to the tablet. Disconnect, edit offline, reconnect, create a deliberate two-version conflict, inspect both replacement choices and Recovery copy, and retain exports of valuable versions.
-- [ ] Exercise scratchpad Fullscreen, Show/Hide notes, Exit fullscreen, Escape, rotation, and backgrounding. Verify the canvas ratio, stroke position, exit control, and visible conflict state at each tablet size.
+- [ ] Exercise scratchpad immersive Fullscreen, Show/Hide tools, Show/Hide notes, Exit fullscreen, Escape, rotation, and backgrounding. Verify system-bar behavior, drawing bounds, stroke position, floating exit, and the conflict controls inside the tools overlay.
+- [ ] Resize and maximize both the main PC and separate DeskWing Ink windows. Confirm the same shared ink, no clipped controls at the minimum size, and correct close/reopen behavior without stopping the companion.
 - [ ] In a disposable Whiteboard web/Teams board (work or school account) or Photoshop document, choose the exact Windows browser/app target, enable input, enter tablet fullscreen, focus the target, and start explicitly. Verify coordinate mapping, slow/fast strokes, pressure-sensitive brush response, tilt, eraser, and barrel-button behavior supported by the hardware/app.
-- [ ] During a Windows pen session, move/resize or cover the target window, change focus, disconnect, lock/background the tablet, change fullscreen, and stop input. Confirm release, no delayed/replayed strokes, and explicit restart. Test a second controller's inability to take an active session.
+- [ ] During a Windows pen session, compare Fill tablet and Match PC proportions, move/resize or cover the target window, change focus, disconnect, lock/background the tablet, change fullscreen, and stop input. Confirm release, no delayed/replayed strokes, and explicit restart. Test a second controller's inability to take an active session.
 - [ ] Try handwriting in Notes and another eligible field with the actual keyboard/language. Confirm Use text, Cancel, Use keyboard, and unsupported-keyboard fallback. Test offline behavior only if an offline claim is needed, with that keyboard's configuration recorded.
 - [ ] Check readable state and controls at desktop 1280×720/900×620, tablet 1280×800/800×600, and 390px narrow fallback, including keyboard focus and reduced motion.
 - [ ] If using Second display, verify its distinct Windows monitor, explicit sharing, real tablet pixels, pause/resume, sharing revocation, and monitor removal. Confirm silent low-rate viewing and the absence of touch forwarding.
 
 ## Platform and release status
 
-The source brand/version is DeskWing 1.14.0. `TabletDeck-Companion.exe`, `TabletDeck-Studio.apk`, Android package `app.tabletdeck.studio`, and `%LOCALAPPDATA%\TabletDeck` retain their compatible identities. Android uses version code 17. Rebuild and install a candidate containing the shared-ink and Windows-pen additions before rehearsing them; an earlier 1.14 installation does not establish that these later changes are present. Signed build, installation, and device/application behavior are separate pieces of evidence.
+The source brand/version is DeskWing 1.14.0. `TabletDeck-Companion.exe`, `TabletDeck-Studio.apk`, Android package `app.tabletdeck.studio`, and `%LOCALAPPDATA%\TabletDeck` retain their compatible identities. Android uses version code 17. Rebuild and install a candidate containing the latest immersive UI/native bar handling and separate Windows ink window before rehearsing those changes; an earlier 1.14 installation does not establish that they are present. Signed build, installation, and device/application behavior are separate pieces of evidence.
 
-iOS source exists, but this Windows environment has not compiled, signed, or run it with macOS/Xcode. Source presence does not establish a working iOS release. App Store/Play Store submission materials and account/signing requirements remain in [the separate store preparation guide](STORE-RELEASE.md); this user guide does not imply store publication or approval.
+Hosted macOS validation passed for commit `b683825b076bdf41afbf5719b770118453cff6d1`: Xcode 26.6 built the unsigned Debug iOS app, and all eight tests passed on the iPad Pro 13-inch (M5), iPadOS 26.4.1 simulator. The later native immersive changes require another run; this baseline does not verify their final build. Physical-iPad installation, Pencil/Scribble, signing, account flows, and store approval are separate checks. [Simulator job and logs](https://github.com/tugcantopaloglu/tablet-deck-studio/actions/runs/42082154607/job/127437726088).
+
+App Store/Play Store submission materials and account/signing requirements remain in [the separate store preparation guide](STORE-RELEASE.md); this user guide does not imply store publication or approval.

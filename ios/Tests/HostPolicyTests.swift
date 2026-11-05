@@ -83,6 +83,21 @@ final class HostPolicyTests: XCTestCase {
         XCTAssertEqual(HostPolicy.dispatchDeadline("/api/pen"), 0.5)
         XCTAssertEqual(HostPolicy.dispatchDeadline("/api/action"), 2)
     }
+    func testFullscreenAcceptsOnlyBooleanAndAlwaysAllowsExit() throws {
+        func body(_ json: String) throws -> [String: Any] {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        }
+        let enable = try body("{\"enabled\":true}"), disable = try body("{\"enabled\":false}")
+        XCTAssertTrue(try HostPolicy.requestedFullscreen(enable, foreground: true, presentingTool: false))
+        XCTAssertFalse(try HostPolicy.requestedFullscreen(disable, foreground: false, presentingTool: true))
+        XCTAssertThrowsError(try HostPolicy.requestedFullscreen(enable, foreground: false, presentingTool: false))
+        XCTAssertThrowsError(try HostPolicy.requestedFullscreen(enable, foreground: true, presentingTool: true))
+        for json in ["{}", "{\"enabled\":1}", "{\"enabled\":0}", "{\"enabled\":\"true\"}", "{\"enabled\":null}", "{\"enabled\":true,\"extra\":false}"] {
+            XCTAssertThrowsError(try HostPolicy.requestedFullscreen(body(json), foreground: true, presentingTool: false), json)
+        }
+        XCTAssertFalse(HostPolicy.allowed("/local/fullscreen", method: "POST"))
+        XCTAssertEqual(HostPolicy.maximumBridgeBytes("/local/fullscreen"), 16384)
+    }
     func testPNGAndFilenameValidation() {
         XCTAssertEqual(PNGExport.safeName("../private.png"), "DeskWing-sketch.png")
         XCTAssertEqual(PNGExport.safeName("My note-2.png"), "My note-2.png")

@@ -56,5 +56,9 @@ Requested 2026-11-05: implement every inspection finding, improve the design, an
 - [x] Add native Windows pen input for Windows Ink apps, with pressure/tilt and explicit PC target/permission (Whiteboard web/Teams and Photoshop still need app-specific tests).
 - [x] Add fullscreen scratchpad and fullscreen pen-tablet surface with reachable exit.
 - [ ] Validate expanded pen modes, update packages, rerun security/regressions and document verified app compatibility.
+- [x] Refine tablet fullscreen to hide Android system bars and use a canvas-only surface with compact reachable controls.
+- [x] Add a separate resizable PC Ink window and permit a smaller resizable main companion window.
 
 Expanded pen evidence: shared ink passed 50 backend and 38 HTTP checks; native Windows receiver confirmed real position, pressure, tilt and clean release; 56 two-client/fullscreen browser checks passed. Independent visual review passed all 16 final captures. Microsoft retired standalone Whiteboard; physical testing uses the local diagnostic canvas unless a supported web/Teams account is available.
+
+Physical pen checkpoint: user confirmed pressure and fullscreen operation after the signed update; the PC received real Xiaomi pen strokes with changing pressure and tilt. User requested a further immersive fullscreen refinement and resizable PC windows. The 55-suite local aggregate passed; iOS build and 8 simulator tests passed for b683825. Final security rescan had zero new findings (7 pre-existing Low). Hosted Windows passed 54/55 suites; a cold-start timeout in a certificate-export test helper was raised, with focused ink/pen API checks still passing.

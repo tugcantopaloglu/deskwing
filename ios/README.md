@@ -1,6 +1,6 @@
 # DeskWing iOS host
 
-This directory contains a native iPhone/iPad host for the shared tablet UI. It is **source prepared for Xcode, not a compiled or signed iOS release**. The development machine used for this change is Windows, with no Swift compiler, Xcode, or connected iOS device. The Mac build and real-device gates below remain required.
+This directory contains a native iPhone/iPad host for the shared tablet UI. It **builds and passes eight unit tests in the hosted iPad simulator**. It is not yet a signed or released iOS app. Development uses Windows; GitHub's hosted Mac runner provides compilation and simulator validation. Physical iPad, Apple Pencil, pairing and distribution gates below remain required.
 
 ## Included
 
@@ -10,6 +10,7 @@ This directory contains a native iPhone/iPad host for the shared tablet UI. It i
 - HTTPS polling using the existing server API. No persistent fast TLS socket, Android ADB USB tunnel, or QR camera flow is implemented in this first iOS host. The pairing UI states those limits.
 - Foreground-only controls, cancellation of pending requests on suspension, best-effort release of held keys, and the server's existing renewable three-second hold lease. Interactive writes that have not started sending within two seconds are cancelled; an already transmitted action may still run and is never automatically repeated by the app.
 - Native text entry through `UITextView`, including system Scribble when supported/enabled, plus a keyboard fallback. Handwriting recognition is provided by iPadOS; it is not an app OCR service. A user-selected share/save sheet exports bounded PNG drawings.
+- The drawing and pen-tablet full-screen control expands the web view to the app window's edges, hides the status bar and requests Home-indicator auto-hide. It restores normal layout on exit, backgrounding, native tools, re-pairing or renderer reload. iPadOS retains system gestures and decides when the Home indicator hides; this does not force a Split View or Stage Manager window to occupy the entire display.
 - Shared ink uses the explicitly allowed `/api/ink` route, with a four-MiB request-body ceiling and revision-aware documents. Its only permitted query form is GET `/api/ink?revision=<64 hexadecimal characters>` for lightweight unchanged polling. Other routes retain the smaller message limits.
 - The separate Windows pen-tablet mode uses `/api/pen` leases and bounded sample batches. It forwards Pencil/pen pointer data to the enabled Windows companion input service; it does not install an iPad digitizer driver. The native host cancels its exact pen lease on suspension, never replays batches, and cancels a pen request still waiting to send after half a second. The Windows lease expires after 1.2 seconds without renewal. Physical pressure, tilt, target mapping, application compatibility and latency still require device testing.
 - Twitch/Kick public chat opens in `SFSafariViewController`, separate from the privileged web view and without the PC-control bridge. It is a viewer, not an authenticated moderation integration.
@@ -46,12 +47,12 @@ For a real device, open the generated project, select the user's Apple Developer
 
 ## Required validation before TestFlight or App Store
 
-1. Compile the app and run `DeskWingTests` on a Mac. The Windows validation performed here cannot prove Swift type checking, UIKit API availability or bundle behavior.
+1. Keep the hosted Mac build and `DeskWingTests` passing for the release commit. The recorded simulator pass below verifies compilation and policy tests; it does not replace a signed archive or physical-device validation.
 2. Verify that the custom `deskwing://app` origin retains scratchpad/localStorage across app restarts and that all new shared assets load. Confirm VoiceOver, Dynamic Type, orientation, split view, safe areas and touch/Pencil input on an iPad.
 3. Rehearse first-run local-network permission denial, allowance in Settings, wrong certificate code, expired certificate, wrong PIN, changed certificate, revoked pairing, reconnects and foreground/background transitions. Confirm the PIN is never sent on a failed trust challenge.
 4. Specifically test the self-signed local-IP certificate with `NSAllowsLocalNetworking` on supported iOS versions. No global `NSAllowsArbitraryLoads` exception is configured. Do not add one to make a failed test pass; resolve the pinned local connection policy first.
 5. Exercise simultaneous preview/polling and action traffic, queued-write expiry, held-key and pen-lease renewal/release, lost-network ambiguity, long macros, cancellation and restoring the app while a response is pending. Pending actions/sample batches must not replay after reconnect. Verify shared ink conflict recovery and bounded large-document sync separately from latency-sensitive pen input.
-6. Test Scribble with actual Apple Pencil, enabled languages, keyboard fallback, long text, cancelling a sheet, pressure/palm handling and drawing save/share. A simulated stylus cannot verify physical palm rejection or system recognition.
+6. Test Scribble with actual Apple Pencil, enabled languages, keyboard fallback, long text, cancelling a sheet, pressure/palm handling and drawing save/share. Verify full-screen entry/exit, Home/status-bar behavior, safe-area placement of Exit/Stop controls, Split View, and restoration after backgrounding or native tools. A simulated stylus cannot verify physical palm rejection or system recognition.
 7. Provide an App Store icon asset catalog with the required opaque 1024px artwork, accessibility/release screenshots, support/privacy policy URLs, and app review instructions explaining the required Windows companion. The current source target intentionally does not pretend those submission assets are complete.
 8. Audit the privacy manifest and App Store privacy answers against final provider behavior and any added SDKs. The supplied manifest is a native-host baseline with no tracking SDKs or required-reason APIs used directly in the current Swift code; it is not an automatic assertion that all product/store disclosures are complete. Do not add an export-compliance exemption flag until the account's accurate declaration is selected.
 9. Archive, validate and distribute a signed TestFlight build. Complete an iPad rehearsal before marking iOS support released.
@@ -66,10 +67,13 @@ The writing field uses the standard text input system. Recognition availability 
 
 Project generation follows [XcodeGen's source/resource specification](https://github.com/yonaskolb/XcodeGen/blob/master/Docs/ProjectSpec.md). Store preparation is tracked in [STORE-RELEASE.md](../docs/STORE-RELEASE.md) and [IOS-PLAN.md](../docs/IOS-PLAN.md).
 
-## Validation recorded on Windows
+## Recorded validation
+
+- Hosted Mac validation passed on 2026-11-05 for commit `b683825b076bdf41afbf5719b770118453cff6d1`: Xcode 26.6, iPad Pro 13-inch (M5) simulator, iPadOS 26.4.1. The unsigned Debug app compiled and all eight `DeskWingTests` passed with zero failures. [iOS simulator job and logs](https://github.com/tugcantopaloglu/tablet-deck-studio/actions/runs/42082154607/job/127437726088).
+- Tests cover private-address and certificate-pin policy, bridge route/origin boundaries, background release rules, ink request limits, PNG validation, malformed certificates, and stale callback isolation after a renderer restart. They do not exercise live TLS pairing or hardware pen input.
 
 - `python ios/sync-assets.py`: shared assets copied with a manifest and path checks.
 - Python syntax, JavaScript syntax, XML plist parsing and generated-manifest/source comparison: run locally.
-- Swift/XCTest, simulator, signing, pinned TLS on iOS, Scribble and device behavior: **not run; requires a Mac/iOS environment**.
+- Signing, a release archive, pinned TLS against the Windows companion, physical Scribble/Pencil and device behavior: **not yet run**.
 
 Security scanner results are recorded separately in the root security review. Do not interpret source scanning as a substitute for the Mac/device gates.

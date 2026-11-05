@@ -1,0 +1,37 @@
+/* An ordinary resizable Windows window with only the shared ink workspace inside. */
+body.desktop-console.ink-window-mode,
+body.desktop-console.ink-window-mode.pen-mode,
+body.desktop-console.ink-window-mode.execution-visible{display:block;min-width:0;min-height:0;overflow:hidden}
+body.desktop-console.ink-window-mode>.console-sidebar,
+body.desktop-console.ink-window-mode>.console-header,
+body.desktop-console.ink-window-mode>#workspace,
+body.desktop-console.ink-window-mode>#computer-workspace,
+body.desktop-console.ink-window-mode>#pen-tablet-workspace,
+body.desktop-console.ink-window-mode>#execution{display:none!important}
+body.desktop-console.ink-window-mode>#pen-workspace:not(.is-fullscreen){position:relative;width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;grid-column:auto;grid-row:auto;padding:0;gap:0;overflow:hidden;background:#f6f3e9}
+body.desktop-console.ink-window-mode #pen-open-window{display:none}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-heading{position:absolute;top:10px;right:12px;z-index:4;padding:0;margin:0;pointer-events:none}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-heading>div:not(.pen-heading-actions){display:none}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-heading-actions{gap:6px;flex-wrap:nowrap;pointer-events:auto}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-heading-actions>button:not(#ink-window-tools):not(#pen-fullscreen){display:none!important}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-heading-actions>button{min-height:44px;padding:8px 12px;font-size:13px;box-shadow:0 2px 8px #0002}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-body{position:absolute;inset:0;display:flex;min-height:0;gap:0;overflow:hidden}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-drawing{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-drawing>.help{display:none}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-paper{flex-shrink:0;max-width:100%;max-height:100%;border-radius:0}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-toolbox{display:none!important;position:absolute;top:64px;right:12px;z-index:3;width:min(650px,calc(100% - 24px));max-height:calc(100% - 76px);padding:14px;overflow:auto;overscroll-behavior:contain;border:1px solid var(--outline);border-radius:12px;background:var(--canvas);box-shadow:0 6px 22px #0003}
+.ink-window-mode #pen-workspace.ink-window-tools-open:not(.is-fullscreen) .pen-toolbox{display:flex!important}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-drawer-actions{display:flex;order:-1}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-drawer-actions>button{min-height:44px;padding:8px 12px}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-toolbar{order:-2;border-top:0;padding-top:0}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-notes{display:none!important;position:absolute;top:64px;right:12px;bottom:12px;z-index:2;width:min(360px,calc(100% - 24px));padding:14px;overflow:auto;gap:10px;border:1px solid var(--outline);border-radius:12px;background:var(--canvas);box-shadow:0 6px 22px #0003}
+.ink-window-mode #pen-workspace.ink-window-notes-open:not(.is-fullscreen) .pen-notes{display:flex!important}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-notes textarea{min-height:100px;flex:1;resize:none}
+.ink-window-mode #pen-workspace:not(.is-fullscreen) .pen-notes>.help{display:none}
+.ink-window-mode .ink-window-only{min-height:44px;padding:8px 12px}
+.ink-window-mode .is-fullscreen .ink-window-only{display:none!important}
+.ink-window-warning:after{content:'';display:inline-block;width:8px;height:8px;margin-left:8px;border-radius:50%;background:var(--amber)}
+.ink-window-error{max-width:560px;padding:32px;margin:auto;color:var(--ink)}
+.ink-window-error h1{font-size:28px;margin:0 0 12px}
+.ink-window-error p{color:var(--secondary);line-height:1.6}
+.ink-window-error button,#pen-open-window{min-height:44px;padding:10px 14px}

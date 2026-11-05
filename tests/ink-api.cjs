@@ -36,7 +36,8 @@ async function request(route,{body,raw,auth='admin',headers={}}={}){
 function fixtureTls(){
   // Trust only the certificate created inside this test's private data directory.
   const script='$ErrorActionPreference="Stop"; $certificate=[System.Security.Cryptography.X509Certificates.X509Certificate2]::new([IO.File]::ReadAllBytes($env:DESKWING_INK_TEST_PFX),$null,[System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet); try { [Console]::Write([Convert]::ToBase64String($certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))) } finally { $certificate.Dispose() }';
-  const exported=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,encoding:'utf8',timeout:15000,env:{...process.env,DESKWING_INK_TEST_PFX:path.join(data,'companion.pfx')}});
+  // Hosted Windows runners can need extra time for the first Windows PowerShell startup.
+  const exported=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,encoding:'utf8',timeout:60000,env:{...process.env,DESKWING_INK_TEST_PFX:path.join(data,'companion.pfx')}});
   if(exported.error||exported.status!==0)throw Error('Could not read the isolated companion certificate: '+(exported.error?.message||exported.stderr));
   const certificate=new X509Certificate(Buffer.from(exported.stdout.trim(),'base64'));
   return {ca:certificate.toString(),checkServerIdentity:(_host,peer)=>peer.raw?.equals(certificate.raw)?undefined:Error('The test companion certificate did not match its private fixture.')};

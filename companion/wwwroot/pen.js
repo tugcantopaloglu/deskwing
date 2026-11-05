@@ -48,7 +48,7 @@
   let doc = createDocument(), history = createHistory(doc.strokes), loaded = false, loadError = '', saveError = '', active = false, suspended = false;
   let host, canvas, context, noteField, stateLine, emptyHint, undoButton, redoButton, clearButton, penButton, eraserButton, saveTimer, resizeObserver;
   let inkCache, cachedStrokes = null, committedPoints = 0;
-  let paperNode, drawingSection, notesSection, fullscreenButton, notesToggle, fullscreen=false, fullscreenNotes=false, browserFullscreen=false;
+  let paperNode, drawingSection, notesSection, fullscreenButton, fullscreenToolsButton, toolBox, notesToggle, fullscreen=false, fullscreenNotes=false, fullscreenTools=false, browserFullscreen=false, nativeFullscreen=false, fullscreenEpoch=0;
   let syncLine, syncDetails, syncConflictBox, syncRetryButton, syncRestoreButton, syncPollTimer=null, syncPending=false, syncEpoch=0, choicePending=false;
   let syncPhase='local', syncMessage='', syncRevision=null, syncWorkspaceId=null, syncBaseKey=null, syncConflict=null, syncMetadata=null, lastRemote=null, forceReview=false;
   let currentStroke = null, activePointer = null, activePointerType = '', tool = 'pen', color = colors[0], width = 3, framePending = false, handwritingPending = false;
@@ -119,6 +119,7 @@
     const detail=syncConflictBox.querySelector?.('[data-pen-conflict-detail]');
     if(detail&&syncConflict)detail.textContent=`This device: ${doc.strokes.length} strokes, ${doc.notes.length} note characters. PC: ${syncConflict.document.strokes.length} strokes, ${syncConflict.document.notes.length} note characters. Nothing has been replaced.`;
     syncConflictBox.querySelectorAll?.('button').forEach(node=>node.disabled=syncPending||choicePending||!!currentStroke||handwritingPending);
+    if(fullscreenToolsButton){const warning=syncPhase==='conflict'||syncPhase==='offline'||!!saveError;fullscreenToolsButton.classList.toggle('pen-tools-warning',warning);fullscreenToolsButton.setAttribute('aria-label',(fullscreenTools?'Hide tools':'Show tools')+(warning?' — ink sharing needs attention':''));}
   }
   async function rememberSync(snapshot,content) {
     syncWorkspaceId=snapshot.workspaceId;syncRevision=snapshot.revision;syncBaseKey=contentKey(content);lastRemote=snapshot;
@@ -249,7 +250,7 @@
   function resize() {
     if (!canvas || !active) return;
     if(paperNode&&drawingSection){
-      if(fullscreen){const available=drawingSection.getBoundingClientRect(),fit=fitPaper(available.width,available.height);paperNode.style.width=fit.width+'px';paperNode.style.height=fit.height+'px';}
+      if(fullscreen||document.body.classList.contains('ink-window-mode')){const available=drawingSection.getBoundingClientRect(),fit=fitPaper(available.width,available.height);paperNode.style.width=fit.width+'px';paperNode.style.height=fit.height+'px';}
       else{paperNode.style.width='';paperNode.style.height='';}
     }
     const rect = canvas.getBoundingClientRect(), ratio = Math.min(window.devicePixelRatio || 1,2);
@@ -257,21 +258,42 @@
     if (canvas.width !== nextWidth || canvas.height !== nextHeight) { if(currentStroke)cancelStroke();canvas.width = nextWidth; canvas.height = nextHeight; }
     scheduleDraw();
   }
-  async function setFullscreen(value) {
-    const next=value===true;
+  async function setFullscreen(value,options={}) {
+    const next=value===true,wasFullscreen=fullscreen,ownedNative=nativeFullscreen,epoch=++fullscreenEpoch;
     if(next&&!active)return false;
     cancelStroke();persist();fullscreen=next;
     document.body.classList.toggle('pen-fullscreen',next);host?.classList.toggle('is-fullscreen',next);
     if(fullscreenButton){fullscreenButton.textContent=next?'Exit fullscreen':'Fullscreen';fullscreenButton.setAttribute('aria-pressed',String(next));}
+    if(fullscreenToolsButton)fullscreenToolsButton.hidden=!next;
+    setFullscreenTools(false);
     if(notesToggle)notesToggle.hidden=!next;
     if(notesSection)notesSection.hidden=next&&!fullscreenNotes;
     if(host)host.classList.toggle('pen-fullscreen-notes',next&&fullscreenNotes);
     resize();
-    if(next&&typeof host?.requestFullscreen==='function'){
+    if(isNative()){
+      // Restore system bars only if this workspace owned immersive mode. Other workspaces share the host.
+      if(options.nativeEvent){nativeFullscreen=false;}
+      else if(next||wasFullscreen||ownedNative){
+        nativeFullscreen=next;
+        try{
+          const result=await nativeRequest('/local/fullscreen',{enabled:next},'POST',10000);
+          if(epoch===fullscreenEpoch){nativeFullscreen=result?.enabled===true;if(next&&!nativeFullscreen)tell('The canvas is fullscreen, but the system bars could not be hidden.',true);}
+        }catch(error){if(epoch===fullscreenEpoch){nativeFullscreen=false;if(next)tell('The canvas is fullscreen. The tablet could not hide system bars; exit and try again.',true);}}
+      }
+    }else if(next&&typeof host?.requestFullscreen==='function'){
       try{await host.requestFullscreen({navigationUI:'hide'});if(fullscreen&&active)browserFullscreen=document.fullscreenElement===host;else if(document.fullscreenElement===host)await document.exitFullscreen?.();}catch{/* In-app fullscreen remains available when the host does not support the browser API. */}
     }else if(!next&&document.fullscreenElement===host){try{await document.exitFullscreen?.();}catch{}}
     if(!next)browserFullscreen=false;
     resize();return true;
+  }
+  function setFullscreenTools(value) {
+    fullscreenTools=fullscreen&&value===true;
+    if(toolBox)toolBox.hidden=fullscreen&&!fullscreenTools;
+    if(fullscreenToolsButton){fullscreenToolsButton.textContent=fullscreenTools?'Hide tools':'Show tools';fullscreenToolsButton.setAttribute('aria-expanded',String(fullscreenTools));}
+    host?.classList.toggle('pen-tools-open',fullscreenTools);
+    if(fullscreenTools)cancelStroke();
+    else if(fullscreen&&toolBox?.contains?.(document.activeElement))fullscreenToolsButton?.focus({preventScroll:true});
+    renderSyncState();
   }
   function toggleFullscreenNotes() {fullscreenNotes=!fullscreenNotes;if(notesSection)notesSection.hidden=fullscreen&&!fullscreenNotes;if(notesToggle){notesToggle.textContent=fullscreenNotes?'Hide notes':'Show notes';notesToggle.setAttribute('aria-pressed',String(fullscreenNotes));}host?.classList.toggle('pen-fullscreen-notes',fullscreen&&fullscreenNotes);cancelStroke();resize();}
   function releasePointer(pointerId) { try { if (canvas?.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId); } catch {} }
@@ -385,20 +407,23 @@
     const heading = element('header','pen-heading'), copy = element('div'); copy.append(element('h2','','Ink & notes'),element('p','help','Sketch, write, and keep ideas beside your controls.')); heading.append(copy);
     const headingActions=element('div','pen-heading-actions');
     fullscreenButton=button('Fullscreen',()=>setFullscreen(!fullscreen));fullscreenButton.id='pen-fullscreen';fullscreenButton.setAttribute('aria-pressed','false');
+    fullscreenToolsButton=button('Show tools',()=>setFullscreenTools(!fullscreenTools));fullscreenToolsButton.id='pen-fullscreen-tools';fullscreenToolsButton.hidden=true;fullscreenToolsButton.setAttribute('aria-expanded','false');fullscreenToolsButton.setAttribute('aria-controls','pen-toolbox');
     notesToggle=button('Show notes',toggleFullscreenNotes);notesToggle.id='pen-fullscreen-notes';notesToggle.hidden=true;notesToggle.setAttribute('aria-pressed','false');
-    const exportButton = button('Export drawing',exportDrawing); exportButton.id = 'pen-export'; headingActions.append(notesToggle,exportButton,fullscreenButton);heading.append(headingActions); host.append(heading);
+    const exportButton = button('Export drawing',exportDrawing); exportButton.id = 'pen-export'; headingActions.append(exportButton,fullscreenToolsButton,fullscreenButton);heading.append(headingActions); host.append(heading);
     stateLine = element('p','pen-save-state',loadError || 'Saved on this device · local backup kept'); stateLine.id = 'pen-status'; stateLine.setAttribute('role','status'); host.append(stateLine);
+    toolBox=element('div','pen-toolbox');toolBox.id='pen-toolbox';toolBox.setAttribute('aria-label','Ink tools and sharing');host.append(toolBox);toolBox.append(stateLine);
+    const drawerActions=element('div','pen-drawer-actions');const drawerExport=button('Export drawing',exportDrawing);drawerExport.id='pen-fullscreen-export';drawerActions.append(notesToggle,drawerExport);toolBox.append(drawerActions);
     const syncBar=element('section','pen-sync-bar');syncBar.setAttribute('aria-label','PC ink sharing');const syncCopy=element('div','pen-sync-copy');syncLine=element('strong','','Local scratchpad');syncLine.id='pen-sync-state';syncLine.setAttribute('role','status');syncDetails=element('span','help','Connect to the companion to share drawings and notes.');syncCopy.append(syncLine,syncDetails);
-    const syncActions=element('div','pen-sync-actions');syncRetryButton=button('Sync now',syncShared);syncRetryButton.id='pen-sync-now';syncRestoreButton=button('Recovery copy',restoreRecovery);syncRestoreButton.id='pen-recovery';syncRestoreButton.hidden=true;syncActions.append(syncRetryButton,syncRestoreButton);syncBar.append(syncCopy,syncActions);host.append(syncBar);
-    syncConflictBox=element('section','pen-conflict');syncConflictBox.hidden=true;syncConflictBox.setAttribute('aria-label','Choose an ink version');const conflictDetail=element('p');conflictDetail.dataset.penConflictDetail='';const conflictActions=element('div','pen-sync-actions');const usePC=button('Use PC version',chooseRemote),useLocal=button('Use this version on PC',chooseLocal);usePC.id='pen-use-pc';useLocal.id='pen-use-local';conflictActions.append(usePC,useLocal);syncConflictBox.append(conflictDetail,conflictActions);host.append(syncConflictBox);
-    if (loadError) { stateLine.classList.add('pen-error'); const recovery = button('Start a new scratchpad',replaceUnreadable,'danger'); host.append(recovery); }
+    const syncActions=element('div','pen-sync-actions');syncRetryButton=button('Sync now',syncShared);syncRetryButton.id='pen-sync-now';syncRestoreButton=button('Recovery copy',restoreRecovery);syncRestoreButton.id='pen-recovery';syncRestoreButton.hidden=true;syncActions.append(syncRetryButton,syncRestoreButton);syncBar.append(syncCopy,syncActions);toolBox.append(syncBar);
+    syncConflictBox=element('section','pen-conflict');syncConflictBox.hidden=true;syncConflictBox.setAttribute('aria-label','Choose an ink version');const conflictDetail=element('p');conflictDetail.dataset.penConflictDetail='';const conflictActions=element('div','pen-sync-actions');const usePC=button('Use PC version',chooseRemote),useLocal=button('Use this version on PC',chooseLocal);usePC.id='pen-use-pc';useLocal.id='pen-use-local';conflictActions.append(usePC,useLocal);syncConflictBox.append(conflictDetail,conflictActions);toolBox.append(syncConflictBox);
+    if (loadError) { stateLine.classList.add('pen-error'); const recovery = button('Start a new scratchpad',replaceUnreadable,'danger'); toolBox.append(recovery); }
     const toolbar = element('div','pen-toolbar'); toolbar.setAttribute('role','toolbar'); toolbar.setAttribute('aria-label','Drawing tools');
     const tools = element('div','pen-tool-group'); penButton = button('Pen',()=>{tool='pen';controls();}); penButton.id='pen-tool'; eraserButton=button('Eraser',()=>{tool='eraser';controls();}); eraserButton.id='pen-eraser'; tools.append(penButton,eraserButton); toolbar.append(tools);
     const colorLabel = element('label','pen-color-label','Ink'); const colorInput = element('select'); colorInput.id='pen-color'; colorInput.setAttribute('aria-label','Ink color');
     for (const [index,name] of ['Graphite','Blue','Berry','Green','Ochre'].entries()) { const option = element('option','',name); option.value=colors[index]; colorInput.append(option); } colorInput.value=color; colorInput.onchange=()=>{color=colorInput.value;}; colorLabel.append(colorInput); toolbar.append(colorLabel);
     const widthLabel = element('label','pen-width-label','Width'); const widthInput = element('input'); widthInput.id='pen-width'; widthInput.type='range'; widthInput.min='1'; widthInput.max='10'; widthInput.step='1'; widthInput.value=String(width); widthInput.setAttribute('aria-label','Pen width'); const widthOutput=element('output','',String(width)); widthOutput.htmlFor='pen-width'; widthInput.oninput=()=>{width=Number(widthInput.value);widthOutput.textContent=String(width);}; widthLabel.append(widthInput,widthOutput); toolbar.append(widthLabel);
     const historyTools=element('div','pen-tool-group'); undoButton=button('Undo',undo);undoButton.id='pen-undo';redoButton=button('Redo',redo);redoButton.id='pen-redo';clearButton=button('Clear',clearDrawing);clearButton.id='pen-clear';historyTools.append(undoButton,redoButton,clearButton);toolbar.append(historyTools);
-    const palm=element('label','pen-palm-toggle'),palmInput=element('input');palmInput.type='checkbox';palmInput.id='pen-only';palmInput.checked=doc.penOnly;palmInput.onchange=()=>{doc.penOnly=palmInput.checked;if(currentStroke&&activePointerType==='touch')cancelStroke();persist();controls();};palm.append(palmInput,element('span','','Ignore fingers on canvas'));toolbar.append(palm);host.append(toolbar);
+    const palm=element('label','pen-palm-toggle'),palmInput=element('input');palmInput.type='checkbox';palmInput.id='pen-only';palmInput.checked=doc.penOnly;palmInput.onchange=()=>{doc.penOnly=palmInput.checked;if(currentStroke&&activePointerType==='touch')cancelStroke();persist();controls();};palm.append(palmInput,element('span','','Ignore fingers on canvas'));toolbar.append(palm);toolBox.append(toolbar);
     const body=element('div','pen-body'),drawing=element('section','pen-drawing');drawingSection=drawing;drawing.setAttribute('aria-label','Scratchpad drawing');const paper=element('div','pen-paper');paperNode=paper;
     canvas=element('canvas');canvas.id='pen-canvas';canvas.width=WIDTH;canvas.height=HEIGHT;canvas.tabIndex=0;canvas.setAttribute('role','img');canvas.setAttribute('aria-describedby','pen-canvas-help');context=canvas.getContext('2d');
     emptyHint=element('div','pen-empty');emptyHint.append(element('strong','','Room for your next idea'),element('span','','Draw with your pen. Your strokes save here.'));paper.append(canvas,emptyHint);drawing.append(paper);
@@ -407,6 +432,7 @@
     const handwritingButton=button('Handwrite text',()=>requestHandwriting(noteField));handwritingButton.dataset.penHandwrite='notes';handwritingButton.id='pen-handwriting';handwritingButton.disabled=!!loadError;notesHeading.append(handwritingButton);notes.append(notesHeading,noteField);
     noteField.oninput=()=>{doc.notes=noteField.value.slice(0,MAX_NOTE);scheduleSave();};const noteActions=element('div','pen-note-actions');noteActions.append(button('Copy notes',exportNotes),element('span','help','Up to 8,000 characters'));notes.append(noteActions,element('p','help',isNative()?(isIOS()?'Handwriting uses iPadOS Scribble and its keyboard.':'Handwriting uses your installed Android keyboard.')+' Your keyboard provider’s privacy settings apply. Finished notes sync to your paired PC.':'On a tablet, Handwrite text uses its keyboard or Scribble. Here, type or paste. Notes sync only to your paired PC.'));body.append(notes);host.append(body);
     canvas.addEventListener('pointerdown',beginStroke);canvas.addEventListener('pointermove',moveStroke);canvas.addEventListener('pointerup',finishStroke);canvas.addEventListener('pointercancel',event=>{if(event.pointerId===activePointer)cancelStroke();});canvas.addEventListener('lostpointercapture',event=>{if(event.pointerId===activePointer)cancelStroke();});canvas.addEventListener('contextmenu',event=>event.preventDefault());
+    canvas.addEventListener('pointerdown',()=>{if(fullscreenTools)setFullscreenTools(false);});
     canvas.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();event.shiftKey?redo():undo();}else if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='y'){event.preventDefault();redo();}});
     if (typeof ResizeObserver !== 'undefined') { resizeObserver?.disconnect();resizeObserver=new ResizeObserver(resize);resizeObserver.observe(canvas); }
     controls();
@@ -436,8 +462,13 @@
     document.addEventListener('click',event=>{if(event.pointerType==='touch'&&now()<palmSuppressedUntil){event.preventDefault();event.stopImmediatePropagation();}},{capture:true});
     document.addEventListener('visibilitychange',()=>document.hidden?suspend():resume());window.addEventListener('pagehide',suspend);window.addEventListener('blur',blurInput);window.addEventListener('focus',resume);window.addEventListener('resize',resize);
     window.addEventListener('beforeunload',event=>{if(saveError){event.preventDefault();event.returnValue='';}});
-    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&fullscreen){event.preventDefault();setFullscreen(false);}},{capture:true});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&fullscreen){event.preventDefault();if(fullscreenTools)setFullscreenTools(false);else setFullscreen(false);}},{capture:true});
     document.addEventListener('fullscreenchange',()=>{if(browserFullscreen&&document.fullscreenElement!==host)setFullscreen(false);else if(document.fullscreenElement===host)browserFullscreen=true;});
+    document.addEventListener('deskwing-fullscreen',event=>{
+      // Request echoes can arrive after a newer workspace enters immersive mode.
+      // Our own requests already update CSS; only host-driven exits should change it here.
+      if(event.detail?.enabled===false&&event.detail.reason!=='request'&&(fullscreen||nativeFullscreen))setFullscreen(false,{nativeEvent:true});
+    });
     const priorSuspend=window.monitorSuspend,priorResume=window.monitorResume;
     window.monitorSuspend=(...args)=>{suspend();return priorSuspend?.apply(window,args);};window.monitorResume=(...args)=>{const result=priorResume?.apply(window,args);resume();return result;};
     if (isNative()) {
@@ -447,7 +478,7 @@
       document.addEventListener('pointerdown',event=>{if(focusTarget&&event.target!==handwriteFieldButton&&!event.target.closest('input,textarea')){focusTarget=null;handwriteFieldButton.hidden=true;}},{passive:true});
     }
   }
-  window.DeskPen=Object.freeze({setActive,isActive:()=>active,suspend,resume,requestHandwriting,setFullscreen,isFullscreen:()=>fullscreen,syncNow:syncShared,chooseRemote,chooseLocal,restoreRecovery});
+  window.DeskPen=Object.freeze({setActive,isActive:()=>active,suspend,resume,requestHandwriting,setFullscreen,isFullscreen:()=>fullscreen,setFullscreenTools,hasFullscreenTools:()=>fullscreenTools,resize,syncNow:syncShared,chooseRemote,chooseLocal,restoreRecovery});
   window.setPenMode=async value=>setActive(value);
   document.addEventListener('DOMContentLoaded',initialize,{once:true});
 })();

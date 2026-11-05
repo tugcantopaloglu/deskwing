@@ -37,6 +37,8 @@ final class NativePenTools {
 
     NativePenTools(Activity activity,Result result){this.activity=activity;this.result=result;}
 
+    boolean isOpen(){return handwriting!=null||exportId!=0;}
+
     void request(int id,String path,JSONObject body){
         try {
             if(closed||activity.isFinishing())throw new IllegalStateException("The tablet workspace is closing.");

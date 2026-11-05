@@ -1,5 +1,5 @@
 // Isolated PC setup API and controller checks. No browser, registry writes, real OBS, or audio.
-const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),vm=require('node:vm'),acorn=require('acorn'),{spawn}=require('node:child_process');
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),vm=require('node:vm'),acorn=require('acorn'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),output=path.join(process.env.TABLETDECK_TEST_OUTPUT||os.tmpdir(),'tabletdeck-desktop-tests');fs.mkdirSync(output,{recursive:true});
 const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/TabletDeck-Companion.exe');
 let server,passed=0;const check=(value,label)=>{assert.ok(value,label);passed++;console.log('PASS '+label);},sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -8,9 +8,13 @@ async function apiTests(){
  server=spawn(executable,['--no-browser','--no-tray','--data-dir',data,'--http-port','19080','--https-port','19083'],{windowsHide:true,stdio:['ignore',log,log]});
  let session;for(let i=0;i<80;i++){try{session=JSON.parse(fs.readFileSync(path.join(data,'admin-session.json'),'utf8'));if((await fetch('http://127.0.0.1:19080/api/board',{headers:{'X-Deck-Admin':session.token}})).ok)break;session=null;}catch{}await sleep(100);}assert.ok(session,'isolated setup companion starts');
  async function request(route,body,admin=true,headers={}){const response=await fetch('http://127.0.0.1:19080'+route,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(admin?{'X-Deck-Admin':session.token}:{}),...headers},body:body===undefined?undefined:JSON.stringify(body)});const text=await response.text();return{status:response.status,data:text?JSON.parse(text):{}};}
- const settings={port:4455,micInput:'Mic/Aux',desktopInput:'Desktop Audio',passwordMode:'replace',password:'fixture-secret-not-a-credential'};
+ const settings={port:4455,micInput:'Mic/Aux',desktopInput:'Desktop Audio',passwordMode:'replace',password:crypto.randomBytes(32).toString('hex')};
  check((await request('/api/admin/obs-settings',settings,false)).status===403,'OBS setup requires local admin authentication');
  const pin=(await request('/api/admin/pairing',{})).data,pair=(await request('/api/pair',{code:pin.code,name:'Setup fixture'},false)).data;
+ check((await request('/api/admin/ink/window',{},false)).status===403,'opening an ink window requires local admin authentication');
+ check((await request('/api/admin/ink/window',{},false,{Authorization:'Bearer '+pair.token})).status===403,'paired tablets cannot open native PC ink windows');
+ check((await request('/api/admin/ink/window',{},true,{Origin:'https://untrusted.invalid'})).status===403,'cross-origin ink window requests are refused');
+ const headlessInk=await request('/api/admin/ink/window',{});check(headlessInk.status===409&&/ink window/i.test(headlessInk.data.error),'headless companion explains why a native ink window cannot open');
  check((await request('/api/admin/obs-settings',settings,false,{Authorization:'Bearer '+pair.token})).status===403,'paired tablet cannot change OBS settings');
  check((await request('/api/admin/obs-settings',settings,true,{Origin:'https://untrusted.invalid'})).status===403,'cross-origin setup writes are refused');
  const original=(await request('/api/admin/config')).data;

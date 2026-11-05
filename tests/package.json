@@ -43,6 +43,7 @@
     "test:workspace-modes": "node workspace-modes.cjs",
     "test:workspace-rendered": "node workspace-rendered.cjs",
     "test:ink-rendered": "node ink-rendered.cjs",
+    "test:ink-window-ui": "node ink-window-ui.cjs",
     "test:readiness-ui": "node readiness-ui.cjs",
     "test:readiness-api": "node readiness-api.cjs",
     "test:ink-api": "node ink-api.cjs",

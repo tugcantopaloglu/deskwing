@@ -98,13 +98,14 @@
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   window.DeskPenTabletCore=core;
 
-  let host, statusLine, targetLine, pad, stage, cursor, coordinates, hint, startButton, stopButton, fullscreenButton, exitButton, adminControls, targetSelect, enableButton, disableButton, refreshButton;
-  let active=false, suspended=false, status=null, statusError='', statusTimer=null, refreshing=false, configBusy=false, targetEdited=false, targetStamp='', pointerId=null, fullscreen=false, pollingGeneration=0, layoutGeneration=0, resizeObserver;
+  let host, statusLine, targetLine, pad, stage, cursor, coordinates, hint, startButton, stopButton, fullscreenButton, exitButton, adminControls, targetSelect, enableButton, disableButton, refreshButton, floatingControls, toolsButton, floatingSessionButton, mappingSelect, mappingHelp;
+  let active=false, suspended=false, status=null, statusError='', statusTimer=null, refreshing=false, configBusy=false, targetEdited=false, targetStamp='', pointerId=null, fullscreen=false, fullscreenPending=false, toolsOpen=false, fillTablet=true, fullscreenError='', pollingGeneration=0, layoutGeneration=0, resizeObserver;
   const element=(tag,className,text) => {const node=document.createElement(tag);if(className)node.className=className;if(text !== undefined)node.textContent=text;return node;};
   const button=(text,handler,className='quiet') => {const node=element('button',className,text);node.type='button';node.addEventListener('click',handler);return node;};
   const desktop=() => typeof desktopConsole !== 'undefined' && desktopConsole === true;
+  const nativeHost=() => typeof native !== 'undefined' && native === true && typeof nativeRequest === 'function';
   const request=(path,body,timeout=REQUEST_TIMEOUT) => {if(typeof api !== 'function')return Promise.reject(new Error('The PC connection is unavailable.'));return api(path,body,timeout);};
-  const client=createClient({request:(body,timeout)=>request('/api/pen',body,timeout),onChange:()=>{if (!client.active) releasePointer();render();}});
+  const client=createClient({request:(body,timeout)=>request('/api/pen',body,timeout),onChange:()=>{if (!client.active) releasePointer();if(fullscreen && client.snapshot().state==='error')toolsOpen=true;render();}});
   function releasePointer() {
     const captured=pointerId;pointerId=null;
     if(captured !== null) {try {if(pad?.hasPointerCapture(captured))pad.releasePointerCapture(captured);}catch{}}
@@ -120,7 +121,7 @@
   function render() {
     if(!host)return;
     const info=client.snapshot(), running=client.active;
-    startButton.disabled=!ready() || client.busy || refreshing || configBusy;
+    startButton.disabled=!ready() || client.busy || refreshing || configBusy || fullscreenPending;
     startButton.textContent=info.state === 'starting' ? 'Connecting…' : 'Start pen session';
     stopButton.disabled=!client.busy;
     statusLine.textContent=info.state === 'error' || client.busy ? info.message : statusError || status?.error || (status?.supported === false ? 'Windows pen input is unavailable on this PC.' : !status?.enabled ? 'Enable pen input in DeskWing on your PC, then refresh.' : status?.active ? 'Another pen session is using this PC. Stop it before starting here.' : info.message);
@@ -132,6 +133,14 @@
     hint.textContent=running ? 'Look at your PC and draw here. Your palm is ignored.' : 'Your pen controls the selected Windows screen or window.';
     fullscreenButton.textContent=fullscreen ? 'Exit fullscreen' : 'Fullscreen';
     fullscreenButton.setAttribute('aria-pressed',String(fullscreen));
+    floatingControls.hidden=!fullscreen;
+    toolsButton.textContent=toolsOpen ? 'Hide tools' : 'Show tools';toolsButton.setAttribute('aria-expanded',String(toolsOpen));
+    host.classList.toggle('pen-tablet-tools-open',fullscreen && toolsOpen);
+    floatingSessionButton.textContent=client.busy ? 'Stop pen' : 'Start pen';floatingSessionButton.disabled=!client.busy && startButton.disabled;
+    floatingSessionButton.classList.toggle('danger',client.busy);floatingSessionButton.classList.toggle('primary',!client.busy);
+    mappingSelect.value=fillTablet ? 'fill' : 'match';
+    mappingHelp.textContent=fullscreenError || (fillTablet ? 'The whole tablet maps to your PC target. Shapes can stretch when the screen proportions differ.' : 'The active area keeps the PC target’s proportions. Unused edges do not control the pen.');
+    mappingHelp.classList.toggle('pen-tablet-error',!!fullscreenError);
     refreshButton.disabled=refreshing || configBusy || info.state === 'starting';
     if(adminControls){enableButton.disabled=configBusy || refreshing || !targetSelect.value || status?.supported !== true;disableButton.disabled=configBusy || !status?.enabled;targetSelect.disabled=configBusy || client.busy;enableButton.textContent=configBusy ? 'Applying…' : status?.enabled ? 'Use this target' : 'Enable pen input';}
     resizePad();
@@ -170,7 +179,7 @@
   }
   async function start() {
     if(!ready() || client.busy)return;
-    try {const result=await client.start(sessionId());if(result && (!active || suspended || document.hidden))void stop('Pen session stopped. Start again when you return.');}
+    try {const result=await client.start(sessionId());if(result && (!active || suspended || document.hidden))void stop('Pen session stopped. Start again when you return.');else if(result && fullscreen){toolsOpen=false;render();}}
     catch(error){statusError=error?.message || 'Could not start the pen session.';render();}
   }
   function showSample(sample) {
@@ -216,21 +225,30 @@
   function resizePad() {
     if(!stage || !pad || !active)return;
     const bounds=stage.getBoundingClientRect(), ratio=status?.target?.width>0 && status?.target?.height>0 ? status.target.width/status.target.height : 16/10;
-    const width=Math.max(1,Math.min(bounds.width,bounds.height*ratio)), height=width/ratio;
-    if(pointerId !== null && (Math.abs(pad.clientWidth-width)>2 || Math.abs(pad.clientHeight-height)>2))void stop('The pen surface changed size. Start a new pen session.');
+    const width=Math.max(1,fullscreen && fillTablet ? bounds.width : Math.min(bounds.width,bounds.height*ratio)), height=Math.max(1,fullscreen && fillTablet ? bounds.height : width/ratio);
+    if(client.busy && (Math.abs(pad.clientWidth-width)>2 || Math.abs(pad.clientHeight-height)>2))void stop('The pen surface changed size. Start a new pen session.');
     pad.style.width=`${width}px`;pad.style.height=`${height}px`;
   }
-  async function setFullscreen(value) {
+  async function setFullscreen(value,notifyNative=true) {
     const token=++layoutGeneration;
     if(!host || fullscreen===value)return;
-    if(client.busy)await stop('Pen session stopped for the new layout. Start again when you are ready.');
-    if(token!==layoutGeneration || value && !active)return;
-    fullscreen=value;host.classList.toggle('pen-tablet-fullscreen',value);render();
-    try {if(value && host.requestFullscreen)await host.requestFullscreen();else if(!value && document.fullscreenElement===host)await document.exitFullscreen();}catch{}
-    if(token!==layoutGeneration && document.fullscreenElement===host){try{await document.exitFullscreen();}catch{}}
+    if(value && (!active || suspended || document.hidden))return;
+    if(client.busy)void stop('Pen session stopped for the new layout. Start again when you are ready.');
+    fullscreen=value;fullscreenPending=value && nativeHost() && notifyNative;toolsOpen=false;fullscreenError='';host.classList.toggle('pen-tablet-fullscreen',value);render();
+    if(active && !suspended && !document.hidden)(value?toolsButton:fullscreenButton)?.focus?.({preventScroll:true});
+    if(nativeHost()){
+      if(notifyNative){
+        try{const result=await nativeRequest('/local/fullscreen',{enabled:value},'POST',10000);if(token===layoutGeneration && value && result?.enabled!==true){fullscreenError='The system bars could not be hidden. The pen surface still fills this window.';toolsOpen=true;render();}}
+        catch{if(token===layoutGeneration && value){fullscreenError='The system bars could not be hidden. The pen surface still fills this window.';toolsOpen=true;render();}}
+        finally{if(token===layoutGeneration){fullscreenPending=false;render();}}
+      }
+    }else{
+      try {if(value && host.requestFullscreen)await host.requestFullscreen();else if(!value && document.fullscreenElement===host)await document.exitFullscreen();}catch{}
+      if(token!==layoutGeneration && document.fullscreenElement===host){try{await document.exitFullscreen();}catch{}}
+    }
     resizePad();
   }
-  function suspend() {suspended=true;pollingGeneration++;clearTimeout(statusTimer);void stop('Pen session stopped while DeskWing is in the background. Start again when you return.');}
+  function suspend() {suspended=true;pollingGeneration++;clearTimeout(statusTimer);void stop('Pen session stopped while DeskWing is in the background. Start again when you return.');void setFullscreen(false);}
   function resume() {suspended=false;if(active)void refresh();}
   function setActive(value) {
     if(!host)build();active=value===true;
@@ -252,8 +270,11 @@
     }
     const connection=element('div','pen-tablet-connection'), details=element('div','pen-tablet-target');targetLine=element('strong','','No Windows target selected');statusLine=element('p','pen-tablet-status','Checking the PC connection…');statusLine.setAttribute('role','status');details.append(targetLine,statusLine);
     const sessionActions=element('div','pen-tablet-actions');refreshButton=button('Refresh',()=>void refresh());startButton=button('Start pen session',()=>void start(),'primary');stopButton=button('Stop pen',()=>void stop('Pen session stopped. Your Windows app is no longer controlled by this tablet.'),'danger');sessionActions.append(refreshButton,startButton,stopButton);connection.append(details,sessionActions);host.append(connection);
+    connection.id='pen-tablet-fullscreen-tools';
+    const mapping=element('label','pen-tablet-mapping','Surface mapping');mappingSelect=element('select');mappingSelect.setAttribute('aria-label','Surface mapping');for(const [value,label]of[['fill','Fill tablet'],['match','Match PC proportions']]){const option=element('option','',label);option.value=value;mappingSelect.append(option);}mappingSelect.addEventListener('change',()=>{const nextFill=mappingSelect.value!=='match';if(client.busy)void stop('Pen session stopped for the new mapping. Start again when you are ready.');fillTablet=nextFill;render();});mapping.append(mappingSelect);mappingHelp=element('p','help pen-tablet-mapping-help');connection.append(mapping,mappingHelp);
     stage=element('div','pen-tablet-stage');pad=element('div','pen-tablet-pad');pad.tabIndex=0;pad.setAttribute('role','application');hint=element('p','pen-tablet-hint');cursor=element('span','pen-tablet-cursor');cursor.hidden=true;cursor.setAttribute('aria-hidden','true');pad.append(hint,cursor);stage.append(pad);host.append(stage);
     const footer=element('div','pen-tablet-footer');coordinates=element('output','','Pen only · palm touches ignored');footer.append(coordinates,element('p','help','This surface maps to your chosen PC target. Artwork stays in the Windows app. Use Windows Ink in apps that offer a pen input setting.'));host.append(footer);
+    floatingControls=element('div','pen-tablet-floating-controls');floatingControls.setAttribute('aria-label','Fullscreen pen controls');toolsButton=button('Show tools',()=>{toolsOpen=!toolsOpen;render();});toolsButton.setAttribute('aria-controls','pen-tablet-fullscreen-tools');floatingSessionButton=button('Start pen',()=>client.busy?void stop('Pen session stopped. Your Windows app is no longer controlled by this tablet.'):void start(),'primary');const floatingExit=button('Exit fullscreen',()=>void setFullscreen(false));floatingControls.append(toolsButton,floatingSessionButton,floatingExit);host.append(floatingControls);
     pad.addEventListener('pointerdown',pointerDown);pad.addEventListener('pointermove',pointerMove);pad.addEventListener('pointerup',pointerUp);pad.addEventListener('pointercancel',event=>{if(event.pointerType==='pen' && client.active && (pointerId===null || pointerId===event.pointerId))void stop('Pen contact was interrupted. Start a new pen session.');});pad.addEventListener('lostpointercapture',pointerInterrupted);pad.addEventListener('pointerleave',event=>{if(event.pointerType==='pen' && pointerId===null && client.active)sample(event,'leave');});pad.addEventListener('contextmenu',event=>event.preventDefault());
     if(typeof ResizeObserver==='function'){resizeObserver=new ResizeObserver(resizePad);resizeObserver.observe(stage);}
     render();
@@ -262,7 +283,8 @@
   window.penTabletSuspend=suspend;window.penTabletResume=resume;
   document.addEventListener('DOMContentLoaded',build);
   document.addEventListener('visibilitychange',()=>document.hidden?suspend():resume());
-  document.addEventListener('fullscreenchange',()=>{if(fullscreen && document.fullscreenElement!==host){fullscreen=false;host?.classList.remove('pen-tablet-fullscreen');void stop('Fullscreen ended. Start a new pen session when you are ready.');render();}});
+  document.addEventListener('fullscreenchange',()=>{if(!nativeHost() && fullscreen && document.fullscreenElement!==host)void setFullscreen(false,false);});
+  document.addEventListener('deskwing-fullscreen',event=>{if(fullscreen && event.detail?.enabled===false && event.detail?.reason!=='request')void setFullscreen(false,false);});
   window.addEventListener('blur',suspend);window.addEventListener('focus',resume);window.addEventListener('pagehide',suspend);window.addEventListener('resize',resizePad);
   window.addEventListener('keydown',event=>{if(active && event.key==='Escape'){void stop('Pen session stopped.');if(fullscreen)void setFullscreen(false);}});
   if(document.readyState!=='loading')build();

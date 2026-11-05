@@ -266,9 +266,11 @@ app.MapPost("/api/admin/import-scenes",async (ImportScenesRequest? req)=>{
     store.Save(c);});return Results.Ok(new{ok=true});
 });
 app.MapPost("/api/admin/window",async()=>{if(tray is null)return Results.Conflict(new{error="The companion is running headlessly. Restart it normally to enable the desktop window."});await tray.OpenConsole();return Results.Ok(new{ok=true});});
+app.MapPost("/api/admin/ink/window",async()=>{if(tray is null)return Results.Conflict(new{error="The companion is running headlessly. Restart it normally to enable the ink window."});await tray.OpenInkWindow();return Results.Ok(new{ok=true});});
 app.MapPost("/api/admin/shutdown",(IHostApplicationLifetime lifetime)=>{lifetime.StopApplication();return Results.Ok(new{ok=true});});
 var panel=$"http://127.0.0.1:{httpPort}/desktop.html"+(args.Contains("--after-update")?"?section=updates":"")+$"#admin={adminToken}";
 File.WriteAllText(Path.Combine(store.DirectoryPath,"admin-session.json"),JsonSerializer.Serialize(new{token=adminToken,httpPort,httpsPort},DataStore.Json));
+app.Lifetime.ApplicationStopping.Register(fastCommands.BeginShutdown);
 app.Lifetime.ApplicationStarted.Register(()=>{
     try{fastControl.Start();}catch(SocketException){Console.Error.WriteLine("Fast control port is unavailable. HTTPS fallback remains active.");}
     Console.WriteLine($"Tablet Deck Studio is running. PC editor: http://127.0.0.1:{httpPort}");

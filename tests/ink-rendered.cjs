@@ -5,6 +5,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const {chromium}=require('playwright');
 const root=path.resolve(__dirname,'..'),webroot=fs.realpathSync(path.join(root,'companion/wwwroot'));
 const output=process.env.TABLETDECK_TEST_OUTPUT?path.join(path.resolve(process.env.TABLETDECK_TEST_OUTPUT),'ink-rendered'):path.join(root,'.impeccable/review');
+const captureOnly=new Set((process.env.TABLETDECK_CAPTURE_ONLY||'').split(',').filter(Boolean));
 const origin='http://127.0.0.1:18997',target={id:'fixture-screen',kind:'screen',label:'Studio display',width:1920,height:1080};
 const targets=[target,{id:'fixture-whiteboard',kind:'window',label:'Microsoft Whiteboard',width:1600,height:900}];
 let browser,checks=0,inkRevision=0,penSequence=0,lease='',enabled=false,currentTarget=target;
@@ -54,20 +55,21 @@ async function fixture(route){
  const real=path.relative(webroot,fs.realpathSync(file));if(path.isAbsolute(real)||real==='..'||real.startsWith('..'+path.sep))return route.fulfill({status:404,body:''});
  return route.fulfill({status:200,contentType:{'.html':'text/html','.css':'text/css','.js':'text/javascript','.svg':'image/svg+xml','.ttf':'font/ttf'}[path.extname(file)]||'application/octet-stream',body:fs.readFileSync(file)});
 }
-async function pageFor(desktop){
+async function pageFor(desktop,search=''){
  const context=await browser.newContext({viewport:{width:1280,height:800},hasTouch:!desktop});await context.route('**/*',fixture);
  if(!desktop)await context.addInitScript(()=>{
   window.fixtureNativeRequests=[];window.DeckNative={dispatch(text){const request=JSON.parse(text);window.fixtureNativeRequests.push(request);
-   const response=request.path==='/native/connection'?Promise.resolve({paired:true,mode:'usb',host:'127.0.0.1'}):request.path==='/local/handwriting'?Promise.resolve({cancelled:true}):request.path.startsWith('/api/')?fetch(request.path,{method:request.method,headers:{'Content-Type':'application/json'},body:request.body===undefined?undefined:JSON.stringify(request.body)}).then(response=>response.json()):Promise.resolve({error:'Unexpected fixture native request'});
+   const response=request.path==='/native/connection'?Promise.resolve({paired:true,mode:'usb',host:'127.0.0.1'}):request.path==='/local/handwriting'?Promise.resolve({cancelled:true}):request.path==='/local/fullscreen'?Promise.resolve({enabled:request.body.enabled===true}):request.path.startsWith('/api/')?fetch(request.path,{method:request.method,headers:{'Content-Type':'application/json'},body:request.body===undefined?undefined:JSON.stringify(request.body)}).then(response=>response.json()):Promise.resolve({error:'Unexpected fixture native request'});
    response.then(value=>window.nativeResult(request.id,value)).catch(error=>window.nativeResult(request.id,{error:error.message}));
   }};
  });
  const page=await context.newPage();page.setDefaultTimeout(10000);page.on('pageerror',error=>errors.push((desktop?'desktop: ':'tablet: ')+error.message));
- await page.goto(origin+'/'+(desktop?'desktop.html#admin=fixture':'index.html'));await page.locator(desktop?'#console-board':'.key').first().waitFor();return page;
+ await page.goto(origin+'/'+(desktop?'desktop.html'+search+'#admin=fixture':'index.html'));await page.locator(search?'#pen-canvas':desktop?'#console-board':'.key').first().waitFor();return page;
 }
 async function mode(page,value){await page.locator('#app-mode').selectOption(value);await page.waitForFunction(value=>DeskWorkspace.mode===value,value);}
 async function settle(page){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
-async function sync(page){await page.locator('#pen-sync-now').click();await page.waitForFunction(()=>!document.querySelector('#pen-sync-now').disabled&&document.querySelector('#pen-sync-state').textContent==='Shared with your PC');}
+async function sync(page){const compact=await page.locator('#ink-window-tools').count()>0&&await page.locator('#pen-sync-now').isHidden();if(compact)await page.locator('#ink-window-tools').click();await page.locator('#pen-sync-now').click();await page.waitForFunction(()=>!document.querySelector('#pen-sync-now').disabled&&document.querySelector('#pen-sync-state').textContent==='Shared with your PC');if(compact)await page.locator('#ink-window-tools').click();}
+async function screenshot(page,name){if(captureOnly.size===0||captureOnly.has(name))await page.screenshot({path:path.join(output,name+'.png'),fullPage:true});}
 async function penStroke(page,selector,points){
  await page.locator(selector).scrollIntoViewIfNeeded();const box=await page.locator(selector).boundingBox(),cdp=await page.context().newCDPSession(page);
  const sample=async(type,point,pressure)=>cdp.send('Input.dispatchMouseEvent',{type,x:box.x+box.width*point[0],y:box.y+box.height*point[1],button:type==='mouseMoved'?'none':'left',buttons:type==='mouseReleased'?0:1,clickCount:type==='mouseMoved'?0:1,pointerType:'pen',force:pressure,tiltX:12,tiltY:-8});
@@ -87,7 +89,7 @@ async function capture(page,name,host,pad,controls){
  const geometry=await page.evaluate(({host,pad})=>{const area=document.querySelector(host),a=area.getBoundingClientRect(),p=document.querySelector(pad).getBoundingClientRect();return{width:innerWidth,height:innerHeight,noHorizontal:document.documentElement.scrollWidth<=innerWidth+1&&area.scrollWidth<=area.clientWidth+1,padFits:p.width>100&&p.height>70&&p.left>=a.left&&p.right<=a.right+1&&p.top>=a.top&&p.bottom<=Math.min(a.bottom,innerHeight)+1,hostFits:a.top>=0&&a.bottom<=innerHeight+1};},{host,pad});
  check(geometry.noHorizontal,name+' has no horizontal clipping');check(geometry.padFits,name+' keeps its entire drawing surface inside the viewport');
  for(const [locator,label]of controls)await visibleControl(page,locator,name+' '+label);
- await page.screenshot({path:path.join(output,name+'.png'),fullPage:true});captures.push({name,...geometry});
+ await screenshot(page,name);captures.push({name,...geometry});
 }
 async function run(){
  fs.mkdirSync(output,{recursive:true});browser=await chromium.launch({headless:true,executablePath:process.env.TABLETDECK_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
@@ -103,20 +105,40 @@ async function run(){
  check(sharedInk.document.strokes.length===beforePalm&&penPackets.length===postsBeforePalm,'scratchpad palm contacts add no strokes and make zero Windows pen calls');
  await desktop.locator('#pen-notes').fill('Reviewed on the PC. Keep the next sketch simple.');await sync(desktop);await sync(tablet);check(await tablet.locator('#pen-notes').inputValue()==='Reviewed on the PC. Keep the next sketch simple.','tablet receives the PC note edit without losing its stroke');
  check(inkRequests.some(request=>/^[0-9a-f]{64}$/.test(request.revision||'')),'shared ink polls with the last known revision');
- await desktop.screenshot({path:path.join(output,'desktop-shared-ink.png'),fullPage:true});
+ await screenshot(desktop,'desktop-shared-ink');
+ const inkWindow=await pageFor(true,'?workspace=ink-window');await sync(inkWindow);
+ check(await inkWindow.title()==='DeskWing Ink'&&await inkWindow.locator('.console-sidebar').isHidden()&&await inkWindow.locator('.console-header').isHidden(),'dedicated Ink window opens shared ink without companion navigation');
+ for(const [width,height,name]of [[1000,740,'desktop-ink-window'],[900,640,'desktop-ink-window-small'],[620,480,'desktop-ink-window-minimum'],[604,441,'desktop-ink-window-client-minimum']]){
+  await inkWindow.setViewportSize({width,height});await inkWindow.locator('#pen-workspace').evaluate(node=>node.scrollTop=0);await settle(inkWindow);
+  const bounds=await inkWindow.evaluate(()=>{const host=document.querySelector('#pen-workspace'),box=document.querySelector('#pen-canvas').getBoundingClientRect();return{width:innerWidth,height:innerHeight,canvasWidth:box.width,canvasHeight:box.height,fit:box.left>=-1&&box.top>=-1&&box.right<=innerWidth+1&&box.bottom<=innerHeight+1,noScroll:document.documentElement.scrollWidth<=innerWidth+1&&host.scrollWidth<=host.clientWidth+1&&host.scrollHeight<=host.clientHeight+1,ratio:box.width/box.height};});
+  check(bounds.noScroll,name+' keeps its default canvas view free of horizontal and vertical scrolling');check(bounds.fit&&bounds.canvasHeight>=200&&Math.abs(bounds.ratio-1.6)<.01,name+' fits the whole 16:10 paper with at least 200px canvas height');
+  check(await inkWindow.locator('#pen-toolbox').isHidden()&&await inkWindow.locator('.pen-notes').isHidden()&&!await inkWindow.evaluate(()=>DeskPen.isFullscreen()),name+' opens with tools and notes closed in an ordinary window');
+  await visibleControl(inkWindow,inkWindow.locator('#pen-fullscreen'),name+' Fullscreen');await visibleControl(inkWindow,inkWindow.locator('#ink-window-tools'),name+' Show tools');await screenshot(inkWindow,name);captures.push({name,...bounds});
+  await inkWindow.locator('#ink-window-tools').click();await inkWindow.locator('#pen-tool').click({trial:true});check(await inkWindow.locator('#pen-toolbox').evaluate(node=>{const color=getComputedStyle(node).backgroundColor;return color!=='transparent'&&color!=='rgba(0, 0, 0, 0)';}),name+' tools overlay has an opaque theme background');await screenshot(inkWindow,name+'-tools');await inkWindow.locator('#ink-window-notes').click();await inkWindow.locator('#pen-notes').click({trial:true});check(await inkWindow.locator('#pen-notes').inputValue()==='Reviewed on the PC. Keep the next sketch simple.',name+' tools and notes remain reachable without losing shared text');check(await inkWindow.locator('.pen-notes').evaluate(node=>{const color=getComputedStyle(node).backgroundColor;return color!=='transparent'&&color!=='rgba(0, 0, 0, 0)';}),name+' notes overlay has an opaque theme background');await screenshot(inkWindow,name+'-notes');await inkWindow.locator('#ink-window-hide-notes').click();
+  check(await inkWindow.locator('#pen-toolbox').isHidden()&&await inkWindow.locator('.pen-notes').isHidden(),name+' dismisses overlays back to the full canvas');
+ }
+ await inkWindow.context().close();
  for(const [width,height,name] of [[1280,800,'tablet-scratchpad-fullscreen'],[668,1070,'tablet-scratchpad-fullscreen-portrait'],[390,844,'tablet-scratchpad-fullscreen-narrow']]){
   await tablet.setViewportSize({width,height});await tablet.locator('#pen-fullscreen').click();await tablet.waitForFunction(()=>DeskPen.isFullscreen());await settle(tablet);
-  await capture(tablet,name,'#pen-workspace','#pen-canvas',[[tablet.locator('#pen-fullscreen'),'Exit fullscreen'],[tablet.locator('#pen-fullscreen-notes'),'Show notes']]);
-  await tablet.locator('#pen-fullscreen-notes').click();await capture(tablet,name+'-notes','#pen-workspace','#pen-canvas',[[tablet.locator('#pen-fullscreen'),'Exit fullscreen'],[tablet.locator('#pen-fullscreen-notes'),'Hide notes']]);
-  check(await tablet.locator('#pen-notes').isVisible(),name+' can reveal editable notes');await tablet.locator('#pen-fullscreen-notes').click();await tablet.locator('#pen-fullscreen').click();await tablet.waitForFunction(()=>!DeskPen.isFullscreen());
+  check(await tablet.locator('#pen-toolbox').isHidden()&&await tablet.locator('.topbar').isHidden(),name+' hides toolbar and app chrome by default');
+  check(await tablet.evaluate(()=>window.fixtureNativeRequests.filter(request=>request.path==='/local/fullscreen').at(-1)?.body.enabled===true),name+' requests native immersive system bars');
+  await capture(tablet,name,'#pen-workspace','#pen-canvas',[[tablet.locator('#pen-fullscreen'),'Exit fullscreen'],[tablet.locator('#pen-fullscreen-tools'),'Show tools']]);
+  await tablet.locator('#pen-fullscreen-tools').click();await visibleControl(tablet,tablet.locator('#pen-fullscreen'),name+' Exit with tools open');await screenshot(tablet,name+'-tools');
+  await tablet.locator('#pen-fullscreen-notes').click();await tablet.locator('#pen-fullscreen-tools').click();await capture(tablet,name+'-notes','#pen-workspace','#pen-canvas',[[tablet.locator('#pen-fullscreen'),'Exit fullscreen'],[tablet.locator('#pen-fullscreen-tools'),'Show tools']]);
+  check(await tablet.locator('#pen-notes').isVisible(),name+' can reveal editable notes');await tablet.locator('#pen-fullscreen-tools').click();await tablet.locator('#pen-fullscreen-notes').click();await tablet.locator('#pen-fullscreen').click();await tablet.waitForFunction(()=>!DeskPen.isFullscreen());
+  check(await tablet.evaluate(()=>window.fixtureNativeRequests.filter(request=>request.path==='/local/fullscreen').at(-1)?.body.enabled===false),name+' restores native system bars on exit');
  }
  await desktop.setViewportSize({width:1280,height:800});await mode(desktop,'pentablet');await desktop.getByRole('combobox',{name:'Windows target',exact:true}).selectOption('fixture-screen');await desktop.getByRole('button',{name:'Enable pen input',exact:true}).click();await desktop.getByRole('button',{name:'Disable pen input',exact:true}).waitFor();
- check(enabled&&await desktop.locator('#console-title').innerText()==='Pen tablet','desktop target settings explicitly enable pen input and retain the correct header');await desktop.screenshot({path:path.join(output,'desktop-pen-tablet-settings.png'),fullPage:true});
+ check(enabled&&await desktop.locator('#console-title').innerText()==='Pen tablet','desktop target settings explicitly enable pen input and retain the correct header');await screenshot(desktop,'desktop-pen-tablet-settings');
  await tablet.setViewportSize({width:1280,height:800});await mode(tablet,'pentablet');await tablet.getByRole('button',{name:'Start pen session',exact:true}).waitFor();
  for(const [width,height,name]of [[1280,800,'tablet-pen-tablet-fullscreen'],[668,1070,'tablet-pen-tablet-fullscreen-portrait'],[390,844,'tablet-pen-tablet-fullscreen-narrow']]){
-  await tablet.setViewportSize({width,height});await tablet.getByRole('button',{name:'Fullscreen',exact:true}).click();await tablet.locator('.pen-tablet-fullscreen').waitFor();await tablet.getByRole('button',{name:'Start pen session',exact:true}).click();await tablet.waitForFunction(()=>DeskPenTablet.isBusy());
-  await capture(tablet,name,'#pen-tablet-workspace','.pen-tablet-pad',[[tablet.getByRole('button',{name:'Exit fullscreen',exact:true}),'Exit fullscreen'],[tablet.getByRole('button',{name:'Stop pen',exact:true}),'Stop pen'],[tablet.getByRole('button',{name:'Back to controls',exact:true}),'Back to controls']]);
-  await tablet.getByRole('button',{name:'Stop pen',exact:true}).click();await tablet.waitForFunction(()=>!DeskPenTablet.isBusy());await tablet.getByRole('button',{name:'Exit fullscreen',exact:true}).click();await tablet.locator('.pen-tablet-fullscreen').waitFor({state:'detached'});
+  await tablet.setViewportSize({width,height});await tablet.getByRole('button',{name:'Fullscreen',exact:true}).click();await tablet.locator('.pen-tablet-fullscreen').waitFor();const floating=tablet.locator('.pen-tablet-floating-controls');await floating.getByRole('button',{name:'Start pen',exact:true}).click();await tablet.locator('.pen-tablet-connected').waitFor();
+  check(await tablet.locator('#pen-tablet-fullscreen-tools').isHidden()&&await tablet.locator('.pen-tablet-heading').isHidden(),name+' hides status and toolbar until requested');
+  check(await tablet.locator('.pen-tablet-pad').evaluate(node=>{const box=node.getBoundingClientRect();return Math.abs(box.width-innerWidth)<=1&&Math.abs(box.height-innerHeight)<=1;}),name+' maps the full tablet surface by default');
+  await capture(tablet,name,'#pen-tablet-workspace','.pen-tablet-pad',[[floating.getByRole('button',{name:'Exit fullscreen',exact:true}),'Exit fullscreen'],[floating.getByRole('button',{name:'Stop pen',exact:true}),'Stop pen'],[floating.getByRole('button',{name:'Show tools',exact:true}),'Show tools']]);
+  await floating.getByRole('button',{name:'Stop pen',exact:true}).click();await tablet.waitForFunction(()=>!DeskPenTablet.isBusy());await floating.getByRole('button',{name:'Show tools',exact:true}).click();await tablet.getByRole('combobox',{name:'Surface mapping',exact:true}).selectOption('match');await settle(tablet);
+  check(await tablet.locator('.pen-tablet-pad').evaluate(node=>{const box=node.getBoundingClientRect();return Math.abs(box.width/box.height-16/9)<.01;}),name+' optionally matches PC proportions');await screenshot(tablet,name+'-tools');await tablet.getByRole('combobox',{name:'Surface mapping',exact:true}).selectOption('fill');
+  await floating.getByRole('button',{name:'Exit fullscreen',exact:true}).click();await tablet.locator('.pen-tablet-fullscreen').waitFor({state:'detached'});check(await tablet.evaluate(()=>window.fixtureNativeRequests.filter(request=>request.path==='/local/fullscreen').at(-1)?.body.enabled===false),name+' restores native system bars on exit');
  }
  await tablet.setViewportSize({width:1280,height:800});await tablet.getByRole('button',{name:'Start pen session',exact:true}).click();await tablet.waitForFunction(()=>DeskPenTablet.isBusy());
  const callsBeforePalm=penPackets.length;await palm(tablet,'.pen-tablet-pad');await settle(tablet);check(penPackets.length===callsBeforePalm,'palm contacts on active Pen tablet produce zero native pen calls');

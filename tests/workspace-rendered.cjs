@@ -64,7 +64,7 @@ async function createPage(desktop){
   window.fixtureNativeRequests=[];
   window.DeckNative={dispatch(text){
    const request=JSON.parse(text);window.fixtureNativeRequests.push(request.path);
-   const result=request.path==='/native/connection'?Promise.resolve({paired:true,mode:'usb',host:'127.0.0.1'}):request.path==='/local/handwriting'?Promise.resolve({cancelled:true}):request.path.startsWith('/api/')?fetch(request.path,{method:request.method,headers:{'Content-Type':'application/json'},body:request.body===undefined?undefined:JSON.stringify(request.body)}).then(response=>response.json()):Promise.resolve({error:'Unexpected native fixture request'});
+   const result=request.path==='/native/connection'?Promise.resolve({paired:true,mode:'usb',host:'127.0.0.1'}):request.path==='/local/handwriting'?Promise.resolve({cancelled:true}):request.path==='/local/fullscreen'?Promise.resolve({enabled:request.body.enabled===true}):request.path.startsWith('/api/')?fetch(request.path,{method:request.method,headers:{'Content-Type':'application/json'},body:request.body===undefined?undefined:JSON.stringify(request.body)}).then(response=>response.json()):Promise.resolve({error:'Unexpected native fixture request'});
    result.then(value=>window.nativeResult(request.id,value)).catch(error=>window.nativeResult(request.id,{error:error.message}));
   }};
  });
@@ -79,7 +79,7 @@ async function capture(page,name,scope,controls,minimum=24){
   const host=document.querySelector(selector);return{page:document.documentElement.scrollWidth<=innerWidth+1,content:host.scrollWidth<=host.clientWidth+1,width:innerWidth,height:innerHeight};
  },scope);
  check(geometry.page&&geometry.content,name+' has no horizontal page or workspace overflow');
- if(name.startsWith('desktop-editor')){
+ if(name.startsWith('desktop-editor')&&geometry.height>=620){
   const preview=await page.evaluate(()=>{const key=document.querySelector('.editor-key').getBoundingClientRect(),label=document.querySelector('.editor-key>span').getBoundingClientRect(),save=document.querySelector('#board-editor>.save-bar').getBoundingClientRect(),body=document.querySelector('#panel-body').getBoundingClientRect();return{complete:key.top>=body.top&&key.bottom<=save.top&&label.bottom<=save.top,saveHeight:document.querySelector('#save-config').getBoundingClientRect().height};});
   check(preview.complete,name+' exposes a complete preview key and label above sticky Save');check(preview.saveHeight>=44,name+' keeps Save at least 44px high');
  }
@@ -125,7 +125,9 @@ async function ink(page){
 }
 async function run(){
  fs.mkdirSync(output,{recursive:true});browser=await chromium.launch({headless:true,executablePath:process.env.TABLETDECK_CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
- const desktop=await createPage(true);await desktop.locator('#console-editor').click();await desktop.locator('#page-name').waitFor();
+ const desktop=await createPage(true);
+ for(const [width,height,name]of [[620,480,'desktop-main-minimum'],[604,441,'desktop-main-client-minimum']]){await desktop.setViewportSize({width,height});await capture(desktop,name,'#console-overview',['#console-connect-first','#app-mode']);}
+ await desktop.setViewportSize({width:1280,height:800});await desktop.locator('#console-editor').click();await desktop.locator('#page-name').waitFor();
  for(const [width,height,name] of [[1280,800,'desktop-editor'],[1280,720,'desktop-editor-720'],[900,620,'desktop-editor-small'],[390,844,'desktop-editor-narrow']]){await desktop.setViewportSize({width,height});await capture(desktop,name,'#panel-body',['#page-name','#add-button','#save-config']);}
  await desktop.setViewportSize({width:1280,height:800});await desktop.locator('#page-name').fill('Unsaved review');await desktop.locator('#app-mode').selectOption('pen');await desktop.locator('#confirm-dialog').waitFor();
  check(await desktop.locator('#page-name').inputValue()==='Unsaved review','mode switch keeps dirty draft until a decision');await desktop.locator('#confirm-dialog button[value="cancel"]').click();
