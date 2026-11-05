@@ -2,7 +2,7 @@
 // Windows Ink is opt-in. An expired, interrupted, or disconnected lease never resumes itself.
 (function () {
   const MAX_BATCH = 32, MAX_PENDING = 96, MAX_AGE = 500, TICK = 8, RENEW = 350, REQUEST_TIMEOUT = 850;
-  const FRAME_INTERVAL = 84, FRAME_SOFT_TIMEOUT = 1500, FRAME_TIMEOUT = 5000, MAX_FRAME_BYTES = 2*1024*1024;
+  const FRAME_INTERVAL = 96, FRAME_SOFT_TIMEOUT = 1500, FRAME_TIMEOUT = 5000, MAX_FRAME_BYTES = 2*1024*1024;
   const finite = value => typeof value === 'number' && Number.isFinite(value);
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const phases = new Set(['hover','down','move','up','leave']);
@@ -24,22 +24,24 @@
   }
   function createPreview(options) {
     const now=options.now || (()=>performance.now()),schedule=options.schedule || setTimeout,unschedule=options.unschedule || clearTimeout;
-    let generation=0,session=null,timer=null,inFlight=false,state='idle',sequence=0,failures=0;
-    function emit(next,message=''){state=next;options.onState?.({state,message});}
-    function clear(){options.onClear?.();}
+    const retryableMessages=new Set(['PC preview capture is busy. It will retry without queuing frames.','PC preview is rate limited. It will retry shortly.','The PC is busy. Wait for the current request before trying again.','Too many pending tablet requests. Wait for the current action, then try again; this request was not queued.']);
+    let generation=0,session=null,timer=null,freshTimer=null,lastFrameAt=-Infinity,inFlight=false,state='idle',sequence=0,failures=0,errorRevealed=false;
+    function emit(next,message='',revealTools=false){state=next;options.onState?.({state,message,revealTools});}
+    function clear(keepDecode=false){if(freshTimer!==null)unschedule(freshTimer);freshTimer=null;lastFrameAt=-Infinity;options.onClear?.({keepDecode});}
     function arm(delay){if(!session)return;if(timer!==null)unschedule(timer);timer=schedule(()=>{timer=null;void capture();},Math.max(0,delay));}
-    function stop(){generation++;session=null;sequence=0;failures=0;if(timer!==null)unschedule(timer);timer=null;clear();emit('idle');}
+    function stop(){generation++;session=null;sequence=0;failures=0;errorRevealed=false;if(timer!==null)unschedule(timer);timer=null;clear();emit('idle');}
     function start(lease,target){
       if(session?.lease===lease && session.target.id===target.id && session.target.width===target.width && session.target.height===target.height)return;
       stop();session={lease,target:{id:target.id,width:target.width,height:target.height}};emit('loading','Loading the live PC view…');if(!inFlight)arm(0);
     }
     async function capture(){
       if(!session || inFlight)return;
-      const token=generation,current=session,started=now();let expired=false,success=false;
-      const currentRequest=()=>token===generation && session===current && !expired;
+      const token=generation,current=session,started=now();let expired=false,success=false,retryable=false;
+      const expire=()=>{expired=true;if(token===generation && session===current){clear();emit('stale','The PC view is taking too long. Check the PC connection.');}};
+      const currentRequest=()=>{if(token!==generation || session!==current || expired)return false;if(now()-started>=FRAME_SOFT_TIMEOUT){expire();return false;}return true;};
       const desired=typeof options.width==='function'?options.width():1280,width=Math.max(160,Math.min(1600,Number.isFinite(desired)?Math.round(desired):1280));
       inFlight=true;
-      const softDeadline=schedule(()=>{expired=true;if(token===generation && session===current){clear();emit('error','The PC view is taking too long. Check the PC connection.');}},FRAME_SOFT_TIMEOUT);
+      const softDeadline=schedule(expire,FRAME_SOFT_TIMEOUT);
       try{
         // Keep this slot until the transport and image decoder settle, even after a soft timeout or stop.
         const response=await options.request({lease:current.lease,width},FRAME_TIMEOUT);
@@ -47,13 +49,23 @@
         const frame=normalizeFrame(response,current.target,width,sequence);
         await options.onFrame(frame,currentRequest);
         if(!currentRequest())return;
-        sequence=frame.sequence;success=true;failures=0;emit('live','Live PC view');
-      }catch(error){if(currentRequest()){clear();const reason=typeof error?.message==='string'?error.message.replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,240):'';emit('error',`PC view unavailable.${reason?' '+reason:''} Reconnect, or choose a screen instead of an app window in DeskWing on your PC.`);}}
+        sequence=frame.sequence;success=true;failures=0;lastFrameAt=started;
+        if(freshTimer!==null)unschedule(freshTimer);
+        const shownSequence=sequence;
+        freshTimer=schedule(()=>{if(token===generation && session===current && sequence===shownSequence){clear(true);emit('stale','The PC view is paused while waiting for a fresh frame. Check the PC connection.');}},Math.max(0,started+FRAME_SOFT_TIMEOUT-now()));
+        emit('live','Live PC view');
+      }catch(error){if(currentRequest()){
+        const reason=typeof error?.message==='string'?error.message.replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,240):'';
+        retryable=retryableMessages.has(reason);
+        if(retryable){const fresh=now()-lastFrameAt<FRAME_SOFT_TIMEOUT;if(!fresh)clear();emit(fresh?'retrying':'stale','The PC view is catching up. Retrying shortly…');}
+        else{clear();const reveal=!errorRevealed;errorRevealed=true;emit('error',`PC view unavailable.${reason?' '+reason:''} Reconnect, or choose a screen instead of an app window in DeskWing on your PC.`,reveal);}
+      }}
       finally{
         unschedule(softDeadline);inFlight=false;
         if(session){
           if(token!==generation)arm(0);
           else if(success){const elapsed=now()-started,interval=Math.max(FRAME_INTERVAL,Math.min(1000,Math.ceil(elapsed*1.25)));arm(Math.max(0,interval-elapsed));}
+          else if(retryable)arm(120);
           else{failures++;arm(Math.min(2000,500*Math.min(failures,4)));}
         }
       }
@@ -170,9 +182,9 @@
     applyingLeaseTarget=true;
     try{status={...status,active:true,target:{id:target.id,label:target.label,kind:target.kind,width:target.width,height:target.height}};previewSession={lease,target:status.target};resizePad();}finally{applyingLeaseTarget=false;}
   },onChange:()=>{if (!client.active){releasePointer();previewSession=null;preview.stop();}else if(previewSession)preview.start(previewSession.lease,previewSession.target);if(fullscreen && client.snapshot().state==='error')toolsOpen=true;render();}});
-  const preview=createPreview({request:(body,timeout)=>request('/api/pen/frame',body,timeout),width:()=>Math.min(1600,Math.max(640,Math.round((pad?.clientWidth || 1280)*(window.devicePixelRatio || 1)))),onClear:clearPreview,onFrame:presentPreview,onState:info=>{previewState=info.state;previewMessage=info.message;if(info.state==='error' && fullscreen)toolsOpen=true;render();}});
-  function clearPreview(){
-    if(cancelPreviewDecode){const cancel=cancelPreviewDecode;cancelPreviewDecode=null;cancel();}
+  const preview=createPreview({request:(body,timeout)=>request('/api/pen/frame',body,timeout),width:()=>Math.min(1600,Math.max(640,Math.round((pad?.clientWidth || 1280)*(window.devicePixelRatio || 1)))),onClear:clearPreview,onFrame:presentPreview,onState:info=>{previewState=info.state;previewMessage=info.message;if(info.revealTools && fullscreen)toolsOpen=true;render();}});
+  function clearPreview(options={}){
+    if(!options.keepDecode && cancelPreviewDecode){const cancel=cancelPreviewDecode;cancelPreviewDecode=null;cancel();}
     previewHasImage=false;
     if(previewImage){previewImage.removeAttribute('src');previewImage.hidden=true;}
   }
@@ -215,9 +227,9 @@
     host.classList.toggle('pen-tablet-connected',running);
     pad.setAttribute('aria-label',`Windows pen tablet surface. ${running ? 'Active. Pen only; fingers are ignored.' : 'Stopped. Start a pen session to use your stylus.'}`);
     hint.textContent=running ? 'Look at your PC and draw here. Your palm is ignored.' : 'Your pen controls the selected Windows screen or window.';
-    if(running)hint.textContent=previewState==='error' ? 'PC view unavailable. Open tools to check the connection.' : 'Loading the live PC view…';
+    if(running)hint.textContent=previewState==='error' || previewState==='stale' ? 'PC view paused. Open tools to check the connection.' : 'Loading the live PC view…';
     hint.hidden=previewHasImage;
-    previewStatus.textContent=previewMessage || 'The live PC view appears after you start a pen session.';previewStatus.classList.toggle('pen-tablet-error',previewState==='error');
+    previewStatus.textContent=previewMessage || 'The live PC view appears after you start a pen session.';previewStatus.classList.toggle('pen-tablet-error',previewState==='error' || previewState==='stale');
     fullscreenButton.textContent=fullscreen ? 'Exit fullscreen' : 'Fullscreen';
     fullscreenButton.setAttribute('aria-pressed',String(fullscreen));
     floatingControls.hidden=!fullscreen;
