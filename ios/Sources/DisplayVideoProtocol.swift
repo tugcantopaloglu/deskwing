@@ -23,6 +23,8 @@ struct DisplayVideoParser {
     private(set) var ended = false
     private var lastPresentation: UInt64?
 
+    init(expected: DisplayVideoFormat) { self.expected = expected }
+
     mutating func append(_ bytes: Data, consume: (DisplayVideoUnit) throws -> Void) throws {
         guard !ended else { throw DeskError.message("The display stream already ended.") }
         // URLSession may combine multiple frames in one callback. Consume bounded pieces rather
