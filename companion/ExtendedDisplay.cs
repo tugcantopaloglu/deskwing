@@ -12,12 +12,14 @@ using Microsoft.Win32.SafeHandles;
 
 namespace TabletDeck;
 
-public sealed record ExtendedDisplayStart(int Width=1280,int Height=800,bool ShareWithTablet=false,bool AcceptInstalledDriver=false);
+public sealed record ExtendedDisplayStart(int Width=1280,int Height=800,bool ShareWithTablet=false,bool AcceptInstalledDriver=false,int RefreshRate=60);
 public sealed record ExtendedDisplayFrameRequest(int Width=960);
 public sealed record ExtendedDisplayFrame(long Sequence,int Width,int Height,string Image,DateTimeOffset CapturedAt,double AgeMs);
 public sealed record ExtendedDisplayDriver(string Name,string Version,bool CatalogTrusted,string? Signer,string? Thumbprint,string Detail);
 public sealed record ExtendedDesktop(string SourceName,string MonitorName,int X,int Y,int Width,int Height,bool SharesDesktopSource,bool IsOwned);
-public sealed record ExtendedDisplayStatus(bool Available,bool Active,bool SharedWithTablet,bool IndependentDesktop,string? SourceName,int Width,int Height,ExtendedDisplayDriver? Driver,string Detail,ExtendedDesktop[] Displays);
+public sealed record ExtendedDisplayStatus(bool Available,bool Active,bool SharedWithTablet,bool IndependentDesktop,string? SourceName,int Width,int Height,ExtendedDisplayDriver? Driver,string Detail,ExtendedDesktop[] Displays,double RefreshRate=0);
+
+internal sealed record DisplayVideoTarget(Guid Monitor,long Generation,ulong Adapter,uint TargetId,string SourceKey,string SourceName,int X,int Y,int Width,int Height,double RefreshRate,CancellationToken Invalidated);
 
 // Original user-mode interop for the installed SudoVDA 0.2 protocol, not a bundled driver.
 // Protocol reference/license and operational limits: docs/EXTENDED-DISPLAY.md.
@@ -42,6 +44,10 @@ public sealed class ExtendedDisplay : IDisposable
     public ExtendedDisplay():this(new WindowsPlatform()){}
     internal ExtendedDisplay(IPlatform platform){this.platform=platform;}
     private readonly object sync=new();
+    private readonly object diagnosticGate=new();
+    private Native.Installed? diagnosticDriver;
+    private long diagnosticAt;
+    private bool diagnosticRead;
     private readonly SemaphoreSlim captureGate=new(1,1);
     private SafeFileHandle? session;
     private System.Threading.Timer? heartbeat;
@@ -54,29 +60,46 @@ public sealed class ExtendedDisplay : IDisposable
     private long sequence,attemptTicks,captureTicks;
     private ExtendedDisplayFrame? cached;
     private int requestedWidth;
+    private long videoGeneration;
+    private CancellationTokenSource videoCancellation=new();
     private const int MaxJpegBytes=384*1024;
     private const uint AddMonitor=0x222000,RemoveMonitor=0x222004,Ping=0x222220,Protocol=0x2223fc;
 
     public ExtendedDisplayStatus Status()
     {
+        Native.Installed? installed;
+        // Driver catalog verification is a diagnostic, not part of frame authorization. Never
+        // hold the capture/ownership lock while Windows verifies catalog signatures.
+        try{installed=DriverDiagnostics();}
+        catch(Exception ex) when(ex is not OutOfMemoryException)
+        {lock(sync)return new(false,session is {IsInvalid:false,IsClosed:false},false,false,null,0,0,sessionDriver,"Display diagnostics unavailable: "+ex.Message,[]);}
         lock(sync)
         {
             try
             {
                 var paths=platform.ReadPaths();
-                var installed=platform.FindDriver();
                 var driver=sessionDriver??installed?.Info;
                 var own=monitorGuid is null?null:paths.FirstOrDefault(p=>p.Adapter==adapterLuid&&p.TargetId==targetId);
                 var independent=own is not null&&IsIndependent(own,paths);
                 var active=session is {IsInvalid:false,IsClosed:false}&&monitorGuid is not null;
                 var detail=sessionError??(active?(independent?(shared?"Independent tablet desktop is shared. Only this session's display can be captured.":"Independent desktop created. Enable tablet sharing on this PC to send frames."):"Monitor created; Windows has not exposed an independent desktop. In Windows Display settings choose Extend for TabletDeck. Physical displays are unchanged."):(installed?.Info.Detail??"Install a compatible, reviewed virtual display driver using its publisher's administrator setup. TouchBar controls work without it."));
                 return new(installed?.Usable==true,active,active&&shared,active&&independent,own?.SourceName,own?.Width??0,own?.Height??0,driver,detail,
-                    paths.Select(p=>new ExtendedDesktop(p.SourceName,p.Name,p.X,p.Y,p.Width,p.Height,p.IsClone,own==p)).ToArray());
+                    paths.Select(p=>new ExtendedDesktop(p.SourceName,p.Name,p.X,p.Y,p.Width,p.Height,p.IsClone,own==p)).ToArray(),own?.RefreshRate??0);
             }
             catch(Exception ex) when(ex is not OutOfMemoryException)
             {
                 return new(false,session is {IsInvalid:false,IsClosed:false},false,false,null,0,0,sessionDriver,"Display diagnostics unavailable: "+ex.Message,[]);
             }
+        }
+    }
+
+    private Native.Installed? DriverDiagnostics()
+    {
+        lock(diagnosticGate)
+        {
+            if(diagnosticRead&&Stopwatch.GetElapsedTime(diagnosticAt)<TimeSpan.FromSeconds(30))return diagnosticDriver;
+            diagnosticDriver=platform.FindDriver();diagnosticAt=Stopwatch.GetTimestamp();diagnosticRead=true;
+            return diagnosticDriver;
         }
     }
 
@@ -102,7 +125,7 @@ public sealed class ExtendedDisplay : IDisposable
                 var input=new byte[56];
                 BitConverter.GetBytes(request.Width).CopyTo(input,0);
                 BitConverter.GetBytes(request.Height).CopyTo(input,4);
-                BitConverter.GetBytes(60).CopyTo(input,8);
+                BitConverter.GetBytes(request.RefreshRate).CopyTo(input,8);
                 created.ToByteArray().CopyTo(input,12);
                 Encoding.ASCII.GetBytes("TabletDeck").CopyTo(input,28);
                 Encoding.ASCII.GetBytes(created.ToString("N")[..12]).CopyTo(input,42);
@@ -111,6 +134,7 @@ public sealed class ExtendedDisplay : IDisposable
                 if(output.Length!=12)throw new InvalidOperationException("SudoVDA returned an invalid monitor identity.");
                 adapterLuid=BitConverter.ToUInt64(output,0);targetId=BitConverter.ToUInt32(output,8);
                 session=handle;monitorGuid=created;shared=request.ShareWithTablet;sessionDriver=driver.Info;sessionError=null;
+                InvalidateVideo();
                 startedGuid=created;
                 cached=null;attemptTicks=0;captureTicks=0;
                 heartbeat=new System.Threading.Timer(_=>Heartbeat(),null,TimeSpan.FromMilliseconds(400),TimeSpan.FromMilliseconds(400));
@@ -142,7 +166,8 @@ public sealed class ExtendedDisplay : IDisposable
 
     public static void Validate(ExtendedDisplayStart request)
     {
-        if((request.Width,request.Height) is not ((1280,800) or (1600,900) or (1920,1080)))throw new ArgumentException("Choose 1280×800, 1600×900, or 1920×1080 at 60 Hz.");
+        if((request.Width,request.Height) is not ((1280,800) or (1600,900) or (1920,1080)))throw new ArgumentException("Choose 1280×800, 1600×900, or 1920×1080.");
+        if(request.RefreshRate is <60 or >240)throw new ArgumentException("Choose a display refresh rate from 60 to 240 Hz.");
         if(!request.AcceptInstalledDriver)throw new ArgumentException("Review and explicitly accept the installed driver on this PC before creating a display.");
     }
 
@@ -152,7 +177,7 @@ public sealed class ExtendedDisplay : IDisposable
         {
             ObjectDisposedException.ThrowIf(disposed,this);
             if(monitorGuid is null)throw new InvalidOperationException("Create a TabletDeck display on this PC first.");
-            shared=enabled;cached=null;captureTicks=0;
+            shared=enabled;cached=null;captureTicks=0;InvalidateVideo();
             return Status();
         }
     }
@@ -161,7 +186,7 @@ public sealed class ExtendedDisplay : IDisposable
     {
         lock(sync)
         {
-            shared=false;cached=null;
+            shared=false;cached=null;InvalidateVideo();
             if(session is not null)
             {
                 try{if(monitorGuid is Guid guid&&!session.IsInvalid&&!session.IsClosed)platform.Ioctl(session,RemoveMonitor,guid.ToByteArray(),0);}
@@ -185,7 +210,7 @@ public sealed class ExtendedDisplay : IDisposable
             try{platform.Ioctl(session,Ping,null,0);}
             catch(Exception ex) when(ex is not OutOfMemoryException)
             {
-                shared=false;cached=null;sessionError="Virtual display connection failed: "+ex.Message;
+                shared=false;cached=null;InvalidateVideo();sessionError="Virtual display connection failed: "+ex.Message;
                 heartbeat?.Dispose();heartbeat=null;session.Dispose();session=null;monitorGuid=null;
             }
         }
@@ -230,13 +255,50 @@ public sealed class ExtendedDisplay : IDisposable
         finally{captureGate.Release();}
     }
 
+    // Only the monitor this process created may enter the video encoder. Topology inspection is
+    // independent of expensive driver/catalog diagnostics and capture never holds this lock.
+    internal DisplayVideoTarget CaptureVideoTarget()
+    {
+        lock(sync)
+        {
+            ObjectDisposedException.ThrowIf(disposed,this);
+            if(!shared||session is not {IsInvalid:false,IsClosed:false}||monitorGuid is not Guid owned)
+                throw new InvalidOperationException("Create a Second display and enable sharing on the PC first.");
+            var paths=platform.ReadPaths();
+            var own=paths.FirstOrDefault(p=>p.Adapter==adapterLuid&&p.TargetId==targetId);
+            if(own is null||!IsIndependent(own,paths))throw new InvalidOperationException("The DeskWing display must be an independent extended desktop.");
+            if((own.Width,own.Height) is not ((1280,800) or (1600,900) or (1920,1080)))
+                throw new InvalidOperationException("Choose a supported Second display size on the PC before starting video.");
+            if(!double.IsFinite(own.RefreshRate)||own.RefreshRate is <1 or >1000)
+                throw new InvalidOperationException("Windows did not report a valid refresh rate for the Second display.");
+            return new(owned,videoGeneration,adapterLuid,targetId,own.SourceKey,own.SourceName,own.X,own.Y,own.Width,own.Height,own.RefreshRate,videoCancellation.Token);
+        }
+    }
+
+    internal void ValidateVideoTarget(DisplayVideoTarget target)
+    {
+        lock(sync)
+        {
+            if(target.Invalidated.IsCancellationRequested)throw new InvalidOperationException("Second display sharing changed. Open the display again when ready.");
+            var current=CaptureVideoTarget();
+            if(current!=target)throw new InvalidOperationException("The Second display moved, changed refresh rate, or was replaced. Open it again after arranging the PC desktop.");
+        }
+    }
+
+    private void InvalidateVideo()
+    {
+        videoGeneration++;
+        var old=videoCancellation;videoCancellation=new();
+        old.Cancel();old.Dispose();
+    }
+
     public void Dispose()
     {
         lock(sync)
         {
             if(disposed)return;
             try{Stop();}
-            finally{disposed=true;shared=false;cached=null;heartbeat?.Dispose();heartbeat=null;session?.Dispose();session=null;}
+            finally{disposed=true;shared=false;cached=null;InvalidateVideo();videoCancellation.Dispose();heartbeat?.Dispose();heartbeat=null;session?.Dispose();session=null;}
         }
     }
 
@@ -258,7 +320,7 @@ public sealed class ExtendedDisplay : IDisposable
     {
         private static readonly Guid InterfaceGuid=new("e5bcc234-1e0c-418a-a0d4-ef8b7501414d");
         internal sealed record Installed(string Path,ExtendedDisplayDriver Info,bool Usable);
-        internal sealed record DesktopPath(ulong Adapter,uint TargetId,string SourceKey,string SourceName,string Name,string AdapterPath,int X,int Y,int Width,int Height,bool IsClone);
+        internal sealed record DesktopPath(ulong Adapter,uint TargetId,string SourceKey,string SourceName,string Name,string AdapterPath,int X,int Y,int Width,int Height,bool IsClone,double RefreshRate=60);
         [StructLayout(LayoutKind.Sequential)] private struct DeviceInfo{public uint Size;public Guid Class;public uint DevInst;public IntPtr Reserved;}
         [StructLayout(LayoutKind.Sequential)] private struct InterfaceInfo{public uint Size;public Guid Class;public uint Flags;public IntPtr Reserved;}
         [DllImport("setupapi.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern IntPtr SetupDiGetClassDevs(ref Guid guid,IntPtr enumerator,IntPtr window,uint flags);
@@ -418,7 +480,7 @@ public sealed class ExtendedDisplay : IDisposable
                         if(DeviceName(ref source)!=0||DeviceName(ref target)!=0||DeviceName(ref adapter)!=0)throw new InvalidOperationException("Windows display identity changed during enumeration.");
                         int x=0,y=0,w=0,h=0;
                         if(p.Source.Mode<modeCount){var mode=IntPtr.Add(modes,checked((int)p.Source.Mode*64));if(Marshal.ReadInt32(mode)==1){w=Marshal.ReadInt32(mode,16);h=Marshal.ReadInt32(mode,20);x=Marshal.ReadInt32(mode,28);y=Marshal.ReadInt32(mode,32);}}
-                        list.Add(new(p.Target.Adapter.Value,p.Target.Id,p.Source.Adapter.Value+":"+p.Source.Id,source.Name,target.Name,adapter.Path,x,y,w,h,false));
+                        list.Add(new(p.Target.Adapter.Value,p.Target.Id,p.Source.Adapter.Value+":"+p.Source.Id,source.Name,target.Name,adapter.Path,x,y,w,h,false,p.Target.Denominator==0?0:(double)p.Target.Numerator/p.Target.Denominator));
                     }
                     return list.Select(p=>p with{IsClone=list.Count(other=>other.SourceKey==p.SourceKey)>1}).ToArray();
                 }

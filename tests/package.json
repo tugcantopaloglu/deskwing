@@ -48,6 +48,12 @@
     "test:readiness-api": "node readiness-api.cjs",
     "test:ink-api": "node ink-api.cjs",
     "test:pen-api": "node pen-api.cjs",
+    "test:display-stream-api": "node display-stream-api.cjs",
+    "test:display-stream-backend": "dotnet run --project display-stream/DisplayStreamTests.csproj -c Release",
+    "test:display-encoder": "dotnet run --project display-encoder/DisplayEncoderTests.csproj -c Release",
+    "test:android-display-protocol": "node run-all.cjs --suite android-display-protocol",
+    "test:android-bridge-tickets": "node run-all.cjs --suite android-bridge-tickets",
+    "test:android-frame-metrics": "node run-all.cjs --suite android-frame-metrics",
     "test:ink-backend": "dotnet run --project ink-backend/InkBackendTests.csproj -c Release",
     "test:shortcut-migration": "dotnet run --project shortcut-migration/ShortcutMigrationTests.csproj -c Release"
   },

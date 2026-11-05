@@ -2,6 +2,7 @@
 // Contextual controls use saved companion bindings. Choosing a layout never launches an app.
 let computerMode='studio',computerSnapshot=null,computerReachable=false,computerReadPending=false,computerChoosing=false,computerEpoch=0,computerSignature='',computerSuspended=false,computerRailScroll=0,computerRailPreset='';
 let computerDisplayPanel=null,computerDisplaySnapshot=null,computerDisplayReading=false,computerDisplayWanted=false,computerDisplayEpoch=0,computerDisplayTimer=null,computerDisplayPending=false,computerDisplaySignature='';
+let computerDisplayCapabilities=null,computerDisplayRefreshMode='60',computerDisplayNativeSession=null,computerDisplayNativeStarting=false,computerDisplayTransport='';
 let computerJog=null;
 const computerNode=id=>document.getElementById(id);
 function computerText(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
@@ -146,31 +147,72 @@ function appendComputerDisplayStatus(host,snapshot){
   }
   host.append(computerDisplayPanel);if(!computerDisplaySnapshot)renderComputerDisplay(snapshot.capabilities?.displayNote);
 }
+function computerHasNativeDisplay(){return typeof native!=='undefined'&&native===true&&typeof nativeRequest==='function';}
+function normalizeComputerDisplayCapabilities(value){
+  if(!value||value.available!==true)return{available:false,detail:typeof value?.detail==='string'?value.detail.slice(0,500):'High-refresh display requires the current DeskWing tablet app.'};
+  const rate=value.currentRefreshRate,maximum=value.maxRefreshRate;
+  if(!Number.isFinite(rate)||rate<1||rate>240||!Number.isFinite(maximum)||maximum<rate-1||maximum>240)throw new Error('The tablet did not report a supported refresh rate.');
+  return{available:true,currentRefreshRate:rate,maxRefreshRate:maximum,supportedRefreshRates:Array.isArray(value.supportedRefreshRates)?value.supportedRefreshRates.filter(rate=>Number.isFinite(rate)&&rate>=1&&rate<=240):[],detail:typeof value.detail==='string'?value.detail.slice(0,500):''};
+}
+function computerDisplayRateProblem(){
+  const source=computerDisplaySnapshot?.refreshRate,target=computerDisplayRefreshMode==='match'&&computerDisplayCapabilities?.available?Math.max(60,Math.round(computerDisplayCapabilities.currentRefreshRate)):60;
+  return Number.isFinite(source)&&source>0&&source+0.1<target?`Create the PC Second display at ${target} Hz or higher to use this setting.`:'';
+}
+function updateComputerDisplayRateUI(){
+  const problem=computerDisplayRateProblem(),warning=computerNode('computer-display-rate-warning'),start=computerNode('computer-display-start');
+  if(warning){warning.textContent=problem;warning.hidden=!problem;}
+  if(start){start.disabled=computerDisplayNativeStarting||!!problem;start.setAttribute('aria-describedby',problem?'computer-display-rate-warning':'computer-display-rate-help');}
+}
+function appendComputerDisplayRefresh(content){
+  const capabilities=computerDisplayCapabilities;
+  const label=computerText('label','computer-display-choice','Refresh rate'),select=computerText('select','app-mode');select.id='computer-display-rate';
+  const fixed=computerText('option','','60 Hz');fixed.value='60';select.append(fixed);
+  const target=capabilities?.available?Math.max(60,Math.round(capabilities.currentRefreshRate)):null;
+  const match=computerText('option','',target?`Match tablet (${target} Hz)`:'Match tablet');match.value='match';match.disabled=!target;select.append(match);
+  select.value=computerDisplayRefreshMode;select.onchange=()=>{computerDisplayRefreshMode=select.value==='match'?'match':'60';updateComputerDisplayRateUI();};label.append(select);content.append(label);
+  const rates=capabilities?.available?`Tablet: ${Math.round(capabilities.currentRefreshRate)} Hz now · up to ${Math.round(capabilities.maxRefreshRate)} Hz. `:'';
+  const help=computerText('p','computer-display-rate-help',rates+'The viewer shows the received video frame rate. The extra Windows display must be set to at least the selected rate.');help.id='computer-display-rate-help';content.append(help);
+  const warning=computerText('p','computer-display-rate-warning');warning.id='computer-display-rate-warning';warning.setAttribute('role','status');warning.hidden=true;content.append(warning);
+}
 function renderComputerDisplay(fallback=''){
   const content=computerDisplayPanel?.querySelector('#computer-display-content');if(!content)return;
   // Keep an active image mounted while foreground context changes in the control bar.
   if(computerDisplayWanted)return;
-  const desktop=typeof desktopConsole!=='undefined'&&desktopConsole,signature=JSON.stringify([computerDisplaySnapshot,fallback,desktop]);if(signature===computerDisplaySignature)return;computerDisplaySignature=signature;
+  const desktop=typeof desktopConsole!=='undefined'&&desktopConsole,signature=JSON.stringify([computerDisplaySnapshot,computerDisplayCapabilities,computerDisplayNativeStarting,fallback,desktop]);if(signature===computerDisplaySignature)return;computerDisplaySignature=signature;
   content.replaceChildren();const data=computerDisplaySnapshot;
   const note=computerText('p','',data?.detail||fallback||'Check whether an independent Windows display is available.');note.id='computer-display-status';note.setAttribute('role','status');content.append(note);
   const row=computerText('div','computer-display-tools'),check=computerText('button','quiet','Check display');check.type='button';check.onclick=refreshComputerDisplay;row.append(check);
   if(data?.active&&data.independentDesktop){
-    content.append(computerText('p','',`Independent desktop · ${data.width} × ${data.height} · ${data.sharedWithTablet?'Sharing with your paired tablet is enabled.':'Tablet sharing is off.'}`));
-    if(!desktop&&data.sharedWithTablet){const view=computerText('button','primary','Open display view');view.type='button';view.onclick=startComputerDisplayView;row.append(view);}
+    const rate=Number.isFinite(data.refreshRate)&&data.refreshRate>0?` · Windows display ${Number(data.refreshRate.toFixed(2))} Hz`:'';
+    content.append(computerText('p','',`Independent desktop · ${data.width} × ${data.height}${rate} · ${data.sharedWithTablet?'Sharing with your paired tablet is enabled.':'Tablet sharing is off.'}`));
+    if(!desktop&&data.sharedWithTablet){
+      if(computerHasNativeDisplay()&&computerDisplayCapabilities?.available){appendComputerDisplayRefresh(content);const view=computerText('button','primary',computerDisplayNativeStarting?'Starting display…':'Start second display');view.id='computer-display-start';view.type='button';view.disabled=computerDisplayNativeStarting;view.onclick=startComputerDisplayView;row.append(view);}
+      else content.append(computerText('p','computer-display-rate-help',computerDisplayCapabilities?.detail||(computerHasNativeDisplay()?'Checking tablet display support…':'Use the DeskWing tablet app for 60 Hz or Match tablet.')));
+      const compatibility=computerText('button','quiet','Open compatibility preview');compatibility.type='button';compatibility.disabled=computerDisplayNativeStarting;compatibility.onclick=startComputerDisplayPreview;row.append(compatibility);
+      content.append(computerText('p','computer-display-preview-help','Compatibility preview sends still images at up to 4 fps. It has no audio.'));
+    }
     if(desktop){const share=computerText('button','quiet',data.sharedWithTablet?'Pause tablet sharing':'Allow tablet sharing');share.type='button';share.onclick=async()=>{if(!data.sharedWithTablet&&!await confirmAction('Share the independent display?','Everything shown on this extra Windows display becomes visible to your paired tablet.'))return;await changeComputerDisplay({operation:'share',enabled:!data.sharedWithTablet},share);};row.append(share);const remove=computerText('button','danger','Remove extra display');remove.type='button';remove.onclick=async()=>{if(await confirmAction('Remove the extra display?','Windows will move its windows to your remaining displays.'))await changeComputerDisplay({operation:'remove'},remove);};row.append(remove);}
   }else if(desktop&&data?.available){
     content.append(computerText('p','','Create a separate Windows desktop using the installed display driver. Windows can place apps on it independently of your physical monitors. Its pixels will be visible to your paired tablet.'));
     if(data.driver){content.append(computerText('p','',`${data.driver.name||'Installed driver'}${data.driver.version?' · '+data.driver.version:''}${data.driver.signer?' · Signed by '+data.driver.signer:''}`));if(data.driver.detail)content.append(computerText('p','',data.driver.detail));}
     const sizeLabel=computerText('label','computer-display-choice','Resolution'),size=computerText('select','app-mode');size.id='computer-display-size';for(const [value,label] of [['1280x800','1280 × 800'],['1600x900','1600 × 900'],['1920x1080','1920 × 1080']]){const option=computerText('option','',label);option.value=value;size.append(option);}sizeLabel.append(size);content.append(sizeLabel);
+    const rateLabel=computerText('label','computer-display-choice','Windows display refresh rate'),rate=computerText('select','app-mode');rate.id='computer-display-refresh-rate';for(const value of [60,90,120,144,165,240]){const option=computerText('option','',`${value} Hz`);option.value=String(value);rate.append(option);}rateLabel.append(rate);content.append(rateLabel);
+    content.append(computerText('p','computer-display-rate-help','Choose at least your tablet’s active refresh rate to use Match tablet. This sets the Windows display; the tablet viewer reports the received video frame rate.'));
     const accept=computerText('label','computer-display-consent'),driver=document.createElement('input');driver.type='checkbox';accept.append(driver,computerText('span','','Use the installed '+(data.driver?.name||'virtual display')+' driver to create an extra Windows display.'));content.append(accept);
     const consent=computerText('label','computer-display-consent'),share=document.createElement('input');share.type='checkbox';consent.append(share,computerText('span','','Allow my paired tablet to view everything on this extra display.'));content.append(consent);
-    const create=computerText('button','primary','Create independent display');create.type='button';create.disabled=true;driver.onchange=share.onchange=()=>{create.disabled=!driver.checked||!share.checked;};create.onclick=()=>{if(!driver.checked||!share.checked)return;const [width,height]=size.value.split('x').map(Number);return changeComputerDisplay({operation:'create',width,height,shareWithTablet:true,acceptInstalledDriver:true},create);};row.append(create);
+    const create=computerText('button','primary','Create independent display');create.type='button';create.disabled=true;driver.onchange=share.onchange=()=>{create.disabled=!driver.checked||!share.checked;};create.onclick=()=>{if(!driver.checked||!share.checked)return;const [width,height]=size.value.split('x').map(Number);return changeComputerDisplay({operation:'create',width,height,refreshRate:Number(rate.value),shareWithTablet:true,acceptInstalledDriver:true},create);};row.append(create);
   }else if(data&&!data.active){content.append(computerText('p','',desktop?'An installed, supported virtual display driver is required. Contextual controls work without an extra display.':'Create and enable sharing for an independent display in the Windows app. Contextual controls work without it.'));}
-  content.append(row);
+  content.append(row);updateComputerDisplayRateUI();
 }
 async function refreshComputerDisplay(){
   if(computerDisplayReading||computerSuspended||computerMode!=='computer'||document.hidden||panel.open)return;computerDisplayReading=true;const epoch=computerEpoch;
-  try{const data=await api('/api/computer/display');if(epoch!==computerEpoch)return;computerDisplaySnapshot=data;if(computerDisplayWanted&&(!data.active||!data.independentDesktop||!data.sharedWithTablet)){stopComputerDisplayView();notice('The independent display is no longer shared. Enable it again in the Windows app.',true);}renderComputerDisplay();}
+  try{
+    const [status,capabilities]=await Promise.allSettled([api('/api/computer/display'),computerHasNativeDisplay()?nativeRequest('/local/display/capabilities',{},'POST',5000):Promise.resolve(null)]);
+    if(epoch!==computerEpoch)return;if(status.status==='rejected')throw status.reason;
+    const data=status.value;computerDisplaySnapshot=data;
+    try{computerDisplayCapabilities=normalizeComputerDisplayCapabilities(capabilities.status==='fulfilled'?capabilities.value:null);}catch(error){computerDisplayCapabilities={available:false,detail:error.message};}
+    if(computerDisplayWanted&&(!data.active||!data.independentDesktop||!data.sharedWithTablet)){stopComputerDisplayView();notice('The independent display is no longer shared. Enable it again in the Windows app.',true);}renderComputerDisplay();
+  }
   catch(error){if(epoch!==computerEpoch)return;stopComputerDisplayView();computerDisplaySnapshot=null;renderComputerDisplay('Display status unavailable. '+error.message+' Check display to try again.');}
   finally{computerDisplayReading=false;}
 }
@@ -179,20 +221,38 @@ async function changeComputerDisplay(body,button){
   try{await api('/api/admin/computer/display',body,30000);await refreshComputerDisplay();}
   catch(error){notice(error.message,true);}finally{if(button.isConnected)button.disabled=false;}
 }
-function stopComputerDisplayView(){
+function stopComputerDisplayView(notifyNative=true){
+  const session=computerDisplayNativeSession;computerDisplayNativeSession=null;computerDisplayTransport='';
   computerDisplayWanted=false;computerDisplayEpoch++;computerDisplaySignature='';clearTimeout(computerDisplayTimer);document.body.classList.remove('computer-screen-mode');
   const image=computerNode('computer-display-image');if(image)image.removeAttribute('src');if(computerDisplayPanel)renderComputerDisplay();
+  if(notifyNative&&session&&computerHasNativeDisplay())void nativeRequest('/local/display/stop',{session},'POST',5000).catch(()=>{});
 }
-function startComputerDisplayView(){
+function computerDisplayCanStart(){const data=computerDisplaySnapshot;return!!(data?.active&&data.independentDesktop&&data.sharedWithTablet&&computerMode==='computer'&&!computerDisplayWanted&&!computerDisplayNativeStarting&&computerNavigationAllowed());}
+async function startComputerDisplayView(){
+  if(!computerDisplayCanStart()||!computerHasNativeDisplay()||!computerDisplayCapabilities?.available||computerDisplayRateProblem())return;
+  const session=crypto.randomUUID(),epoch=++computerDisplayEpoch;
+  computerDisplayWanted=true;computerDisplayNativeStarting=true;computerDisplayNativeSession=session;computerDisplayTransport='native';
+  const content=computerNode('computer-display-content');content.replaceChildren();const status=computerText('p','','Opening the tablet display…');status.id='computer-display-status';status.setAttribute('role','status');content.append(status);
+  const tools=computerText('div','computer-display-tools'),stop=computerText('button','quiet','Back to controls');stop.type='button';stop.onclick=()=>stopComputerDisplayView();tools.append(stop);content.append(tools);
+  try{
+    const result=await nativeRequest('/local/display/start',{refreshMode:computerDisplayRefreshMode,session},'POST',20000);
+    if(epoch!==computerDisplayEpoch||!computerDisplayWanted||computerDisplayNativeSession!==session){void nativeRequest('/local/display/stop',{session},'POST',5000).catch(()=>{});return;}
+    if(result?.started!==true||result.session!==session||!Number.isFinite(result.targetRefreshRate)||result.targetRefreshRate<60||result.targetRefreshRate>240)throw new Error('The tablet did not start a supported display session.');
+    status.textContent=`Second display is open on the tablet · ${Math.round(result.targetRefreshRate)} Hz target. The viewer reports its received video frame rate.`;
+  }catch(error){if(epoch===computerDisplayEpoch&&computerDisplayNativeSession===session){stopComputerDisplayView();notice('Second display could not start. '+(error?.message||'Check the PC connection and try again.'),true);}}
+  finally{computerDisplayNativeStarting=false;computerDisplaySignature='';if(!computerDisplayWanted)renderComputerDisplay();}
+}
+function startComputerDisplayPreview(){
+  if(!computerDisplayCanStart())return;
   const data=computerDisplaySnapshot;if(!data?.active||!data.independentDesktop||!data.sharedWithTablet||computerMode!=='computer'||!computerNavigationAllowed())return;
-  computerDisplayWanted=true;const epoch=++computerDisplayEpoch,content=computerNode('computer-display-content');content.replaceChildren();
+  computerDisplayWanted=true;computerDisplayTransport='preview';const epoch=++computerDisplayEpoch,content=computerNode('computer-display-content');content.replaceChildren();
   const tools=computerText('div','computer-display-tools'),back=computerText('button','quiet','Back to controls');back.type='button';back.onclick=stopComputerDisplayView;tools.append(back);content.append(tools);
   const image=document.createElement('img');image.id='computer-display-image';image.alt='Independent Windows display';content.append(image);const status=computerText('p','',`Opening ${data.sourceName||'the independent display'}…`);status.id='computer-display-status';status.setAttribute('role','status');content.append(status);document.body.classList.add('computer-screen-mode');computerDisplayTick(epoch);
 }
 async function computerDisplayTick(epoch){
   if(!computerDisplayWanted||computerSuspended||epoch!==computerDisplayEpoch||computerMode!=='computer'||document.hidden||panel.open)return;
   if(computerDisplayPending){computerDisplayTimer=setTimeout(()=>computerDisplayTick(epoch),100);return;}computerDisplayPending=true;
-  try{const frame=await api('/api/computer/display/frame',{width:960},10000);if(epoch!==computerDisplayEpoch||!computerDisplayWanted)return;if(typeof frame.image!=='string'||!frame.image.startsWith('data:image/jpeg;base64,')||frame.image.length>4000000)throw new Error('The display returned an invalid image.');computerNode('computer-display-image').src=frame.image;computerNode('computer-display-status').textContent=`Independent Windows display · ${frame.width} × ${frame.height} preview · no audio`;}
+  try{const frame=await api('/api/computer/display/frame',{width:960},10000);if(epoch!==computerDisplayEpoch||!computerDisplayWanted)return;if(typeof frame.image!=='string'||!frame.image.startsWith('data:image/jpeg;base64,')||frame.image.length>4000000)throw new Error('The display returned an invalid image.');computerNode('computer-display-image').src=frame.image;computerNode('computer-display-status').textContent=`Compatibility preview · up to 4 fps · ${frame.width} × ${frame.height} · no audio`;}
   catch(error){if(epoch!==computerDisplayEpoch)return;stopComputerDisplayView();notice('Display view paused. '+error.message,true);}
   finally{computerDisplayPending=false;if(computerDisplayWanted&&epoch===computerDisplayEpoch)computerDisplayTimer=setTimeout(()=>computerDisplayTick(epoch),250);}
 }
@@ -246,6 +306,11 @@ function initializeComputerCopilot(){
   setInterval(()=>{refreshComputer();if(computerDisplayPanel?.open)refreshComputerDisplay();},1500);
   panel.addEventListener('close',()=>{if(!panel.open&&computerMode==='computer'){syncComputerConsoleMode();computerSignature='';refreshComputer();}});
   document.addEventListener('visibilitychange',()=>{if(document.hidden)computerSuspend();else computerResume();});
+  document.addEventListener('deskwing-display',event=>{
+    const detail=event.detail;if(detail?.active!==false||typeof detail.session!=='string'||detail.session!==computerDisplayNativeSession)return;
+    stopComputerDisplayView(false);
+    if(typeof detail.reason==='string'&&detail.reason&&detail.reason!=='closed')notice(detail.reason.slice(0,500),true);
+  });
   window.addEventListener('pagehide',computerSuspend);
   window.addEventListener('blur',()=>{stopComputerJog();window.MediaTouchBar?.suspend();});
   window.addEventListener('resize',()=>{const rail=computerNode('computer-workspace').querySelector('.computer-apps');if(computerMode==='computer'&&rail){computerRailScroll=rail.scrollLeft;revealComputerPreset(rail,computerActivePreset()?.id,true);}});

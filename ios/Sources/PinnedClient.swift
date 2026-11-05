@@ -9,6 +9,7 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
     private let pin: String
     private let token: String
     private let waitsForConnectivity: Bool
+    private let displayControlOnly: Bool
     private let lock = NSLock()
     private var receivedPin = ""
     private var pending: [Int: Pending] = [:]
@@ -33,8 +34,9 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
         let callbacks = OperationQueue(); callbacks.maxConcurrentOperationCount = 1
         return URLSession(configuration: configuration, delegate: self, delegateQueue: callbacks)
     }()
-    init(host: String, port: Int, pin: String, token: String = "", waitsForConnectivity: Bool = false) {
+    init(host: String, port: Int, pin: String, token: String = "", waitsForConnectivity: Bool = false, displayControlOnly: Bool = false) {
         self.host = host; self.port = port; self.pin = pin; self.token = token; self.waitsForConnectivity = waitsForConnectivity
+        self.displayControlOnly = displayControlOnly
         super.init()
     }
     var verifiedFingerprint: String { lock.lock(); defer { lock.unlock() }; return receivedPin }
@@ -42,8 +44,11 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
     @discardableResult
     func send(path: String, method: String, body: [String: Any], pairing: Bool = false, reply: @escaping Reply) throws -> URLSessionDataTask {
         guard HostPolicy.validHost(host), (1...65535).contains(port), HostPolicy.normalizedPin(pin) == pin,
+              (!displayControlOnly || !pairing),
               (pairing && path == "/api/pair" && method == "POST" && token.isEmpty) ||
-                (!pairing && pin.count == 64 && !token.isEmpty && HostPolicy.allowed(path, method: method)) else {
+                (!pairing && pin.count == 64 && !token.isEmpty && (displayControlOnly
+                    ? method == "POST" && ["/api/computer/display/stream/start", "/api/computer/display/stream/stop"].contains(path)
+                    : HostPolicy.allowed(path, method: method))) else {
             throw DeskError.message("This PC request is not allowed.")
         }
         var parts = URLComponents(); parts.scheme = "https"; parts.host = host; parts.port = port; parts.path = path
@@ -61,12 +66,13 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
             request.httpBody = data
         }
         if pairing { request.timeoutInterval = 12 }
+        if displayControlOnly { request.timeoutInterval = path.hasSuffix("/start") ? 12 : 3 }
         if path.hasSuffix("/frame") { request.timeoutInterval = 8 }
         let task = session.dataTask(with: request)
         lock.lock()
         guard pending.count < 16 else { lock.unlock(); throw DeskError.message("The PC is busy. Wait for the current action before trying again.") }
         pending[task.taskIdentifier] = Pending(task: task, path: path,
-            release: HostPolicy.allowedInBackground(path, body: body), reply: reply)
+            release: HostPolicy.allowedInBackground(path, body: body) || (displayControlOnly && path.hasSuffix("/stop")), reply: reply)
         lock.unlock()
         task.resume()
         if !pairing && HostPolicy.needsDispatchDeadline(path, method: method, body: body) {

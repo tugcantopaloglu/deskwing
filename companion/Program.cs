@@ -75,6 +75,7 @@ var inkWorkspace=new InkWorkspace(store.DirectoryPath);
 var computer=new ComputerCopilot(store.DirectoryPath,fastCommands.ExecuteConfigured);
 using var mediaSessions=new MediaSessions();
 using var extendedDisplay=new ExtendedDisplay();
+using var displayStream=new DisplayStream(extendedDisplay);
 await using var stateUpdates=new StateUpdates(engine);
 await using var fastControl=new FastControlServer(store,fastCommands,stateUpdates,cert,controlPort);
 var desktop=new DesktopPreferences(store.DirectoryPath);
@@ -106,7 +107,7 @@ app.Use(async (ctx,next)=>{
             if(ctx.Request.ContentLength>FastCommands.PenRequestBytes){ctx.Response.StatusCode=413;await ctx.Response.WriteAsJsonAsync(new{error="Keep pen packets below 16 KB."});return;}
             var size=ctx.Features.Get<IHttpMaxRequestBodySizeFeature>();if(size is not null&&!size.IsReadOnly)size.MaxRequestBodySize=FastCommands.PenRequestBytes;
         }
-        if(fastCommands.Maintenance&&ctx.Request.Method!="GET"&&ctx.Request.Path!="/api/hold"&&ctx.Request.Path!="/api/cancel"&&ctx.Request.Path!="/api/pen"){ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{error="The companion is restarting for an update."});return;}
+        if(fastCommands.Maintenance&&ctx.Request.Method!="GET"&&ctx.Request.Path!="/api/hold"&&ctx.Request.Path!="/api/cancel"&&ctx.Request.Path!="/api/pen"&&ctx.Request.Path!=DisplayStreamRoutes.StreamPath+"/stop"){ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{error="The companion is restarting for an update."});return;}
         try {await next(ctx);} catch(Exception ex) when(ex is not OutOfMemoryException) {
             ctx.Response.StatusCode=ex is BadHttpRequestException bad?bad.StatusCode:ex is JsonException or ArgumentException ? 400 : 409;
             await ctx.Response.WriteAsJsonAsync(new {error=ex is OperationCanceledException?"The action timed out. Check OBS and try again.":ex.Message});
@@ -150,6 +151,7 @@ app.MapPost("/api/admin/computer/display",async (JsonElement req,CancellationTok
     throw new ArgumentException("Choose create, remove, or share.");
 });
 app.MapPost("/api/computer/display/frame",(ExtendedDisplayFrameRequest req,CancellationToken ct)=>extendedDisplay.FrameAsync(req,ct));
+app.MapDisplayStream(displayStream,Principal,IsAuthorized,()=>!fastCommands.Maintenance&&!app.Lifetime.ApplicationStopping.IsCancellationRequested);
 app.MapGet("/api/board",async(CancellationToken ct)=>{
     var config=store.Config;var live=config.Pages.Any(p=>p.LiveScenes)?await engine.State():null;
     SoundpadLibraryResult? library=null;string? soundpadWarning=null;
@@ -214,7 +216,7 @@ app.MapPost("/api/pair",(PairRequest req)=>{
 });
 app.MapGet("/api/admin/info",()=>new {httpPort,httpsPort,controlPort,fingerprint,certificateCode=fingerprint[..24],addresses=NetworkAddresses(),lanAddresses=NetworkLanAddresses(),connectedTablets=fastControl.ConnectedDevices,dataDirectory=store.DirectoryPath,deviceRecoveryWarning=store.DeviceRecoveryWarning,devices=store.Devices.Select(d=>new{d.Id,d.Name,d.Added,lastSeen=store.LastSeen(d),fastConnected=fastControl.Connected(d.TokenHash)})});
 app.MapPost("/api/admin/pairing",()=>new{code=pairing.Open(),expiresIn=300,certificateCode=fingerprint[..24]});
-app.MapPost("/api/admin/revoke",(RevokeRequest req)=>{var owner=store.Devices.FirstOrDefault(device=>device.Id==req.Id)?.TokenHash;store.Revoke(req.Id);if(owner is not null){holds.ReleaseOwner(owner);fastCommands.RevokePen(owner);fastControl.Revoke(owner);}return Results.Ok(new{ok=true});});
+app.MapPost("/api/admin/revoke",(RevokeRequest req)=>{var owner=store.Devices.FirstOrDefault(device=>device.Id==req.Id)?.TokenHash;store.Revoke(req.Id);if(owner is not null){holds.ReleaseOwner(owner);fastCommands.RevokePen(owner);fastControl.Revoke(owner);displayStream.Revoke(owner);}return Results.Ok(new{ok=true});});
 app.MapGet("/api/admin/desktop",()=>new{settings=desktop.Get(),recoveryWarning=desktop.RecoveryWarning,startWithWindows=DesktopPreferences.StartsWithWindows(),usbStatus=usb.Status,update=updates.Status,installation=selfUpdate.Status,tabletUpdate=usbApkUpdate.Status});
 app.MapPost("/api/admin/desktop",(DesktopRequest req)=>{DesktopPreferences.Validate(req.Settings);if(req.StartWithWindows is not null)DesktopPreferences.SetStartup(req.StartWithWindows.Value);desktop.Save(req.Settings);return Results.Ok(new{ok=true});});
 app.MapPost("/api/admin/updates",async (CancellationToken ct)=>await updates.Check(true,ct));
@@ -271,6 +273,7 @@ app.MapPost("/api/admin/shutdown",(IHostApplicationLifetime lifetime)=>{lifetime
 var panel=$"http://127.0.0.1:{httpPort}/desktop.html"+(args.Contains("--after-update")?"?section=updates":"")+$"#admin={adminToken}";
 File.WriteAllText(Path.Combine(store.DirectoryPath,"admin-session.json"),JsonSerializer.Serialize(new{token=adminToken,httpPort,httpsPort},DataStore.Json));
 app.Lifetime.ApplicationStopping.Register(fastCommands.BeginShutdown);
+app.Lifetime.ApplicationStopping.Register(displayStream.Shutdown);
 app.Lifetime.ApplicationStarted.Register(()=>{
     try{fastControl.Start();}catch(SocketException){Console.Error.WriteLine("Fast control port is unavailable. HTTPS fallback remains active.");}
     Console.WriteLine($"Tablet Deck Studio is running. PC editor: http://127.0.0.1:{httpPort}");

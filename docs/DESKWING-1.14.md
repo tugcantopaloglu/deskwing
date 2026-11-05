@@ -6,7 +6,7 @@ DeskWing brings Stream Studio, Computer Copilot, Ink & notes, Pen tablet, and Se
 | --- | --- | --- |
 | See the same sketch or notes on the tablet and PC | **Ink & notes** | DeskWing's shared scratchpad, with local backup and PNG export. |
 | Draw inside Whiteboard on the web/in Teams, Photoshop, or another Windows pen-aware app | **Pen tablet** | The chosen Windows application's document; save it in that application. |
-| See a secondary Windows desktop on the tablet | **Second display** | A silent low-rate view; it does not forward input. |
+| See a secondary Windows desktop on the tablet | **Second display** | Native H.264 or an explicit JPEG compatibility view; neither forwards input. |
 
 This guide describes 1.14.0 development behavior. It does not certify a published release or every hardware/application workflow. Specific observed checks are recorded below. Existing executable, APK, package, and configuration identities retain their TabletDeck names so upgrades can keep the established installation and pairing.
 
@@ -134,7 +134,7 @@ The drawing keeps its existing 8:5 ratio so saved strokes do not distort. On a 1
 
 Choose Exit fullscreen to return. Escape closes the tools overlay first, then exits fullscreen. Workspace changes, backgrounding, and native tool dialogs leave immersive mode and cancel an unfinished stroke; completed ink is retained. Export remains available inside Show tools, including on narrow layouts. Open the tools overlay to check sharing or resolve a version conflict before assuming both devices show the same work.
 
-In the Android app, fullscreen also requests that the system status and navigation bars hide and removes their WebView padding. An edge swipe can reveal transient system bars. Android Back exits immersive mode first; opening native handwriting/export or backgrounding restores normal UI, and returning does not re-enter fullscreen automatically. The iOS host requests hidden status bars, home-indicator auto-hide, and full-view layout. Those are system-managed requests, not a permanent lockout of OS gestures. If native bar hiding fails, DeskWing keeps the app-filling canvas and shows a message. Verify the final immersive build on the actual device; the earlier physical fullscreen result predates this update.
+In the Android app, fullscreen also requests that the system status and navigation bars hide and removes their WebView padding. An edge swipe can reveal transient system bars. Android Back exits immersive mode first; opening native handwriting/export or backgrounding restores normal UI, and returning does not re-enter fullscreen automatically. The iOS host requests hidden status bars, home-indicator auto-hide, and layout to the app window's bounds; it does not force Split View or Stage Manager to occupy the whole display. Home and edge gestures remain available. These are system-managed requests, not a permanent lockout of OS gestures. If native bar hiding fails, DeskWing keeps the app-filling canvas and shows a message. Verify system-bar behavior on the actual device; a simulator policy test does not establish physical immersive behavior.
 
 ### Resize the PC and ink windows
 
@@ -150,17 +150,25 @@ The window needs the normal desktop/tray companion. A headless companion cannot 
 
 ## Draw directly in a Windows application
 
-**Pen tablet** sends pen input to Windows instead of adding strokes to the DeskWing scratchpad. It has no streamed image of the target app: look at the actual PC monitor while drawing on the tablet. A physical pen must be reported as pen input; finger and mouse events on this surface are ignored.
+**Pen tablet** sends pen input to Windows instead of adding strokes to the DeskWing scratchpad. During an active session, it shows a preview of the selected PC target behind the tablet input surface, so marks made in that application can return in the captured image. A physical pen must be reported as pen input; finger and mouse events on this surface are ignored. Save the resulting drawing in the Windows application.
 
 **Whiteboard compatibility, checked 5 November 2026:** Microsoft retired the standalone Windows, iOS, and Android Whiteboard apps on 16 October 2026. For work or school accounts, use Whiteboard on the web or in Teams. Select that Windows browser/Teams window as the pen target, open a test board, and choose its pen tool. Browser/Teams pen handling still needs a physical test; do not install the retired standalone app for this workflow. [Microsoft's retirement guidance](https://support.microsoft.com/en-us/whiteboard/retirement-standalone-microsoft-whiteboard-apps).
 
 1. Open the intended Windows drawing app and a disposable test document. Choose its drawing tool and, where the app offers an input mode, use its Windows Ink path. Use a brush configured to respond to pressure if you want to test pressure.
-2. Open **Pen tablet** in DeskWing on the PC. Under **Windows target**, choose a **Screen** or **Window** and select **Enable pen input**. If already enabled, **Use this target** applies a changed selection. This permission resets when the companion closes.
+2. Open **Pen tablet** in DeskWing on the PC. Under **Windows target**, choose a **Screen** or **Window** and select **Enable pen & live view**. If already enabled, **Use this target** applies a changed selection. This permission covers both pen input and the target preview, and resets when the companion closes.
 3. A Screen target maps the pad across that Windows display. A Window target maps across the application's client area, including any toolbars inside it; keep that window visible, uncovered, in the foreground, and at a stable size. Arrange the window and focus the drawing app before starting.
 4. On the paired tablet, choose **Pen tablet**, then **Refresh** if needed. Confirm the selected target and choose **Fullscreen** if desired. Tap **Start pen** in fullscreen, or **Start pen session** in the normal view, only when the PC target is ready.
-5. Draw with the pen and watch the Windows app. The tablet reports normalized coordinates and reported pressure; it does not verify the resulting brush mark. Use **Stop pen** when finished, and save the document in the Windows app. **Back to controls** leaves this workspace. **Disable pen input** on the PC revokes the enabled target.
+5. Draw with the pen and watch the target preview or Windows app. The preview reflects captured application pixels; the coordinate/pressure readings describe input and do not verify brush behavior. Use **Stop pen** when finished, and save the document in the Windows app. **Back to controls** leaves this workspace. **Disable pen & live view** on the PC revokes the enabled target.
 
-Outside fullscreen, the surface keeps the target's aspect ratio. Fullscreen defaults to **Fill tablet**, which maps the whole tablet area to the chosen PC target; shapes can stretch when those proportions differ. In **Show tools → Surface mapping**, choose **Match PC proportions** to preserve proportions with unused edges that do not control the pen. Changing mapping stops an active session; start again after the layout settles.
+The PC preview begins only with your active pen session for the PC-enabled target. Before Start, merely opening Pen tablet does not capture the PC. A Window target captures that window's client area, including its own toolbars, without substituting an unrelated desktop crop if capture fails. A Screen target shares the selected display and its visible windows. Choose the target according to the pixels you want to see and share.
+
+This is a silent JPEG preview at up to 12 frames per second, bounded to 1600 pixels on either side. It is separate from the pen-input requests and may update more slowly than the PC drawing application. Only one preview capture runs at a time; slow requests do not accumulate a frame queue. Some applications or protected content may produce unavailable or black images. Pen input can remain available when capture fails, so check the actual PC if the preview is unavailable. This is not a full-motion video or end-to-end latency promise.
+
+The target area reports **Loading the live PC view…**, **Live PC view**, or **PC view unavailable** with guidance. A capture error or an overlong frame clears the previous image, and fullscreen opens Show tools so the explanation is visible. Preview requests retry while the pen session remains active. An unsupported window may require choosing its Screen target on the PC, which changes the captured scope to that entire display.
+
+Stopping the session, backgrounding or leaving the workspace, or losing the connection clears the preview. Target and session checks discard frames captured after their authorization or geometry changes. DeskWing does not save preview frames to disk or keep a frame history; the drawing itself remains in the Windows application's document. Second display is a separate independent-monitor workflow with native H.264 viewing and its own four-frame-per-second JPEG compatibility option.
+
+Outside fullscreen, the surface keeps the target's aspect ratio. Fullscreen defaults to **Fill tablet**, which maps the whole tablet area to the chosen PC target; shapes can stretch when those proportions differ. In **Show tools → Surface mapping**, choose **Match PC proportions** to preserve proportions with unused edges that do not control the pen. The preview follows the same mapping as the input area. Changing mapping stops an active session and clears its preview; start again after the layout settles.
 
 Hover, contact, pressure, tilt, barrel-button, and eraser information are forwarded when the tablet exposes them. The Windows implementation creates a synthetic pen with pressure values from 0 to 1024; that numeric range does not establish the pen's physical sensitivity or guarantee a target app's pressure response. Unsupported hardware or application settings can produce uniform strokes. This is a Windows Ink input path, not a bundled Wintab tablet driver.
 
@@ -174,7 +182,7 @@ Immersive fullscreen removes the heading, footer, reserved toolbars, and outer p
 
 The same native system-bar behavior applies as in Ink & notes: Android Back/native tools/backgrounding restore normal UI, and a new input session must be started deliberately. A native bar-hiding error leaves the full-window surface available with explanatory guidance in Show tools.
 
-Whiteboard on the web/in Teams and Photoshop are intended use cases, not certified outcomes from source or automated tests. Validate the exact Windows build, tablet/WebView, stylus, browser/app version, account access, input settings, and brush. On 5 November 2026, the user drew with the Xiaomi tablet and pen through the Windows pen receiver: test strokes carried varying pressure and tilt, and the user reported pressure and fullscreen working. That receiver test does not establish Whiteboard/Photoshop delivery, complete palm rejection, or the later immersive layout changes.
+Whiteboard on the web/in Teams and Photoshop are intended use cases, not certified outcomes from source or automated tests. Validate the exact Windows build, tablet/WebView, stylus, browser/app version, account access, input settings, and brush. On 5 November 2026, the user drew with the Xiaomi tablet and pen through the Windows pen receiver: test strokes carried varying pressure and tilt, and the user reported pressure and fullscreen working. After the later input update, the user confirmed that the drawing delay was fixed. These observations do not establish a latency figure, edge alignment, Whiteboard/Photoshop delivery, complete palm rejection, or the new preview behavior.
 
 ## Convert handwriting to text on Android
 
@@ -186,13 +194,41 @@ Handwriting is text entry, not automatic recognition of the scratchpad drawing. 
 
 **Privacy:** DeskWing does not send these strokes to its own remote OCR service. The installed keyboard performs recognition under that keyboard vendor's privacy policy, permissions, and settings. Its offline support is not guaranteed. Finished notes can synchronize to the paired PC. Choose and configure a keyboard appropriate for the text you enter. The exported PNG destination may also be a cloud-backed provider if you select one in Android's picker. The iOS source uses native text entry/Scribble; a simulator build does not verify real Pencil or handwriting behavior on an iPad.
 
-## Use Second display within its limits
+## Use Second display
 
-Second display exposes the existing optional independent-monitor workflow. It requires a compatible virtual display driver already installed on Windows. The local PC console creates the monitor after explicit installed-driver acceptance, and PC sharing must be enabled before the tablet can receive frames. If Windows has the monitor disconnected or duplicated, use Windows display settings to make it an extended, nonoverlapping desktop.
+Second display creates an independent Windows desktop and shares only that owned extra monitor. It requires a compatible virtual display driver already installed on the PC, explicit driver acceptance, and tablet-sharing permission. DeskWing does not install the driver or silently replace the extra monitor with a physical-screen capture.
 
-Move a reference window or tool panel onto that monitor using Windows. The tablet view is **silent JPEG capture at up to four frames per second**, with 640/960/1280-pixel capture widths and a 384 KiB per-frame bound. The monitor's Windows refresh rate does not increase this transport rate. Busy frame requests are dropped rather than queued. It is suitable for relatively static panels and references; it is not a full-motion video transport.
+1. On the PC, open **Second display** and choose **Check display**. Review the installed driver's identity.
+2. When creating the monitor, choose **Resolution**: 1280 × 800, 1600 × 900, or 1920 × 1080. Choose **Windows display refresh rate**: 60, 90, 120, 144, 165, or 240 Hz, subject to driver/Windows support.
+3. Accept use of that installed driver and sharing of everything on the extra display, then choose **Create independent display**. If the monitor already exists, use **Allow tablet sharing**. Arrange it as an extended, nonoverlapping desktop in Windows and move the desired application windows onto it.
+4. In the tablet app, open Second display, choose **Refresh rate → 60 Hz** or **Match tablet**, then choose **Start second display**. The native viewer fits the extra desktop without stretching its proportions, keeps unused edges blank, and leaves **Exit display** available.
 
-There is no touch, pen, or pointer forwarding from this display view into Windows, and no audio transmission. Pen tablet is a separate explicitly started input workspace; it does not turn this JPEG view into an interactive remote desktop. Protected content may appear black. The app does not install a driver, elevate, or silently use a physical monitor as a fallback. Pause the tablet view when finished; turn off PC sharing to revoke new frames, or stop the display to remove the monitor owned by the current session. See [Extended display](EXTENDED-DISPLAY.md) for driver, topology, and cleanup details.
+There are two explicit viewing paths:
+
+| View | What it sends | Where it works |
+| --- | --- | --- |
+| **Start second display** | A silent H.264 stream decoded by the native tablet viewer; target rate is 60 Hz or the current tablet rate. | A supported native host and decoder, with a sufficiently fast Windows source display. |
+| **Open compatibility preview** | Silent JPEG still images at up to four frames per second. | The browser or native app when the slower preview is useful. |
+
+A failed native start does not silently switch to JPEG. Choose Open compatibility preview yourself if needed. Its capture widths remain 640/960/1280 pixels, with a 384 KiB per-JPEG limit; the current view requests 960 pixels. Increasing Windows refresh rate does not raise this fallback's four-frame-per-second transport limit.
+
+### Choose and verify the refresh rate
+
+**Match tablet** uses the tablet's reported current refresh rate, not its advertised maximum. The interface shows both separately. On the user's tablet, ADB reported 120 Hz current and 165 Hz maximum; this establishes a device capability reading, not a video-playback result. At a current rate of 120 Hz, Match tablet requests 120 Hz.
+
+The extra Windows monitor's actual rate must be at least the selected tablet target. A 60 Hz Windows source cannot supply a 120 Hz match request. If necessary, stop viewing and recreate the extra display on the PC at a sufficient rate; removing it moves its windows back to remaining displays. Android stops a Match session when the tablet's current refresh changes materially and requires a fresh Start. On iOS, watch the screen-cadence counter and restart to choose a newly measured target if conditions change.
+
+Read the counters while content is moving. Android distinguishes **fps shown**, **fps received**, target Hz, and tablet Hz, with a **below target** indication. Its shown count comes from decoder rendering callbacks. The iOS viewer reports **fps received** and screen Hz; these do not measure displayed video frames. A configured target is not an achieved frame rate, and these counters do not measure end-to-end latency.
+
+Windows captures the owned monitor and uses its built-in Media Foundation H.264 encoder. The current encoder is software-based; no GPU-encoding or sustained 60+ fps result is promised. PC capture/encoding, the connection, tablet decoder, resolution, power/thermal state, and display mode can limit delivery. Android checks hardware H.264 decoding at the chosen resolution/rate; try 60 Hz or a smaller PC display when the requested format is unsupported. Protected content may be black.
+
+### Stop, privacy, and limits
+
+Only one native display stream runs at a time. It is separate from pen-input and control requests and does not build an unlimited queue of frames. Everything visible on the shared extra monitor can reach the paired viewer. This feature supplies neither audio nor touch, pen, or pointer forwarding; **Pen tablet** remains the separate workspace for drawing into a selected Windows target.
+
+**Exit display** closes the viewer while leaving the Windows monitor available. Backgrounding, disconnection, revoked pairing/sharing, changed monitor geometry/rate, decoder failure, or companion shutdown ends viewing; it does not resume automatically. **Pause tablet sharing** stops sharing, and **Remove extra display** removes the owned monitor. See [Extended display](EXTENDED-DISPLAY.md) for driver, topology, and cleanup details.
+
+The new H.264 path still requires its final build and physical-device validation. The tablet's measured refresh capability and an encoder-only timing check do not establish sustained 60+ fps capture-to-tablet playback.
 
 ## Hardware rehearsal checklist
 
@@ -212,14 +248,15 @@ Record the exact build, PC/Windows version, tablet model, Android/WebView versio
 - [ ] Resize and maximize both the main PC and separate DeskWing Ink windows. Confirm the same shared ink, no clipped controls at the minimum size, and correct close/reopen behavior without stopping the companion.
 - [ ] In a disposable Whiteboard web/Teams board (work or school account) or Photoshop document, choose the exact Windows browser/app target, enable input, enter tablet fullscreen, focus the target, and start explicitly. Verify coordinate mapping, slow/fast strokes, pressure-sensitive brush response, tilt, eraser, and barrel-button behavior supported by the hardware/app.
 - [ ] During a Windows pen session, compare Fill tablet and Match PC proportions, move/resize or cover the target window, change focus, disconnect, lock/background the tablet, change fullscreen, and stop input. Confirm release, no delayed/replayed strokes, and explicit restart. Test a second controller's inability to take an active session.
+- [ ] Check the selected-target preview at the center and all edges with both mappings. Confirm that window capture shows only the selected client area and Screen capture shows the intended display. Test an unavailable/black capture, a slow connection, Stop, backgrounding, target changes, and reconnects; confirm stale pixels clear and capture never starts without an active session. Record preview freshness separately from pen-input response.
 - [ ] Try handwriting in Notes and another eligible field with the actual keyboard/language. Confirm Use text, Cancel, Use keyboard, and unsupported-keyboard fallback. Test offline behavior only if an offline claim is needed, with that keyboard's configuration recorded.
 - [ ] Check readable state and controls at desktop 1280×720/900×620, tablet 1280×800/800×600, and 390px narrow fallback, including keyboard focus and reduced motion.
-- [ ] If using Second display, verify its distinct Windows monitor, explicit sharing, real tablet pixels, pause/resume, sharing revocation, and monitor removal. Confirm silent low-rate viewing and the absence of touch forwarding.
+- [ ] For Second display, verify the distinct Windows monitor and sharing permission. Compare 60 Hz and Match tablet with moving content, recording Windows source Hz, tablet current/max Hz, received fps, and Android shown fps where available. Test explicit JPEG compatibility viewing, exit/background/restart, sharing revocation, topology/rate changes, and monitor removal. Confirm no audio or input forwarding.
 
 ## Platform and release status
 
-The source brand/version is DeskWing 1.14.0. `TabletDeck-Companion.exe`, `TabletDeck-Studio.apk`, Android package `app.tabletdeck.studio`, and `%LOCALAPPDATA%\TabletDeck` retain their compatible identities. Android uses version code 17. Rebuild and install a candidate containing the latest immersive UI/native bar handling and separate Windows ink window before rehearsing those changes; an earlier 1.14 installation does not establish that they are present. Signed build, installation, and device/application behavior are separate pieces of evidence.
+The source brand/version is DeskWing 1.14.0. `TabletDeck-Companion.exe`, `TabletDeck-Studio.apk`, Android package `app.tabletdeck.studio`, and `%LOCALAPPDATA%\TabletDeck` retain their compatible identities. Android uses version code 17. Rebuild and install a candidate containing native H.264 Second display before rehearsing it; an earlier 1.14 installation does not establish that this later change is present. Signed build, installation, and device/application behavior are separate pieces of evidence.
 
-Hosted macOS validation passed for commit `b683825b076bdf41afbf5719b770118453cff6d1`: Xcode 26.6 built the unsigned Debug iOS app, and all eight tests passed on the iPad Pro 13-inch (M5), iPadOS 26.4.1 simulator. The later native immersive changes require another run; this baseline does not verify their final build. Physical-iPad installation, Pencil/Scribble, signing, account flows, and store approval are separate checks. [Simulator job and logs](https://github.com/tugcantopaloglu/tablet-deck-studio/actions/runs/42082154607/job/127437726088).
+Windows regression and the unsigned iOS simulator build passed at commit `a9a85c93d01b6d03d79648644548431a53ee0efd`, which includes the selected-target pen preview. That result does not establish physical preview alignment/freshness and predates the new high-refresh display transport. The H.264 path needs its own final build and device rehearsal. Physical-iPad installation, Pencil/Scribble, live connection, signing, account flows, and store approval remain separate checks. [Windows and iOS validation run](https://github.com/tugcantopaloglu/tablet-deck-studio/actions/runs/42094855827).
 
 App Store/Play Store submission materials and account/signing requirements remain in [the separate store preparation guide](STORE-RELEASE.md); this user guide does not imply store publication or approval.

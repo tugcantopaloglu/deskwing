@@ -62,6 +62,11 @@ typography:
     fontFamily: "Manrope, system-ui, sans-serif"
     fontSize: "13px"
     fontWeight: 700
+  display-choice:
+    fontFamily: "Manrope, system-ui, sans-serif"
+    fontSize: "14px"
+    fontWeight: 700
+    lineHeight: 1.6
 rounded:
   badge: "6px"
   navigation: "8px"
@@ -153,6 +158,30 @@ components:
     textColor: "{colors.ink}"
     rounded: "{rounded.control}"
     padding: "14px"
+  pc-preview-status:
+    textColor: "{colors.secondary}"
+    typography: "{typography.help}"
+  pc-preview-error:
+    textColor: "{colors.amber}"
+    typography: "{typography.help}"
+  display-rate-select:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+    typography: "{typography.display-choice}"
+    padding: "8px 12px"
+  display-start:
+    backgroundColor: "{colors.cyan}"
+    textColor: "{colors.primary-ink}"
+    rounded: "{rounded.control}"
+    typography: "{typography.label}"
+    padding: "10px 18px"
+  display-compatibility:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.control}"
+    typography: "{typography.label}"
+    padding: "10px 18px"
 ---
 
 # Design System: DeskWing
@@ -234,6 +263,8 @@ Pen tablet also removes permanent chrome in fullscreen. Its default Fill tablet 
 
 Both native PC windows use resizable/maximizable borders and a 620×480 minimum window size. Main DeskWing defaults to 1280×860; DeskWing Ink defaults to 1000×740. The separate ink view keeps the ordinary Windows caption and border, removes the application sidebar/header, and fits the paper into the full client area with zero outer padding. Floating tools and optional notes overlays preserve drawing space at smaller window sizes. Window sizing is independent of the shared document and is not persisted across newly created windows.
 
+Second display setup keeps resolution and refresh selectors beside their labels, with a wrapping 12px gap and 48px minimum control height. Start and compatibility-view buttons use 44px minimum height and 13px labels. The native player fits the source aspect ratio within a black video surface; its exit and telemetry stay visible in native overlays. These native controls use platform fonts, documented separately from the bundled web typography.
+
 Primary tablet and ordinary form controls use a 48px minimum height. New editor, pen, and live-filter controls commonly use 44px. Desktop sidebar controls use 42px at normal widths and 44px in the narrow layout; compact editor selection/drag affordances are smaller supporting targets. Preserve these distinctions instead of claiming every target is 44px.
 
 Spacing tokens record recurring observed values, not an enforced mathematical scale. Keep aligned edges and reserve the largest gaps for task boundaries. Test 1280×720 and 900×620 desktop layouts, 1280×800 and 800×600 tablet layouts, and the 390px narrow fallback.
@@ -290,13 +321,17 @@ DeskWing Ink opens directly onto the fitted paper, with floating **Show tools** 
 
 Visually distinguish the live Windows input surface from the shared paper document. Show the selected display/application, readiness, and whether a pen session is active. Start/Stop and the fullscreen exit must remain discoverable. Pressure and other telemetry describe input samples; they are not evidence that a specific target app painted a stroke. A change of focus, geometry, connection, or lifecycle must visibly end the current session when the input contract requires it.
 
-The normal input pad uses the regular slate surface within an inset field-colored stage, fits the chosen target's aspect ratio, and adds a cyan border for an active connection. A small outlined cyan cursor becomes filled during contact. Keep its explanatory hint distinct from real app pixels: this mode does not show a target-app video.
+The normal input pad uses the regular slate surface within an inset field-colored stage, fits the chosen target's aspect ratio, and adds a cyan border for an active connection. During an active pen session, the selected target's JPEG preview sits behind the input surface and follows the same geometry as its pen coordinates. A small outlined cyan cursor becomes filled during contact. Keep loading, unavailable, and stopped states explicit, and clear obsolete frames. Preview pixels are application content, not sample artwork or evidence that every reported input sample produced a mark.
+
+The preview image fills the pad with `object-fit: fill` and does not receive pointer events. The target/status area shows **Loading the live PC view…**, **Live PC view**, or an unavailable explanation. Preview errors use amber text and open the tools overlay in fullscreen; input can remain active when capture fails. PC enable/disable labels name both **pen & live view** so the shared pixels are part of the stated action.
 
 Immersive fullscreen removes stage padding, borders, corner radius, heading, and footer. Floating **Show tools**, **Start pen**/**Stop pen**, and **Exit fullscreen** remain at least 44px. Show tools reveals target/status/mapping details in a bounded overlay; Back to controls remains in the normal view. Fill tablet is the immersive default; Match PC proportions is an explicit alternative. Entering/leaving fullscreen or changing mapping ends the old session before using new coordinates.
 
 ### Second display
 
-Give the shared desktop area room and keep its lifecycle/sharing state legible. Its visual presentation must not imply full-motion playback, transmitted audio, or input forwarding by the display view itself. The existing display transport is a silent bounded JPEG view. Windows pen input is a separate explicitly started workspace; do not make a display screenshot look interactive merely because that other mode exists.
+Give the shared desktop area room and keep its lifecycle/sharing state legible. **Start second display** is the primary action for the native H.264 viewer; **Open compatibility preview** is a quiet, explicit alternative for bounded JPEG viewing at up to 4 fps. Do not silently substitute the preview after a failed native start. **Refresh rate** offers **60 Hz** and **Match tablet**, with current and maximum tablet refresh reported separately. On the PC, **Windows display refresh rate** configures the source monitor; it is not a delivery counter.
+
+Keep selected target Hz, source Hz, device Hz, and measured received/shown fps distinct in wording. Android reports decoder-rendered **fps shown** and **fps received**; iOS reports received fps and screen cadence, not displayed-video fps. **Exit display** must stay reachable. Native overlays use black video framing and platform controls; the web setup retains the incumbent Manrope, slate surfaces, cyan primary action, and visible focus. Neither display path supplies audio or forwards touch/pen input. Pen tablet remains a separate workspace with its own preview and input authorization.
 
 ## Do's and Don'ts
 
@@ -315,4 +350,4 @@ Give the shared desktop area room and keep its lifecycle/sharing state legible. 
 - Don't make editor preview keys perform live actions.
 - Don't hide save failures, draft conflicts, or source availability behind a toast alone.
 - Don't decorate the canvas with sample ink that could be mistaken for a saved drawing.
-- Don't visually promise full palm rejection, built-in handwriting recognition, universal drawing-app support, or a full-motion second display.
+- Don't visually promise full palm rejection, built-in handwriting recognition, universal drawing-app support, or a guaranteed delivered display frame rate.

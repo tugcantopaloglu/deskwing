@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-05T18:39:22.462Z",
+  "generatedAt": "2026-11-05T19:47:12.071Z",
   "title": "Design System: DeskWing",
   "extensions": {
     "sourceTokens": {
@@ -74,6 +74,12 @@
           "fontFamily": "Manrope, system-ui, sans-serif",
           "fontSize": "13px",
           "fontWeight": 700
+        },
+        "display-choice": {
+          "fontFamily": "Manrope, system-ui, sans-serif",
+          "fontSize": "14px",
+          "fontWeight": 700,
+          "lineHeight": 1.6
         }
       },
       "rounded": {
@@ -183,6 +189,35 @@
           "textColor": "{colors.ink}",
           "rounded": "{rounded.control}",
           "padding": "14px"
+        },
+        "pc-preview-status": {
+          "textColor": "{colors.secondary}",
+          "typography": "{typography.help}"
+        },
+        "pc-preview-error": {
+          "textColor": "{colors.amber}",
+          "typography": "{typography.help}"
+        },
+        "display-rate-select": {
+          "backgroundColor": "{colors.surface}",
+          "textColor": "{colors.ink}",
+          "rounded": "{rounded.control}",
+          "typography": "{typography.display-choice}",
+          "padding": "8px 12px"
+        },
+        "display-start": {
+          "backgroundColor": "{colors.cyan}",
+          "textColor": "{colors.primary-ink}",
+          "rounded": "{rounded.control}",
+          "typography": "{typography.label}",
+          "padding": "10px 18px"
+        },
+        "display-compatibility": {
+          "backgroundColor": "{colors.surface}",
+          "textColor": "{colors.ink}",
+          "rounded": "{rounded.control}",
+          "typography": "{typography.label}",
+          "padding": "10px 18px"
         }
       }
     },
@@ -200,7 +235,16 @@
       "companion/wwwroot/pen-tablet.js",
       "companion/wwwroot/ink-window.css",
       "companion/wwwroot/ink-window.js",
-      "companion/DesktopConsole.cs"
+      "companion/DesktopConsole.cs",
+      "companion/PenPreview.cs",
+      "companion/WindowsPen.cs",
+      "companion/wwwroot/computer.css",
+      "companion/wwwroot/computer.js",
+      "companion/ExtendedDisplay.cs",
+      "companion/DisplayStream.cs",
+      "companion/WindowsDisplayEncoder.cs",
+      "android/src/app/tabletdeck/NativeDisplayVideo.java",
+      "ios/Sources/DisplayVideoController.swift"
     ],
     "colorMeta": {
       "canvas": {
@@ -896,6 +940,36 @@
             ]
           },
           "exit": "Exit fullscreen remains floating; Back to controls is in normal view. Fullscreen/geometry/mapping changes end active pen session; restart explicitly."
+        },
+        "preview": {
+          "image": {
+            "position": "absolute",
+            "inset": "0",
+            "display": "block",
+            "width": "100%",
+            "height": "100%",
+            "objectFit": "fill",
+            "pointerEvents": "none",
+            "userSelect": "none",
+            "layer": "Behind hint and pen cursor, inside mapped pad.",
+            "ariaHidden": true
+          },
+          "status": {
+            "fontSize": "13px",
+            "lineHeight": 1.6,
+            "margin": "5px 0 0",
+            "color": "{colors.secondary}",
+            "errorColor": "{colors.amber}",
+            "role": "status"
+          },
+          "geometry": "Image and pen use the same normalized pad bounds; Fill tablet can stretch both, Match PC proportions preserves the target ratio.",
+          "states": [
+            "idle",
+            "loading",
+            "live",
+            "error"
+          ],
+          "clear": "Removes image src and hides it on stop, lifecycle interruption, capture/validation/decode failure, or soft timeout."
         }
       },
       "desktopWindows": {
@@ -984,6 +1058,62 @@
         "minimizable": true,
         "dpiScaling": true,
         "geometryPersistence": false
+      },
+      "secondDisplay": {
+        "webChoices": {
+          "display": "flex",
+          "flexWrap": "wrap",
+          "alignItems": "center",
+          "gap": "12px",
+          "margin": "16px 0",
+          "labelColor": "{colors.ink}",
+          "labelWeight": 700,
+          "select": {
+            "minWidth": "150px",
+            "maxWidth": "100%",
+            "minHeight": "48px",
+            "padding": "8px 12px",
+            "border": "1px solid var(--outline)",
+            "borderRadius": "12px",
+            "background": "{colors.surface}",
+            "color": "{colors.ink}",
+            "fontFamily": "Manrope, system-ui, sans-serif",
+            "fontSize": "14px",
+            "fontWeight": 700,
+            "lineHeight": 1.6
+          }
+        },
+        "webActions": {
+          "display": "flex",
+          "flexWrap": "wrap",
+          "gap": "10px",
+          "margin": "12px 0",
+          "minHeight": "44px",
+          "fontSize": "13px",
+          "padding": "10px 18px"
+        },
+        "help": {
+          "fontSize": "13px",
+          "lineHeight": 1.6,
+          "color": "{colors.secondary}",
+          "maxWidth": "75ch",
+          "margin": "8px 0 16px"
+        },
+        "nativeVideo": {
+          "fit": "Preserve source aspect ratio, center within black surface, leave unused edges.",
+          "inputForwarding": false,
+          "audio": false,
+          "exitLabel": "Exit display"
+        },
+        "compatibilityImage": {
+          "display": "block",
+          "width": "100%",
+          "height": "auto",
+          "minHeight": "100px",
+          "maxHeight": "calc(100dvh - 210px)",
+          "objectFit": "contain",
+          "background": "{colors.canvas}"
+        }
       }
     },
     "groups": [
@@ -1054,9 +1184,11 @@
           "pen-input-pad",
           "button-primary",
           "button-danger",
-          "pen-input-tools"
+          "pen-input-tools",
+          "pc-preview-status",
+          "pc-preview-error"
         ],
-        "behavior": "PC selects a display/window; active session is explicit; fullscreen and interruptions stop input. No target-app image stream."
+        "behavior": "PC enables a selected display/window for pen and live view. An explicit active owner session sends input and requests a bounded JPEG target preview; interruptions stop input and clear the preview."
       },
       {
         "name": "Dedicated PC ink window",
@@ -1070,6 +1202,21 @@
           "ink-window-tool-drawer"
         ],
         "behavior": "Independent native sizing and ordinary Windows caption/border; shared ink document; canvas fills client area with floating tools and optional notes overlays; close only this view."
+      },
+      {
+        "name": "Second display",
+        "sources": [
+          "computer.css",
+          "computer.js",
+          "NativeDisplayVideo.java",
+          "DisplayVideoController.swift"
+        ],
+        "components": [
+          "display-rate-select",
+          "display-start",
+          "display-compatibility"
+        ],
+        "behavior": "Native H.264 uses explicit Start and 60 Hz/current-tablet Match. JPEG ≤4 fps remains a separately selected compatibility view; target Hz and measured video counters stay distinct."
       }
     ],
     "inkStates": {
@@ -1096,9 +1243,9 @@
     },
     "penInputStates": {
       "target": "Windows target",
-      "enable": "Enable pen input",
+      "enable": "Enable pen & live view",
       "retarget": "Use this target",
-      "disable": "Disable pen input",
+      "disable": "Disable pen & live view",
       "start": "Start pen session",
       "stop": "Stop pen",
       "fullscreen": [
@@ -1113,15 +1260,216 @@
       "mapping": [
         "Fill tablet",
         "Match PC proportions"
-      ]
+      ],
+      "preview": {
+        "idle": "The live PC view appears after you start a pen session.",
+        "loading": "Loading the live PC view…",
+        "live": "Live PC view",
+        "unavailable": "PC view unavailable.",
+        "slow": "The PC view is taking too long. Check the PC connection.",
+        "errorTreatment": "Clear obsolete image, show amber status and open fullscreen tools; input may remain active."
+      },
+      "dispatch": {
+        "minimumSpacingMs": 8,
+        "maximumDispatchRateHz": 125,
+        "separateFromPreview": true,
+        "meaning": "Client request scheduling limit, not an end-to-end stroke latency measurement or a guaranteed sample rate."
+      }
     },
     "nativeFullscreen": {
       "route": "POST /local/fullscreen {enabled:boolean}",
       "android": "Hides status/navigation bars with transient system-bar swipe behavior; removes WebView insets while enabled. Back/native tools/background restore previous normal UI; no automatic re-entry.",
-      "ios": "Requests hidden status bar, home-indicator auto-hide, and full-view constraints. Native tools/background/disconnect/navigation/renderer restart restore normal layout.",
+      "ios": "Requests hidden status bar, home-indicator auto-hide, and window-bounds layout. System Home/edge gestures remain; Split View/Stage Manager are not forced to fill the display. Exit/mode exit, resign-active/background, native tools, disconnect/re-pair, navigation/reload, or renderer termination restore safe-area layout.",
       "failure": "App-filling canvas remains with visible warning when system bars cannot be hidden.",
       "lifecycle": "Native deskwing-fullscreen event carries enabled/reason; disabled event restores the web layout and ends pen input where applicable.",
-      "verification": "New immersive build requires fresh device checks. Earlier physical pen/fullscreen test and earlier iOS simulator build do not certify this changed UI."
+      "verification": "Windows and unsigned iOS simulator CI passed at a9a85c93d01b6d03d79648644548431a53ee0efd. Physical iPad/system-bar behavior still needs device validation. The later high-refresh display transport requires its own final checks."
+    },
+    "penPreview": {
+      "source": "companion/PenPreview.cs",
+      "route": "POST /api/pen/frame",
+      "authorization": "Same current owner, active lease, enabled target, generation, and geometry; checked before and after capture. No capture merely from opening the workspace.",
+      "transport": "Silent JPEG data URL, one in-flight capture; independent of pen-input requests.",
+      "minimumIntervalMs": 84,
+      "advertisedMaximumFps": 12,
+      "maxImageDimensionPx": 1600,
+      "maximumDataUrlLength": 2097152,
+      "maximumJpegBytes": 1572846,
+      "serverResponseTimeoutMs": 2000,
+      "frontendSoftTimeoutMs": 1500,
+      "frontendTransportTimeoutMs": 5000,
+      "windowCapture": "Selected client area via PrintWindow; no fallback to desktop cropping.",
+      "displayCapture": "Explicitly selected display, including visible windows.",
+      "retention": "No disk frame storage or saved frame history.",
+      "failure": "Unsupported/protected targets may fail or be blank. No guaranteed visual latency or full-motion playback.",
+      "verification": "Windows and iOS CI passed at a9a85c93d01b6d03d79648644548431a53ee0efd. Physical selected-target preview alignment/freshness remain unverified; pressure/delay observations do not establish them."
+    },
+    "nativeDisplayPresentation": {
+      "android": {
+        "videoBackground": "#000000",
+        "controlsBackgroundArgb": "#dd101318",
+        "controlsPaddingDp": {
+          "left": 12,
+          "top": 4,
+          "right": 4,
+          "bottom": 4
+        },
+        "controlsMarginsDp": {
+          "left": 12,
+          "top": 12,
+          "right": 12,
+          "bottom": 0
+        },
+        "cutoutHandling": "Margins expand to reported safe insets.",
+        "statistics": {
+          "font": "Android platform TextView",
+          "fontSizeSp": 13,
+          "textColor": "#ffffff",
+          "maximumLines": 2,
+          "endMarginDp": 12
+        },
+        "exit": {
+          "label": "Exit display",
+          "font": "Android platform Button default",
+          "heightDp": 48,
+          "minWidthDp": 112
+        },
+        "counters": [
+          "fps shown (decoder rendering callbacks)",
+          "fps received",
+          "target Hz",
+          "tablet Hz",
+          "below target"
+        ]
+      },
+      "ios": {
+        "videoBackground": "#000000",
+        "videoGravity": "resizeAspect",
+        "exit": {
+          "label": "Exit display",
+          "background": {
+            "white": 0.12,
+            "alpha": 0.95
+          },
+          "textColor": "#ffffff",
+          "cornerRadiusPt": 12,
+          "font": "system",
+          "fontSizePt": 15,
+          "fontWeight": "semibold",
+          "topSafeInsetPt": 12,
+          "trailingSafeInsetPt": 12,
+          "minWidthPt": 116,
+          "heightPt": 44
+        },
+        "statistics": {
+          "background": {
+            "white": 0.08,
+            "alpha": 0.85
+          },
+          "textColor": "#ffffff",
+          "cornerRadiusPt": 8,
+          "font": "monospacedDigitSystem",
+          "fontSizePt": 12,
+          "fontWeight": "medium",
+          "maximumLines": 3,
+          "leadingSafeInsetPt": 12,
+          "trailingSafeInsetPt": 12,
+          "gapBelowExitPt": 8
+        },
+        "counters": [
+          "fps received",
+          "screen Hz (display-link cadence)",
+          "target Hz",
+          "source Hz",
+          "frames dropped"
+        ],
+        "measurementLimit": "Does not measure presented video-frame rate."
+      }
+    },
+    "secondDisplay": {
+      "sourceSelection": "Only the current owned independent nonoverlapping virtual monitor; never a physical-monitor fallback.",
+      "native": {
+        "codec": "H.264",
+        "transport": "Dedicated persistent pinned HTTPS response with owner-bound stream lease.",
+        "startLabel": "Start second display",
+        "defaultRefreshMode": "60",
+        "refreshModes": [
+          {
+            "value": "60",
+            "label": "60 Hz"
+          },
+          {
+            "value": "match",
+            "label": "Match tablet",
+            "meaning": "Rounded reported current refresh, not maximum."
+          }
+        ],
+        "sourceRateRequired": true,
+        "sourceRateToleranceHz": 0.1,
+        "allowedRefreshRangeHz": {
+          "min": 60,
+          "max": 240
+        },
+        "pcRefreshOptionsHz": [
+          60,
+          90,
+          120,
+          144,
+          165,
+          240
+        ],
+        "resolutions": [
+          {
+            "width": 1280,
+            "height": 800
+          },
+          {
+            "width": 1600,
+            "height": 900
+          },
+          {
+            "width": 1920,
+            "height": 1080
+          }
+        ],
+        "encoder": "Built-in software Media Foundation H.264; GDI capture.",
+        "gpuEncoding": false,
+        "androidDecoder": "Hardware H.264 with resolution/rate capability check.",
+        "iosDecoder": "Platform sample-buffer video pipeline.",
+        "maximumAccessUnitBytes": 2097152,
+        "unclaimedLeaseMs": 5000,
+        "writeTimeoutMs": 2000,
+        "streamCount": 1,
+        "queue": "One capture/encoder worker; bounded writes and backpressure; no growing frame queue."
+      },
+      "compatibility": {
+        "label": "Open compatibility preview",
+        "codec": "JPEG",
+        "maxFps": 4,
+        "captureWidths": [
+          640,
+          960,
+          1280
+        ],
+        "currentUiWidth": 960,
+        "maxJpegBytes": 393216,
+        "automaticFallback": false
+      },
+      "lifecycle": "Explicit foreground start. Exit/background, disconnection, revoke/share-off, source geometry/rate changes, decoder failure, or shutdown end viewing; no automatic resume.",
+      "stopMeaning": "Exit leaves the owned Windows monitor available; Remove extra display removes it.",
+      "audio": false,
+      "inputForwarding": false,
+      "retention": "No streamed frame files saved to disk.",
+      "verification": {
+        "tabletCapability": "ADB reported 120 Hz current and 165 Hz maximum on the user's tablet; capability reading only.",
+        "performance": "New H.264 integration build and sustained 60+ fps device rehearsal pending. Encoder-only timing excludes capture, network, and tablet presentation."
+      }
+    },
+    "validationBaseline": {
+      "commit": "a9a85c93d01b6d03d79648644548431a53ee0efd",
+      "url": "https://github.com/tugcantopaloglu/tablet-deck-studio/actions/runs/42094855827",
+      "windowsRegression": "success",
+      "iosSimulator": "success",
+      "scope": "Includes selected-target pen preview; predates native H.264 Second display."
     }
   },
   "components": [
@@ -1209,9 +1557,9 @@
       "name": "Windows pen input surface",
       "kind": "custom",
       "refersTo": "pen-input-pad",
-      "description": "A mapped input surface with target and explicit session controls; no target-app screenshot.",
-      "html": "<section class=\"ds-pen-input\"><div class=\"ds-pen-target\"><strong>Selected Windows window</strong><p>Start a pen session when your Windows app is ready.</p></div><div class=\"ds-pen-actions\"><button class=\"ds-pen-start\">Start pen session</button><button class=\"ds-pen-exit\">Fullscreen</button><button class=\"ds-pen-exit\">Back to controls</button></div><div class=\"ds-pen-stage\"><div class=\"ds-pen-pad\"><p>Your pen controls the selected Windows screen or window.</p></div></div><output>X 0% · Y 0% · Pressure 0%</output></section>",
-      "css": ".ds-pen-input{font-family:Manrope,system-ui,sans-serif;display:flex;flex-direction:column;gap:16px;padding:20px 24px 24px;background:var(--canvas,#101318);color:var(--ink,#f5f7fa)}.ds-pen-target strong{display:block;font-size:15px;overflow-wrap:anywhere}.ds-pen-target p{font-size:13px;line-height:1.6;color:var(--secondary,#b8c3d1);margin:5px 0 0}.ds-pen-actions{display:flex;flex-wrap:wrap;gap:8px}.ds-pen-actions button{font-family:Manrope,system-ui,sans-serif;min-height:44px;padding:10px 16px;font-size:13px;font-weight:700;border-radius:12px;cursor:pointer;border:1px solid var(--outline,#354151)}.ds-pen-start{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent!important}.ds-pen-exit{background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-pen-actions button:hover:enabled{filter:brightness(1.12)}.ds-pen-actions button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-pen-actions button:disabled{opacity:.5;cursor:default}.ds-pen-stage{display:flex;align-items:center;justify-content:center;min-height:260px;max-height:65vh;overflow:hidden;background:#131922;border-radius:12px}.ds-pen-pad{width:100%;aspect-ratio:8/5;position:relative;overflow:hidden;background:var(--surface,#1c222b);border:1px solid var(--outline,#354151);border-radius:12px}.ds-pen-pad p{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:28px;margin:0;text-align:center;color:var(--secondary,#b8c3d1);line-height:1.6;font-size:clamp(14px,1.5vw,18px)}.ds-pen-input output{font-size:12px;line-height:1.6;font-variant-numeric:tabular-nums;color:var(--secondary,#b8c3d1)}@media(max-width:580px){.ds-pen-input{padding:12px;gap:12px}.ds-pen-actions button{padding:10px 12px}.ds-pen-stage{min-height:220px}}"
+      "description": "Stopped-state example of the mapped input surface. An active owner session displays the real selected-target JPEG behind input; loading and unavailable states carry explicit status.",
+      "html": "<section class=\"ds-pen-input\"><div class=\"ds-pen-target\"><strong>Selected Windows window</strong><p>Start a pen session when your Windows app is ready.</p><p role=\"status\">The live PC view appears after you start a pen session.</p></div><div class=\"ds-pen-actions\"><button class=\"ds-pen-start\">Start pen session</button><button class=\"ds-pen-exit\">Fullscreen</button><button class=\"ds-pen-exit\">Back to controls</button></div><div class=\"ds-pen-stage\"><div class=\"ds-pen-pad\"><img class=\"ds-pc-preview\" alt=\"\" aria-hidden=\"true\" hidden><p>Your pen controls the selected Windows screen or window.</p></div></div><output>X 0% · Y 0% · Pressure 0%</output></section>",
+      "css": ".ds-pen-input{font-family:Manrope,system-ui,sans-serif;display:flex;flex-direction:column;gap:16px;padding:20px 24px 24px;background:var(--canvas,#101318);color:var(--ink,#f5f7fa)}.ds-pen-target strong{display:block;font-size:15px;overflow-wrap:anywhere}.ds-pen-target p{font-size:13px;line-height:1.6;color:var(--secondary,#b8c3d1);margin:5px 0 0}.ds-pen-actions{display:flex;flex-wrap:wrap;gap:8px}.ds-pen-actions button{font-family:Manrope,system-ui,sans-serif;min-height:44px;padding:10px 16px;font-size:13px;font-weight:700;border-radius:12px;cursor:pointer;border:1px solid var(--outline,#354151)}.ds-pen-start{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent!important}.ds-pen-exit{background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-pen-actions button:hover:enabled{filter:brightness(1.12)}.ds-pen-actions button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-pen-actions button:disabled{opacity:.5;cursor:default}.ds-pen-stage{display:flex;align-items:center;justify-content:center;min-height:260px;max-height:65vh;overflow:hidden;background:#131922;border-radius:12px}.ds-pen-pad{width:100%;aspect-ratio:8/5;position:relative;overflow:hidden;background:var(--surface,#1c222b);border:1px solid var(--outline,#354151);border-radius:12px}.ds-pen-pad p{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:28px;margin:0;text-align:center;color:var(--secondary,#b8c3d1);line-height:1.6;font-size:clamp(14px,1.5vw,18px)}.ds-pen-input output{font-size:12px;line-height:1.6;font-variant-numeric:tabular-nums;color:var(--secondary,#b8c3d1)}@media(max-width:580px){.ds-pen-input{padding:12px;gap:12px}.ds-pen-actions button{padding:10px 12px}.ds-pen-stage{min-height:220px}}.ds-pc-preview{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:fill;pointer-events:none;user-select:none;-webkit-user-select:none}.ds-pc-preview[hidden]{display:none!important}"
     },
     {
       "name": "Immersive ink controls",
@@ -1220,6 +1568,22 @@
       "description": "Floating controls over paper, with the optional drawer closed. The drawer carries tools, notes, export, sync, and conflict details.",
       "html": "<div class=\"ds-immersive-ink\"><div class=\"ds-ink-floating\"><button class=\"ds-ink-tools\" aria-expanded=\"false\" aria-label=\"Show tools — ink sharing needs attention\">Show tools<span aria-hidden=\"true\"></span></button><button class=\"ds-ink-exit\">Exit fullscreen</button></div></div>",
       "css": ".ds-immersive-ink{position:relative;min-height:260px;background:#f6f3e9;overflow:hidden}.ds-ink-floating{position:absolute;top:max(10px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));display:flex;gap:6px}.ds-ink-floating button{font-family:Manrope,system-ui,sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:44px;min-width:44px;font-size:13px;font-weight:700;padding:8px 12px;border:1px solid var(--outline,#354151);border-radius:12px;box-shadow:0 2px 8px #0002;cursor:pointer}.ds-ink-tools{background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-ink-tools:hover{background:var(--surface-high,#252d38)}.ds-ink-tools span{display:block;width:8px;height:8px;border-radius:50%;background:var(--amber,#ffd58a)}.ds-ink-exit{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent!important}.ds-ink-floating button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}"
+    },
+    {
+      "name": "PC preview states",
+      "kind": "custom",
+      "refersTo": "pc-preview-status",
+      "description": "Text-state examples for the session-scoped preview. No fabricated application screenshot; runtime live pixels come from the authorized target.",
+      "html": "<div class=\"ds-preview-states\" aria-label=\"PC preview status examples\"><p class=\"ds-preview-status\" role=\"status\">Loading the live PC view…</p><p class=\"ds-preview-status\" role=\"status\">Live PC view</p><p class=\"ds-preview-status ds-preview-error\" role=\"status\">PC view unavailable. Check the connection.</p></div>",
+      "css": ".ds-preview-status{font-family:Manrope,system-ui,sans-serif;font-size:13px;line-height:1.6;margin:5px 0 0;color:var(--secondary,#b8c3d1)}.ds-preview-status.ds-preview-error{color:var(--amber,#ffd58a)}"
+    },
+    {
+      "name": "Second display refresh and viewing choices",
+      "kind": "custom",
+      "refersTo": "display-rate-select",
+      "description": "Web controls using the incumbent tokens. 120/current and 165/maximum are example capability readings; no delivered-fps result is invented.",
+      "html": "<section class=\"ds-display-choices\"><label>Refresh rate<select><option>60 Hz</option><option>Match tablet (120 Hz)</option></select></label><p>Tablet: 120 Hz now · up to 165 Hz. The viewer reports received video frame rate.</p><div class=\"ds-display-actions\"><button class=\"ds-display-start\">Start second display</button><button>Open compatibility preview</button></div><p>Compatibility preview sends still images at up to 4 fps. It has no audio.</p></section>",
+      "css": ".ds-display-choices{font-family:Manrope,system-ui,sans-serif;color:var(--secondary,#b8c3d1);font-size:13px;line-height:1.6}.ds-display-choices label{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:16px 0;font-weight:700;color:var(--ink,#f5f7fa)}.ds-display-choices select{min-width:150px;max-width:100%;min-height:48px;padding:8px 12px;background:var(--surface,#1c222b);color:var(--ink,#f5f7fa);border:1px solid var(--outline,#354151);border-radius:12px;font:inherit;font-size:14px;font-weight:700;flex-shrink:0}.ds-display-choices p{max-width:75ch;margin:8px 0 16px;overflow-wrap:anywhere}.ds-display-actions{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}.ds-display-actions button{font-family:inherit;font-size:13px;font-weight:700;min-height:44px;padding:10px 18px;border:1px solid var(--outline,#354151);border-radius:12px;background:var(--surface,#1c222b);color:var(--ink,#f5f7fa);white-space:normal;cursor:pointer}.ds-display-actions .ds-display-start{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent}.ds-display-choices :focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-display-actions button:disabled{opacity:.55;cursor:wait}"
     }
   ],
   "narrative": {
@@ -1257,7 +1621,7 @@
       "Don't make editor preview keys perform live actions.",
       "Don't hide save failures, draft conflicts, or source availability behind a toast alone.",
       "Don't decorate the canvas with sample ink that could be mistaken for a saved drawing.",
-      "Don't visually promise full palm rejection, built-in handwriting recognition, universal drawing-app support, or a full-motion second display."
+      "Don't visually promise full palm rejection, built-in handwriting recognition, universal drawing-app support, or a guaranteed delivered display frame rate."
     ]
   }
 }

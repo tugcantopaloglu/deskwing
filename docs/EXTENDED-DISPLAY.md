@@ -7,14 +7,26 @@ The current integration targets the installed SudoVDA 0.2 device protocol. Table
 ## Use the installed driver
 
 1. Open Computer Copilot on the PC and inspect Second display's installed-driver publisher and trust information.
-2. Explicitly accept that installed driver and create a 1280×800, 1600×900, or 1920×1080 monitor at 60 Hz. Creation is restricted to the authenticated local PC console.
+2. Choose 1280×800, 1600×900, or 1920×1080 and the Windows display refresh rate. The UI offers 60, 90, 120, 144, 165, or 240 Hz; 60 Hz is the default. Explicitly accept the installed driver and sharing permission, then choose **Create independent display**. Creation is restricted to the authenticated local PC console and remains subject to installed-driver/Windows support.
 3. Windows should expose the new TabletDeck monitor. If its saved configuration leaves it disconnected or duplicated, use Windows **Settings → System → Display → Extend** for that monitor. TabletDeck will report the actual topology and refuse capture until it has a separate, nonoverlapping desktop source.
-4. Enable **Share with tablet** on the PC, then start the display view on the paired tablet. Move the desired application/window to the new Windows monitor using Windows' normal window controls.
-5. Pause viewing on the tablet when finished. Turn sharing off on the PC to stop access to new frames, or stop the display to remove the monitor created by this TabletDeck session.
+4. If needed, choose **Allow tablet sharing** on the PC. Move the desired windows onto the extra monitor using normal Windows controls. On the tablet choose **Refresh rate → 60 Hz** or **Match tablet**, then **Start second display** for native H.264 viewing. **Open compatibility preview** is the separate JPEG option.
+5. Choose **Exit display** when finished viewing. **Pause tablet sharing** revokes viewing; **Remove extra display** removes this session's monitor and lets Windows move its windows to the remaining displays. Exiting the viewer alone leaves the Windows monitor intact.
 
 The app never selects an existing physical desktop as a fallback. Starting another SudoVDA session while one belongs to another application is refused. Each TabletDeck session uses a random monitor GUID and removes only that GUID. Nothing changes physical monitor resolutions, positions, or the primary display.
 
-This is a bounded JPEG view: up to four captures per second, widths of 640/960/1280 pixels, and 384 KiB per JPEG. Busy requests are dropped instead of queued. It is intended for tools, secondary panels, and reference windows; its transport is not a low-latency video codec. Protected content may appear black. Tablet input into the extended Windows desktop is not supplied by this frame transport.
+The native path uses a persistent authenticated H.264 stream and a native tablet decoder. Match tablet chooses the tablet's reported current refresh rate, not its maximum. The actual Windows source must run at least as fast as the request; a 60 Hz source is rejected for a 120 Hz request. Stop viewing and recreate the extra display at a sufficient rate if needed. Android checks hardware decoding support for the chosen resolution/rate. Browser viewing uses the explicit compatibility option. A failed native start does not silently choose another transport.
+
+**Open compatibility preview** remains bounded JPEG: up to four captures per second, widths of 640/960/1280 pixels, and 384 KiB per JPEG. The current UI requests 960 pixels. Busy requests are dropped instead of queued. A higher Windows monitor refresh does not increase this fallback's transport rate. It suits relatively static panels and references.
+
+Both paths are silent and supply no touch, pen, or pointer forwarding. Protected content may appear black. Pen tablet is a different workspace, with its own selected-target preview and explicit Windows input session.
+
+## Refresh targets and observed delivery
+
+The UI keeps **Windows display refresh rate**, tablet current/max refresh, and video counters separate. The user's tablet reported 120 Hz current and 165 Hz maximum through ADB; that capability observation means Match tablet requests 120 Hz while the reported current rate remains 120. It does not demonstrate 120 fps video delivery.
+
+Android's viewer reports **fps shown** from decoder rendering callbacks, **fps received**, target Hz, and current tablet Hz. It marks delivery below target. iOS reports received fps and measured screen cadence; these are not displayed-video-frame measurements. Video preserves source proportions with unused edges, and Exit display stays visible.
+
+The Windows producer uses GDI capture of the owned monitor and the built-in software Media Foundation H.264 encoder. It does not currently select GPU encoding. Source capture, encoding, network throughput, decoder support, resolution, power state, and display scheduling all affect delivery. Configured 60/120 Hz and encoder-only synthetic-frame timings do not establish end-to-end 60+ fps or latency. Use moving content and the actual viewer counters during physical rehearsal.
 
 ## Diagnose without changing anything
 
@@ -37,12 +49,19 @@ If interface access fails, status includes the actual Windows error, including a
 | Route | Access | Request / result |
 | --- | --- | --- |
 | `GET /api/computer/display` | Paired tablet or local PC admin | Actual status; no pixels |
-| `POST /api/admin/computer/display` | Local PC admin | `operation: "create"`, `width`, `height`, `acceptInstalledDriver: true`, optional `shareWithTablet` (default false) |
+| `POST /api/admin/computer/display` | Local PC admin | `operation: "create"`, `width`, `height`, `refreshRate` (default 60, allowed 60–240), `acceptInstalledDriver: true`, optional `shareWithTablet` (default false) |
 | Same admin route | Local PC admin | `operation: "share"`, `enabled: true/false` |
 | Same admin route | Local PC admin | `operation: "remove"` |
 | `POST /api/computer/display/frame` | Paired tablet or local PC admin, explicit PC sharing also required | `{ "width": 960 }`; JPEG data URI plus dimensions, sequence and timestamp |
+| `POST /api/computer/display/stream/start` | Authenticated client; owned independent display and sharing required | `{ "refreshRate": 120 }`; owner-bound lease, source dimensions, requested rate, actual source rate, and `codec: "h264"` |
+| `POST /api/computer/display/stream` | Same authenticated owner and unused live lease | `{ "lease": "…" }`; binary `application/vnd.deskwing.h264` response, with caching disabled |
+| `POST /api/computer/display/stream/stop` | Same authenticated owner and lease | `{ "lease": "…" }`; ends only that matching stream |
 
-Status fields include `available`, `active`, `sharedWithTablet`, `independentDesktop`, `sourceName`, `width`, `height`, `driver`, `detail`, and `displays`. `available` identifies an accessible, locally trusted candidate package; it does not prove a monitor was created. `active` means this process owns a driver session; `independentDesktop` requires Windows to expose that session's unique, nonoverlapping source. Frames recheck the monitor identity and bounds before and after capture. Clone, overlap, missing targets, unshared sessions, and topology changes fail closed.
+Status fields include `available`, `active`, `sharedWithTablet`, `independentDesktop`, `sourceName`, `width`, `height`, actual `refreshRate`, `driver`, `detail`, and `displays`. `available` identifies an accessible, locally trusted candidate package; it does not prove a monitor was created. `active` means this process owns a driver session; `independentDesktop` requires Windows to expose that session's unique, nonoverlapping source. Frames recheck the monitor identity and bounds before and after capture. Clone, overlap, missing targets, unshared sessions, and topology changes fail closed.
+
+`DisplayStream` runs one owner-bound native stream and one capture/encoder worker at a time, separate from control and pen requests. A start lease must attach within 5 seconds. Source identity, generation, geometry, actual refresh, sharing, pairing, and shutdown state are validated before publishing encoded data. Each H.264 access unit is bounded to 2 MiB; writes have a 2-second timeout and backpressure rather than an accumulating frame queue. A non-cooperative write retains the sole worker slot until it settles. Source refresh must meet the request, allowing 0.1 Hz tolerance for nominal rates such as 59.94 Hz.
+
+Native apps use `/local/display/capabilities`, `/local/display/start`, and `/local/display/stop` handlers with their existing pinned PC connection. Starting requires the trusted page and foreground host; stop remains available for lifecycle cleanup. Video travels over pinned HTTPS, independently of the fast control link. Background/exit, connection failure, revoked sharing/pairing, source topology/rate changes, or decoder failure end viewing and clear the session. Restart is explicit. The app does not save streamed frames to disk.
 
 The SudoVDA watchdog is global to that driver. TabletDeck refuses to start when that adapter already has active targets from another application. Its heartbeat runs only while its own session is alive. Do not run competing virtual-monitor managers against this same driver concurrently.
 
@@ -65,3 +84,7 @@ These identify the installed files, not a verified downloadable release. The [Vi
 The active topology contained two physical desktops (R27qe 2560×1440 and XV272 S 1920×1080), and **no active virtual desktop**. SDKs 22621/26100 and SignTool were present, but the inspected Windows Kits had no IddCx header/WDF build tree. No driver build/install, monitor creation, boot configuration change, real pixel capture, or tablet delivery was performed during development verification.
 
 The new component built with zero warnings/errors. `ExtendedDisplayTests.Run()` passed 31 deterministic checks with a fake driver: fixed protocol structures, acceptance/resolution/trust/protocol guards, cancellation before writes, foreign-monitor refusal, own-GUID cleanup, malformed-response cleanup, failed-removal retry, sharing revocation, and clone/overlap capture refusal. A separate real read-only run verified accessible interface discovery and installed package trust, retained the two physical displays, and rejected capture while sharing was off. Real creation, watchdog behavior, Windows activation, JPEG capture, and physical tablet delivery still require the explicit PC workflow above.
+
+## High-refresh verification status
+
+The preceding section is the historical 2026-11-01 baseline. New H.264 stream, encoder, native protocol, and UI checks do not retroactively establish physical display delivery. An encoder-only benchmark uses synthetic pixels and excludes monitor capture, the connection, and tablet presentation. Final integration builds and sustained 60+ fps physical playback remain separate pending checks. Record source/tablet rates, resolution, received/rendered counters, frame drops, foreground/background behavior, sharing revocation, and stop/restart with the actual build before making a performance claim.

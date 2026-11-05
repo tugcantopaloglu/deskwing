@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../companion/DisplayStream.cs" Link="DisplayStream.cs" />
+    <Compile Include="../../companion/ExtendedDisplay.cs" Link="ExtendedDisplay.cs" />
+    <Compile Include="../../companion/ExtendedDisplayTests.cs" Link="ExtendedDisplayTests.cs" />
+    <Compile Include="../../companion/WindowsDisplayEncoder.cs" Link="WindowsDisplayEncoder.cs" />
+    <Compile Include="../../companion/WindowsMediaFoundation.cs" Link="WindowsMediaFoundation.cs" />
+  </ItemGroup>
+</Project>

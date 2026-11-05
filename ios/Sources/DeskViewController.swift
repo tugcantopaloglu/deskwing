@@ -24,6 +24,12 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
     private var fullscreenEnabled = false
     private var insetWebConstraints: [NSLayoutConstraint] = []
     private var fullWebConstraints: [NSLayoutConstraint] = []
+    private var nativeDisplay: NativeDisplaySession?
+    private var displayIntent = 0
+    private var displayProbe: DisplayRefreshProbe?
+    private var pendingDisplayID: String?
+    private var cancelDisplayStart: (() -> Void)?
+    private var usedDisplayIDs: [String] = []
 
     override var prefersStatusBarHidden: Bool { fullscreenEnabled }
     override var prefersHomeIndicatorAutoHidden: Bool { fullscreenEnabled }
@@ -61,7 +67,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         web.load(URLRequest(url: URL(string: "deskwing://app/index.html")!))
         UIApplication.shared.isIdleTimerDisabled = true
     }
-    deinit { NotificationCenter.default.removeObserver(self); client?.invalidate(); pairingClient?.invalidate() }
+    deinit { NotificationCenter.default.removeObserver(self); client?.invalidate(); pairingClient?.invalidate(); displayProbe?.cancel(); nativeDisplay?.stop(reason: "Display host closed.") }
     private func makeClient(_ pc: PairedPC) -> PinnedClient { PinnedClient(host: pc.host, port: pc.port, pin: pc.fingerprint, token: pc.token) }
     private func showFatal(_ message: String) {
         let label = UILabel(); label.text = message; label.numberOfLines = 0; label.textAlignment = .center
@@ -123,6 +129,16 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
     private func local(_ id: Int, ticket: UUID, path: String, body: [String: Any]) {
         if path == "/native/connection" || path == "/native/diagnostics/reset" { complete(id, ticket: ticket, connection()); return }
         if path == "/native/chat", body["operation"] as? String == "hide" { provider?.dismiss(animated: true); complete(id, ticket: ticket, ["ok":true]); return }
+        if path == "/local/display/stop" {
+            do {
+                guard Set(body.keys) == ["session"] else { throw DeskError.message("Choose the display session to stop.") }
+                let session = try DisplayVideoPolicy.session(body["session"])
+                let matches = nativeDisplay?.id == session || pendingDisplayID == session
+                if matches { stopNativeDisplay(reason: "closed") }
+                complete(id, ticket: ticket, ["stopped":matches, "session":session])
+            } catch { fail(id, ticket: ticket, error.localizedDescription) }
+            return
+        }
         if path == "/local/fullscreen" {
             do {
                 let enabled = try HostPolicy.requestedFullscreen(body, foreground: foreground, presentingTool: presentedViewController != nil)
@@ -134,6 +150,8 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         guard foreground else { fail(id, ticket: ticket, "Open DeskWing before using this tool."); return }
         do {
             switch path {
+            case "/local/display/capabilities": try displayCapabilities(id, ticket: ticket, body: body)
+            case "/local/display/start": try startNativeDisplay(id, ticket: ticket, body: body)
             case "/native/pair": try pair(id, ticket: ticket, body: body)
             case "/native/forget":
                 try PairingStore.forget(); retireClient(); pc = nil; complete(id, ticket: ticket, connection())
@@ -184,6 +202,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         } catch { pairingClient = nil; pairing.invalidate(); throw error }
     }
     private func retireClient() {
+        stopNativeDisplay(reason: "The paired PC changed. Start the display again after connecting.")
         setFullscreen(false, reason: "disconnect")
         generation += 1; releaseInputLeases()
         let old = client; old?.cancelPending(keepingReleases: true); client = nil
@@ -196,6 +215,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         if let pen { try? client.send(path: "/api/pen", method: "POST", body: ["operation":"cancel", "lease":pen]) { _ in } }
     }
     @objc private func suspend() {
+        stopNativeDisplay(reason: "Display stopped while DeskWing is in the background.")
         setFullscreen(false, reason: "background")
         UIApplication.shared.isIdleTimerDisabled = false
         foreground = false; generation += 1; pairingClient?.invalidate(); pairingClient = nil
@@ -211,6 +231,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         guard presentedViewController == nil else { throw DeskError.message("Finish the open sheet before using handwriting.") }
         let text = body["text"] as? String ?? ""
         guard text.utf16.count <= 8000 else { throw DeskError.message("Handwriting fields support up to 8,000 characters.") }
+        stopNativeDisplay(reason: "Display stopped when handwriting opened.")
         setFullscreen(false, reason: "tool")
         let editor = PenInputController(text: text) { [weak self] text, cancelled in self?.complete(id, ticket: ticket, ["text":text,"cancelled":cancelled]) }
         handwriting = editor
@@ -220,6 +241,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
     private func exportImage(_ id: Int, ticket: UUID, body: [String: Any]) throws {
         guard presentedViewController == nil else { throw DeskError.message("Finish the open sheet before exporting a drawing.") }
         let data = try PNGExport.decode(body["dataUrl"] as? String ?? "")
+        stopNativeDisplay(reason: "Display stopped when export opened.")
         setFullscreen(false, reason: "tool")
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("DeskWing-export-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -242,6 +264,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         guard channel.range(of: pattern, options: .regularExpression) != nil else { throw DeskError.message("Enter a valid Twitch or Kick channel name.") }
         let address = providerName == "twitch" ? "https://www.twitch.tv/popout/\(channel)/chat?popout=" : "https://kick.com/popout/\(channel)/chat"
         guard let url = URL(string: address) else { throw DeskError.message("Invalid provider address.") }
+        stopNativeDisplay(reason: "Display stopped when chat opened.")
         setFullscreen(false, reason: "tool")
         let sheet = SFSafariViewController(url: url); provider = sheet; present(sheet, animated: true)
         complete(id, ticket: ticket, ["ok":true])
@@ -251,6 +274,75 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         }
     }
     private func fail(_ id: Int, ticket: UUID, _ message: String) { complete(id, ticket: ticket, ["error":String(message.prefix(1000))]) }
+    private func displayCapabilities(_ id: Int, ticket: UUID, body: [String: Any]) throws {
+        guard body.isEmpty else { throw DeskError.message("Display capability checks do not accept settings.") }
+        let maximum = view.window?.screen.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond
+        let epoch = generation, probe = DisplayRefreshProbe(maximum: maximum)
+        probe.start { [weak self, probe] measured in
+            guard let self else { return }; _ = probe
+            guard self.foreground, self.generation == epoch else { self.fail(id, ticket: ticket, "Display measurement stopped when the app changed."); return }
+            let rates = Array(Set([60, maximum].filter { $0 >= 60 && $0 <= 240 })).sorted()
+            self.complete(id, ticket: ticket, ["available":maximum >= 60, "currentRefreshRate":measured,
+                "maxRefreshRate":maximum, "supportedRefreshRates":rates,
+                "detail":"Native H.264 video. Frame rate is measured during playback; power and thermal settings can reduce screen refresh."])
+        }
+    }
+    private func startNativeDisplay(_ id: Int, ticket: UUID, body: [String: Any]) throws {
+        guard Set(body.keys) == ["refreshMode", "session"], let pc, presentedViewController == nil,
+              nativeDisplay == nil, pendingDisplayID == nil else { throw DeskError.message("Close the open display or tool and connect to the PC before starting.") }
+        let session = try DisplayVideoPolicy.session(body["session"])
+        guard !usedDisplayIDs.contains(session) else { throw DeskError.message("Use a fresh display session after stopping.") }
+        let maximum = view.window?.screen.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond
+        _ = try DisplayVideoPolicy.refresh(body["refreshMode"], maximum: maximum)
+        usedDisplayIDs.append(session); if usedDisplayIDs.count > 128 { usedDisplayIDs.removeFirst() }
+        displayIntent += 1; let intent = displayIntent, epoch = generation
+        pendingDisplayID = session
+        cancelDisplayStart = { [weak self] in self?.fail(id, ticket: ticket, "Display start was cancelled.") }
+        let probe = DisplayRefreshProbe(maximum: maximum); displayProbe = probe
+        probe.start { [weak self] measured in
+            guard let self else { return }
+            guard self.displayIntent == intent, self.generation == epoch, self.foreground,
+                  self.pendingDisplayID == session, self.pc?.pairingID == pc.pairingID else {
+                self.fail(id, ticket: ticket, "Display start stopped when the connection changed."); return
+            }
+            self.displayProbe = nil; self.pendingDisplayID = nil; self.cancelDisplayStart = nil
+            do {
+                let rate = try DisplayVideoPolicy.refresh(body["refreshMode"], maximum: maximum, current: measured)
+                self.releaseInputLeases(); self.setFullscreen(false, reason: "tool")
+                let display = NativeDisplaySession(id: session, pc: pc, refresh: rate, measuredRefresh: measured) { [weak self] endedID, reason in
+                    guard let self else { return }
+                    if self.nativeDisplay?.id == endedID { self.nativeDisplay = nil; self.displayIntent += 1 }
+                    self.displayEnded(endedID, reason: reason)
+                }
+                self.nativeDisplay = display
+                display.start(presenter: self) { [weak self, weak display] result in
+                    guard let self else { display?.stop(reason: "Display host closed."); return }
+                    guard self.displayIntent == intent, self.generation == epoch, self.foreground,
+                          self.nativeDisplay === display else {
+                        display?.stop(reason: "Display start stopped when the session changed.")
+                        self.fail(id, ticket: ticket, "Display start was cancelled."); return
+                    }
+                    switch result {
+                    case .success(let response): self.complete(id, ticket: ticket, response)
+                    case .failure(let error): self.fail(id, ticket: ticket, error.localizedDescription)
+                    }
+                }
+            } catch { self.fail(id, ticket: ticket, error.localizedDescription); self.displayEnded(session, reason: error.localizedDescription) }
+        }
+    }
+    private func stopNativeDisplay(reason: String) {
+        displayIntent += 1; displayProbe?.cancel(); displayProbe = nil
+        let pending = pendingDisplayID; pendingDisplayID = nil
+        let cancel = cancelDisplayStart; cancelDisplayStart = nil; cancel?()
+        let display = nativeDisplay; nativeDisplay = nil; display?.stop(reason: reason)
+        if let pending { displayEnded(pending, reason: reason) }
+    }
+    private func displayEnded(_ session: String, reason: String) {
+        guard HostPolicy.trustedPage(web?.url), let data = try? JSONSerialization.data(withJSONObject:
+            ["active":false, "session":session, "reason":String(reason.prefix(500))]),
+              let json = String(data: data, encoding: .utf8) else { return }
+        web.evaluateJavaScript("document.dispatchEvent(new CustomEvent('deskwing-display',{detail:\(json)}));", completionHandler: nil)
+    }
     private func setFullscreen(_ enabled: Bool, reason: String) {
         guard fullscreenEnabled != enabled else { return }
         fullscreenEnabled = enabled
@@ -284,9 +376,11 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         }
     }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        stopNativeDisplay(reason: "Display stopped when the page changed.")
         setFullscreen(false, reason: "navigation")
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        stopNativeDisplay(reason: "Display stopped when the page restarted.")
         setFullscreen(false, reason: "renderer")
         generation += 1; requests.reset(); handwriting?.cancel(); provider?.dismiss(animated: false)
         pairingClient?.invalidate(); pairingClient = nil

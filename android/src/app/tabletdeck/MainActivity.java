@@ -56,15 +56,19 @@ public final class MainActivity extends Activity {
     private ChatPane chatPane;
     private NativePenTools penTools;
     private NativeFullscreen fullscreen;
+    private NativeDisplayVideo displayVideo;
     private boolean backPending;
     private long backSequence;
     private SharedPreferences preferences;
+    private final Object connectionGate=new Object();
     private final ExecutorService network=boundedExecutor(2,32);
     private final ExecutorService controls=boundedExecutor(3,16);
     private final ExecutorService urgent=boundedExecutor(1,8);
     private final ExecutorService penControls=boundedExecutor(1,2);
     private final ExecutorService previews=boundedExecutor(1,2);
     private final AtomicLong lifecycleGeneration=new AtomicLong();
+    private final AtomicLong webDocumentGeneration=new AtomicLong();
+    private final BridgeRequestTickets bridgeTickets=new BridgeRequestTickets();
     private final ConcurrentHashMap<Integer,Boolean> fastPending=new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer,PenRequest> fastPenPending=new ConcurrentHashMap<>();
     private final PenLeaseTracker<PenTarget> penLeases=new PenLeaseTracker<>();
@@ -93,6 +97,8 @@ public final class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(true);
         settings.setSafeBrowsingEnabled(true);
         web.setWebViewClient(new WebViewClient(){
+            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon){resetWebDocument("The tablet page changed. Start the display again.");}
+            @Override public boolean onRenderProcessGone(WebView view,android.webkit.RenderProcessGoneDetail detail){resetWebDocument("The tablet page restarted. Start the display again.");if(view.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)view.getParent()).removeView(view);web=null;view.removeJavascriptInterface("DeckNative");view.destroy();recreate();return true;}
             @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request) {
                 Uri url=request.getUrl();return !url.getScheme().equals("https")||!UI_HOST.equals(url.getHost());
             }
@@ -112,12 +118,15 @@ public final class MainActivity extends Activity {
         });
         web.addJavascriptInterface(new Bridge(),"DeckNative");
         FrameLayout root=new FrameLayout(this);root.addView(web,new FrameLayout.LayoutParams(-1,-1));setContentView(root);
-        chatPane=new ChatPane(this,root,web,event->{if(!closed)web.evaluateJavascript("if(window.monitorChatEvent)window.monitorChatEvent("+event.toString()+");",null);});
+        chatPane=new ChatPane(this,root,web,event->{if(!closed&&web!=null)web.evaluateJavascript("if(window.monitorChatEvent)window.monitorChatEvent("+event.toString()+");",null);});
         penTools=new NativePenTools(this,this::deliver);
         fullscreen=new NativeFullscreen(this,web,(enabled,reason)->{
             backSequence++;backPending=false;
-            if(!closed)web.evaluateJavascript("document.dispatchEvent(new CustomEvent('deskwing-fullscreen',{bubbles:true,detail:{enabled:"+enabled+",reason:"+JSONObject.quote(reason)+"}}));",null);
+            if(!closed&&web!=null)web.evaluateJavascript("document.dispatchEvent(new CustomEvent('deskwing-fullscreen',{bubbles:true,detail:{enabled:"+enabled+",reason:"+JSONObject.quote(reason)+"}}));",null);
         },this::handleBack);
+        displayVideo=new NativeDisplayVideo(this,root,this::displayConnection,()->!closed&&!paused,lifecycleGeneration::get,
+            (session,reason)->{if(!closed&&web!=null)web.evaluateJavascript("document.dispatchEvent(new CustomEvent('deskwing-display',{detail:{active:false,session:"+JSONObject.quote(session)+",reason:"+JSONObject.quote(reason)+"}}));",null);},
+            ()->{cancelActivePen();fullscreen.setEnabled(true,"display");},()->fullscreen.setEnabled(false,"display"));
         web.setOnApplyWindowInsetsListener((view,insets)->{if(fullscreen.isEnabled())view.setPadding(0,0,0,0);else view.setPadding(insets.getSystemWindowInsetLeft(),0,insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
         web.loadUrl("https://"+UI_HOST+"/index.html");
         fastLink=new FastLink(new FastLink.Listener(){
@@ -130,11 +139,11 @@ public final class MainActivity extends Activity {
             public boolean packet(String json) throws Exception {
                 JSONObject message=new JSONObject(json);String type=message.optString("type");
                 if(type.equals("ready"))return message.optInt("protocol")==1;
-                if(type.equals("state")){final String state=message.getJSONObject("state").toString();runOnUiThread(()->{if(!closed)web.evaluateJavascript("if(window.deckPush)window.deckPush("+state+");",null);});}
+                if(type.equals("state")){final String state=message.getJSONObject("state").toString();runOnUiThread(()->{if(!closed&&web!=null)web.evaluateJavascript("if(window.deckPush)window.deckPush("+state+");",null);});}
                 else if(message.has("id")){int id=message.getInt("id");if(id==0){fastLink.pong();return false;}PenRequest penRequest=fastPenPending.remove(id);if(fastPending.remove(id)!=null){JSONObject result=message.has("error")?new JSONObject().put("error",message.getString("error")):message.getJSONObject("result");observePenResult(penRequest,result);deliver(id,result);}}
                 return false;
             }
-            public void disconnected(){cancelPenLease(penLeases.takeIf(target->target.fast));runOnUiThread(()->{if(!closed)web.evaluateJavascript("if(window.deckStreamClosed)window.deckStreamClosed();",null);});for(Integer id:fastPending.keySet())if(fastPending.remove(id)!=null){fastPenPending.remove(id);try{deliver(id,new JSONObject().put("error","Fast link closed before confirmation. The action may have run; it was not repeated."));}catch(Exception ignored){}}}
+            public void disconnected(){cancelPenLease(penLeases.takeIf(target->target.fast));runOnUiThread(()->{if(!closed&&web!=null)web.evaluateJavascript("if(window.deckStreamClosed)window.deckStreamClosed();",null);});for(Integer id:fastPending.keySet())if(fastPending.remove(id)!=null){fastPenPending.remove(id);try{deliver(id,new JSONObject().put("error","Fast link closed before confirmation. The action may have run; it was not repeated."));}catch(Exception ignored){}}}
         });fastLink.start();
     }
     private static WebResourceResponse blocked(){return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));}
@@ -146,12 +155,29 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void dispatch(String message) {
             if(message==null||message.length()>BridgeRequestLimits.MAX_EXPORT_ENVELOPE_BYTES||closed)return;
             final String requestedPath;final JSONObject request;
-            try{request=new JSONObject(message);requestedPath=request.getString("path");}catch(Exception ignored){return;}
+            final long submittedDocument=webDocumentGeneration.get();int originalId=0,registeredId=0;
+            try{request=new JSONObject(message);originalId=request.getInt("id");BridgeRequestTickets.Ticket ticket=bridgeTickets.register(originalId,submittedDocument);registeredId=ticket.nativeId;request.put("id",ticket.nativeId);if(submittedDocument!=webDocumentGeneration.get()){bridgeTickets.complete(ticket.nativeId);return;}requestedPath=request.getString("path");}
+            catch(BridgeRequestTickets.DuplicateRequestException ignored){return;}
+            catch(Exception ex){JSONObject error=newError("The request could not start. "+friendly(ex));if(registeredId>0)deliver(registeredId,error);else if(originalId>0)deliverRaw(originalId,error,submittedDocument);return;}
             try{BridgeRequestLimits.validate(requestedPath,request.optString("method","POST"),message,request.optJSONObject("body")==null?"{}":request.getJSONObject("body").toString());}catch(Exception ex){failRequest(request,friendly(ex));return;}
+            if(requestedPath.equals("/local/display/capabilities")||requestedPath.equals("/local/display/start")||requestedPath.equals("/local/display/stop")){
+                if(!request.optString("method","POST").equals("POST")){failRequest(request,"Display requests require POST.");return;}
+                final long requestedGeneration=lifecycleGeneration.get(),requestedDocument=submittedDocument;
+                runOnUiThread(()->{try{
+                    if(requestedDocument!=webDocumentGeneration.get())return;
+                    int id=request.getInt("id");JSONObject body=request.optJSONObject("body");if(body==null)body=new JSONObject();
+                    if(requestedPath.equals("/local/display/stop")){deliver(id,displayVideo.stop(body));return;}
+                    if(closed||paused||requestedGeneration!=lifecycleGeneration.get())throw new IllegalStateException("Open DeskWing before starting the display.");
+                    if(requestedPath.equals("/local/display/capabilities")){if(body.length()!=0)throw new IllegalArgumentException("Display capabilities do not accept options.");deliver(id,displayVideo.capabilities());return;}
+                    if(penTools.isOpen())throw new IllegalStateException("Close the pen tool before opening the display.");
+                    displayVideo.start(body,result->deliverDisplay(id,result,requestedDocument));
+                }catch(Exception ex){failRequest(request,friendly(ex));}});return;
+            }
             if(requestedPath.equals("/local/fullscreen")){
                 if(!request.optString("method","POST").equals("POST")){failRequest(request,"Fullscreen requires a POST request.");return;}
                 final long requestedGeneration=lifecycleGeneration.get();
                 runOnUiThread(()->{try{
+                    if(submittedDocument!=webDocumentGeneration.get())return;
                     int id=request.getInt("id");
                     JSONObject body=request.optJSONObject("body");
                     boolean enabled=FullscreenPolicy.validateRequest(body==null?null:body.opt("enabled"),closed,paused,penTools.isOpen(),requestedGeneration,lifecycleGeneration.get());
@@ -161,9 +187,9 @@ public final class MainActivity extends Activity {
             }
             if(requestedPath.equals("/local/handwriting")||requestedPath.equals("/local/export-image")){
                 if(!request.optString("method","POST").equals("POST")){failRequest(request,"Local pen tools require a POST request.");return;}
-                runOnUiThread(()->{try{if(paused||closed)throw new IllegalStateException("Open the tablet workspace before using pen tools.");fullscreen.setEnabled(false,"tool");penTools.request(request.getInt("id"),requestedPath,request.optJSONObject("body")==null?new JSONObject():request.getJSONObject("body"));}catch(Exception ex){failRequest(request,friendly(ex));}});return;
+                runOnUiThread(()->{try{if(submittedDocument!=webDocumentGeneration.get())return;if(paused||closed)throw new IllegalStateException("Open the tablet workspace before using pen tools.");displayVideo.stop("The display stopped when a pen tool opened.");fullscreen.setEnabled(false,"tool");penTools.request(request.getInt("id"),requestedPath,request.optJSONObject("body")==null?new JSONObject():request.getJSONObject("body"));}catch(Exception ex){failRequest(request,friendly(ex));}});return;
             }
-            if(requestedPath.equals("/native/chat")){runOnUiThread(()->{try{deliver(request.getInt("id"),chatPane.command(request.getJSONObject("body")));}catch(Exception ex){try{deliver(request.getInt("id"),new JSONObject().put("error",ex.getMessage()));}catch(Exception ignored){}}});return;}
+            if(requestedPath.equals("/native/chat")){runOnUiThread(()->{try{if(submittedDocument!=webDocumentGeneration.get())return;displayVideo.stop("The display stopped when a chat window opened.");deliver(request.getInt("id"),chatPane.command(request.getJSONObject("body")));}catch(Exception ex){try{deliver(request.getInt("id"),new JSONObject().put("error",ex.getMessage()));}catch(Exception ignored){}}});return;}
             final long submittedNanos=System.nanoTime(),submittedGeneration=lifecycleGeneration.get();
             JSONObject submittedBody=request.optJSONObject("body");
             String submittedOperation=submittedBody==null?"":submittedBody.optString("operation");
@@ -173,17 +199,18 @@ public final class MainActivity extends Activity {
                 int id=0;JSONObject result;
                 try {
                     id=request.getInt("id");
+                    if(submittedDocument!=webDocumentGeneration.get())throw new IllegalStateException("The tablet page changed before this request started.");
                     String path=request.getString("path"),method=request.optString("method","POST");
                     JSONObject body=request.optJSONObject("body");if(body==null)body=new JSONObject();
                     if(path.equals("/native/connection"))result=connection();
-                    else if(path.equals("/native/scan")){startScan(id);return;}
+                    else if(path.equals("/native/scan")){startScan(id,submittedDocument);return;}
                     else if(path.equals("/native/diagnostics/reset")){fastLink.clearStatistics();result=connection();}
-                    else if(path.equals("/native/forget")){lifecycleGeneration.incrementAndGet();cancelActivePen();preferences.edit().clear().commit();updateWifiLock();fastLink.reset();result=connection();}
+                    else if(path.equals("/native/forget")){synchronized(connectionGate){lifecycleGeneration.incrementAndGet();preferences.edit().clear().commit();}runOnUiThread(()->displayVideo.stopInvalid("The PC pairing changed."));cancelActivePen();updateWifiLock();fastLink.reset();result=connection();}
                     else if(path.equals("/native/transport")){
                         String mode=body.getString("mode");if(!mode.equals("usb")&&!mode.equals("wifi"))throw new Exception("Choose Wi-Fi or USB.");
                         String host=body.optString("host",preferences.getString("host","")).trim();
                         if(mode.equals("wifi"))validateHost(host);
-                        lifecycleGeneration.incrementAndGet();cancelActivePen();preferences.edit().putString("mode",mode).putString("host",host).commit();updateWifiLock();fastLink.clearStatistics();fastLink.reset();result=connection();
+                        synchronized(connectionGate){lifecycleGeneration.incrementAndGet();preferences.edit().putString("mode",mode).putString("host",host).commit();}runOnUiThread(()->displayVideo.stopInvalid("The PC connection changed."));cancelActivePen();updateWifiLock();fastLink.clearStatistics();fastLink.reset();result=connection();
                     }
                     else if(path.equals("/native/pair"))result=pair(body);
                     else {
@@ -192,7 +219,7 @@ public final class MainActivity extends Activity {
                         ControlRequestPolicy.validate(path,method,body.optString("operation"),paused,submittedNanos,System.nanoTime(),lifecycleGeneration.get(),submittedGeneration);
                         if(paused&&(path.equals("/api/monitor/frame")||path.equals("/api/computer/display/frame")))throw new Exception("Previews are paused while the tablet app is in the background.");
                         final String operation=body.optString("operation");
-                        Runnable beforeCommit=()->ControlRequestPolicy.validate(path,method,operation,paused,submittedNanos,System.nanoTime(),lifecycleGeneration.get(),submittedGeneration);
+                        Runnable beforeCommit=()->{if(submittedDocument!=webDocumentGeneration.get())throw new IllegalStateException("The tablet page changed before this request started.");ControlRequestPolicy.validate(path,method,operation,paused,submittedNanos,System.nanoTime(),lifecycleGeneration.get(),submittedGeneration);};
                         PenRequest penRequest=path.equals("/api/pen")&&method.equals("POST")?new PenRequest(operation,body.optString("lease"),submittedGeneration,submittedNanos,penTarget()):null;
                         if(method.equals("POST")&&fastPath(path)&&fastLink!=null&&fastLink.connected()){
                             fastPending.put(id,Boolean.TRUE);
@@ -237,9 +264,13 @@ public final class MainActivity extends Activity {
         try{urgent.execute(()->{try{PenTarget target=lease.target;sendTo(target.host,"/api/pen","POST",new JSONObject().put("operation","cancel").put("lease",lease.value),target.fingerprint,target.token,null,target.port);}catch(Exception ignored){/* The PC also releases exact fast-link leases and expires missing renewals. */}});}catch(RejectedExecutionException ignored){/* A bounded queue never retains pointer movements for replay. */}
     }
     private static boolean fastPath(String path){return path.equals("/api/pen")||path.equals("/api/ping")||path.equals("/api/cancel")||path.equals("/api/apps")||path.equals("/api/action")||path.equals("/api/audio")||path.equals("/api/mute")||path.equals("/api/hold");}
-    private synchronized void startScan(int id) throws Exception {if(pendingScan!=0)throw new Exception("A pairing scan is already open.");pendingScan=id;runOnUiThread(()->{try{startActivityForResult(new Intent(this,QrScanActivity.class),42);}catch(Exception ex){int request=pendingScan;pendingScan=0;try{deliver(request,new JSONObject().put("error","Camera scanner unavailable. Use manual pairing."));}catch(Exception ignored){}}});}
+    private synchronized void startScan(int id,long document) throws Exception {if(pendingScan!=0)throw new Exception("A pairing scan is already open.");pendingScan=id;runOnUiThread(()->{if(document!=webDocumentGeneration.get()){if(pendingScan==id)pendingScan=0;return;}try{startActivityForResult(new Intent(this,QrScanActivity.class),42);}catch(Exception ex){int request=pendingScan;pendingScan=0;try{deliver(request,new JSONObject().put("error","Camera scanner unavailable. Use manual pairing."));}catch(Exception ignored){}}});}
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(penTools!=null&&penTools.activityResult(request,result,data))return;if(request!=42)return;int id=pendingScan;pendingScan=0;if(id==0)return;try{if(result!=RESULT_OK||data==null)throw new Exception(data==null?"Scan cancelled. You can pair manually.":data.getStringExtra("error")==null?"Scan cancelled.":data.getStringExtra("error"));PairingPayload p=PairingPayload.parse(data.getStringExtra("pairing"));deliver(id,new JSONObject().put("host",p.host).put("mode",p.mode).put("port",p.port).put("controlPort",p.controlPort).put("certificate",p.certificate).put("code",p.code));}catch(Exception ex){try{deliver(id,new JSONObject().put("error",ex.getMessage()));}catch(Exception ignored){}}}
-    private void deliver(int id,JSONObject result){final String json=result.toString();runOnUiThread(()->{if(!closed)web.evaluateJavascript("window.nativeResult("+id+","+json+");",null);});}
+    private void deliver(int id,JSONObject result){final String json=result.toString();runOnUiThread(()->{BridgeRequestTickets.Ticket ticket=bridgeTickets.complete(id);if(ticket!=null&&!closed&&web!=null&&ticket.document==webDocumentGeneration.get())web.evaluateJavascript("window.nativeResult("+ticket.originalId+","+json+");",null);});}
+    private void deliverRaw(int id,JSONObject result,long document){final String json=result.toString();runOnUiThread(()->{if(!closed&&web!=null&&document==webDocumentGeneration.get())web.evaluateJavascript("window.nativeResult("+id+","+json+");",null);});}
+    private void deliverDisplay(int id,JSONObject result,long document){deliver(id,result);}
+    private static JSONObject newError(String message){JSONObject result=new JSONObject();try{result.put("error",message);}catch(Exception ignored){}return result;}
+    private void resetWebDocument(String reason){webDocumentGeneration.incrementAndGet();bridgeTickets.reset();lifecycleGeneration.incrementAndGet();if(displayVideo!=null)displayVideo.stop(reason);if(fullscreen!=null)fullscreen.setEnabled(false,"navigation");if(penTools!=null)penTools.pause();if(chatPane!=null)chatPane.hide();cancelActivePen();if(fastLink!=null)fastLink.reset();}
     private JSONObject pair(JSONObject body) throws Exception {
         String host=body.optString("host","").trim(),mode=body.optString("mode","wifi");
         if(!mode.equals("wifi")&&!mode.equals("usb"))throw new Exception("Choose Wi-Fi or USB.");
@@ -253,7 +284,7 @@ public final class MainActivity extends Activity {
         JSONObject request=new JSONObject().put("code",code).put("name",Build.MANUFACTURER+" "+Build.MODEL);
         JSONObject response=sendTo(mode.equals("usb")?"127.0.0.1":host,"/api/pair","POST",request,certificate,"",actualFingerprint,port);
         if(actualFingerprint[0]==null||!actualFingerprint[0].equals(response.getString("fingerprint")))throw new Exception("The PC certificate changed. Generate a new pairing code.");
-        lifecycleGeneration.incrementAndGet();cancelActivePen();preferences.edit().putString("pairingId",java.util.UUID.randomUUID().toString()).putInt("port",port).putInt("controlPort",controlPort).putString("host",host).putString("mode",mode).putString("fingerprint",actualFingerprint[0]).putString("token",response.getString("token")).commit();
+        synchronized(connectionGate){lifecycleGeneration.incrementAndGet();preferences.edit().putString("pairingId",java.util.UUID.randomUUID().toString()).putInt("port",port).putInt("controlPort",controlPort).putString("host",host).putString("mode",mode).putString("fingerprint",actualFingerprint[0]).putString("token",response.getString("token")).commit();}runOnUiThread(()->displayVideo.stopInvalid("The PC pairing changed."));cancelActivePen();
         updateWifiLock();fastLink.clearStatistics();fastLink.reset();return connection();
     }
     private static void validateHost(String host) throws Exception {
@@ -305,6 +336,18 @@ public final class MainActivity extends Activity {
         if(ex instanceof java.net.SocketTimeoutException||ex instanceof java.net.ConnectException)return "Cannot reach the PC. Keep the companion running. Check Wi-Fi / Windows Firewall, or run USB-Connect.cmd for USB.";
         return ex.getMessage()==null?"Connection failed. Try pairing again.":ex.getMessage();
     }
+    private NativeDisplayVideo.Connection displayConnection() throws Exception {
+        final String host,expected,token;final int port;
+        synchronized(connectionGate){host=preferences.getString("mode","wifi").equals("usb")?"127.0.0.1":preferences.getString("host","");expected=preferences.getString("fingerprint","");token=preferences.getString("token","");port=preferences.getInt("port",8743);}
+        validateHost(host);if(!expected.matches("[A-F0-9]{64}")||token.isEmpty()||port<1||port>65535)throw new Exception("Pair this tablet with your PC first.");
+        final SSLSocketFactory factory=pinnedFactory(expected,null);
+        return path->{
+            if(!NativeDisplayVideo.allowedPath(path))throw new IllegalArgumentException("Unsupported display request.");
+            HttpsURLConnection connection=(HttpsURLConnection)new URL("https://"+host+":"+port+path).openConnection();connection.setSSLSocketFactory(factory);
+            connection.setHostnameVerifier((hostname,session)->{try{X509Certificate peer=(X509Certificate)session.getPeerCertificates()[0];peer.checkValidity();return hostname.equals(host)&&MessageDigest.isEqual(hash(peer).getBytes(StandardCharsets.US_ASCII),expected.getBytes(StandardCharsets.US_ASCII));}catch(Exception ex){return false;}});
+            connection.setRequestProperty("Authorization","Bearer "+token);return connection;
+        };
+    }
     private synchronized void updateWifiLock(){
         boolean wanted=!paused&&!closed&&!preferences.getString("token","").isEmpty()&&preferences.getString("mode","wifi").equals("wifi");
         try {
@@ -314,6 +357,7 @@ public final class MainActivity extends Activity {
     }
     private void handleBack(){
         if(closed||paused||web==null)return;
+        if(displayVideo!=null&&displayVideo.isOpen()){displayVideo.stop("closed");return;}
         if(fullscreen!=null&&fullscreen.isEnabled()){fullscreen.setEnabled(false,"back");return;}
         if(backPending)return;
         backPending=true;final long sequence=++backSequence,generation=lifecycleGeneration.get();
@@ -324,7 +368,7 @@ public final class MainActivity extends Activity {
     }
     @Override public void onBackPressed(){handleBack();}
     @Override public void onWindowFocusChanged(boolean hasFocus){super.onWindowFocusChanged(hasFocus);if(fullscreen!=null)fullscreen.windowFocusChanged(hasFocus);}
-    @Override protected void onPause(){paused=true;backSequence++;backPending=false;lifecycleGeneration.incrementAndGet();if(fullscreen!=null)fullscreen.setEnabled(false,"background");cancelActivePen();if(penTools!=null)penTools.pause();updateWifiLock();if(chatPane!=null)chatPane.pause();if(fastLink!=null)fastLink.pause();if(web!=null){web.evaluateJavascript("if(window.penTabletSuspend)window.penTabletSuspend();if(typeof releaseDeckHold===\'function\')releaseDeckHold();if(window.monitorSuspend)window.monitorSuspend();if(window.penSuspend)window.penSuspend();",null);web.onPause();}super.onPause();}
+    @Override protected void onPause(){paused=true;backSequence++;backPending=false;lifecycleGeneration.incrementAndGet();if(displayVideo!=null)displayVideo.stop("DeskWing moved to the background. Start the display again when ready.");if(fullscreen!=null)fullscreen.setEnabled(false,"background");cancelActivePen();if(penTools!=null)penTools.pause();updateWifiLock();if(chatPane!=null)chatPane.pause();if(fastLink!=null)fastLink.pause();if(web!=null){web.evaluateJavascript("if(window.penTabletSuspend)window.penTabletSuspend();if(typeof releaseDeckHold===\'function\')releaseDeckHold();if(window.monitorSuspend)window.monitorSuspend();if(window.penSuspend)window.penSuspend();",null);web.onPause();}super.onPause();}
     @Override protected void onResume(){super.onResume();paused=false;updateWifiLock();if(chatPane!=null)chatPane.resume();if(fastLink!=null)fastLink.resume();if(web!=null){web.onResume();web.evaluateJavascript("if(window.monitorResume)window.monitorResume();if(window.penTabletResume)window.penTabletResume();",null);}}
-    @Override protected void onDestroy(){closed=true;lifecycleGeneration.incrementAndGet();if(fullscreen!=null)fullscreen.close();cancelActivePen();if(penTools!=null)penTools.close();updateWifiLock();if(chatPane!=null)chatPane.hide();if(fastLink!=null)fastLink.close();network.shutdownNow();controls.shutdownNow();penControls.shutdownNow();urgent.shutdownNow();previews.shutdownNow();web.removeJavascriptInterface("DeckNative");web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){closed=true;lifecycleGeneration.incrementAndGet();if(displayVideo!=null)displayVideo.close();if(fullscreen!=null)fullscreen.close();cancelActivePen();if(penTools!=null)penTools.close();updateWifiLock();if(chatPane!=null)chatPane.hide();if(fastLink!=null)fastLink.close();network.shutdownNow();controls.shutdownNow();penControls.shutdownNow();urgent.shutdownNow();previews.shutdownNow();if(web!=null){web.removeJavascriptInterface("DeckNative");web.destroy();}super.onDestroy();}
 }
