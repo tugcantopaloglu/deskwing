@@ -1,6 +1,6 @@
 ---
 name: DeskWing
-description: A local workspace for stream controls, computer tools, ink, and a secondary Windows display.
+description: A local workspace for stream controls, shared ink, Windows pen input, and a secondary display.
 colors:
   canvas: "#101318"
   surface: "#1c222b"
@@ -129,6 +129,15 @@ components:
   pen-paper:
     backgroundColor: "{colors.paper}"
     rounded: "{rounded.control}"
+  pen-input-pad:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.secondary}"
+    rounded: "{rounded.control}"
+  pen-sync-conflict:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.secondary}"
+    rounded: "{rounded.field}"
+    padding: "14px 16px"
 ---
 
 # Design System: DeskWing
@@ -139,7 +148,7 @@ components:
 
 DeskWing retains the established studio interface: a near-black canvas, slate controls, bundled Manrope, authored line icons, and cyan emphasis. The direction is an extension of the working product. Large, legible controls and stable status positions support touch operation while the PC carries configuration and review.
 
-The interface expands into four workspaces: Stream Studio, Computer Copilot, Ink & notes, and Second display. Each task gets a useful working area. The board editor shows the board beside its inspector; ink gets a quiet paper canvas; secondary Windows content gets an unobstructed view. Connection and save state remain explicit.
+The interface includes Stream Studio, Computer Copilot, shared Ink & notes, Pen tablet, and Second display. Each task gets a useful working area. The board editor shows the board beside its inspector; shared ink gets a quiet paper canvas; Windows pen input gets a clearly labeled target and session state; secondary Windows content gets an unobstructed view. Connection, local save, sharing, and active input state remain explicit.
 
 **Key Characteristics:**
 
@@ -188,7 +197,7 @@ The interface uses the same family for headings and controls. Heavier labels mak
 ### Hierarchy
 
 - **Display** is the tablet header brand treatment, with a 24px override between 761px and 1100px. It is hidden in full-pad mode and is not a general heading style.
-- **Headline** is the Ink & notes heading. The desktop overview uses a 28px heading and the console brand uses 25px.
+- **Headline** is the Ink & notes and Pen tablet heading. The desktop overview uses a 28px heading and the console brand uses 25px.
 - **Title** is the desktop header at its main size. It steps to 19px below 1000px and 18px below 620px.
 - **Key label** is the large tablet action text. Responsive and full-pad overrides reduce it to preserve usable keys.
 - **Label** is form metadata. **Help** is supporting copy; longer instructions generally stay within 65–72 characters per line.
@@ -204,7 +213,7 @@ The desktop console has a 216px sidebar and 72px header. At 1000px or below the 
 
 The board editor uses a preview/inspector split: `minmax(320px, 1.3fr) minmax(280px, 1fr)`, with a 28px gap. At 1100px or below this becomes `minmax(240px, 1fr) minmax(230px, .9fr)` with an 18px gap. At 760px or below the inspector follows the preview vertically. Preview density choices are 12, 24, and 40; the preview paginates instead of growing without bounds.
 
-Ink uses a 3:1 drawing/notes split with a 24px gap. The paper has an 8:5 aspect ratio. At 1050px or below notes move beneath the drawing. At 580px or below toolbar spacing and paper corners tighten. The canvas remains distinct from ordinary scrollable fields.
+Ink uses a 3:1 drawing/notes split with a 24px gap. The paper has an 8:5 aspect ratio. At 1050px or below notes move beneath the drawing. At 580px or below toolbar spacing and paper corners tighten. Fullscreen hides unrelated app chrome, preserves a visible exit and sync state, and fits that same paper ratio into the available area. Show/Hide notes changes available space; it does not stretch the drawing. At 700px or below fullscreen notes move under the drawing. The canvas remains distinct from ordinary scrollable fields.
 
 Primary tablet and ordinary form controls use a 48px minimum height. New editor, pen, and live-filter controls commonly use 44px. Desktop sidebar controls use 42px at normal widths and 44px in the narrow layout; compact editor selection/drag affordances are smaller supporting targets. Preserve these distinctions instead of claiming every target is 44px.
 
@@ -232,7 +241,7 @@ Quiet buttons are slate with an outline; primary buttons are cyan with dark ink;
 
 ### Grouped navigation
 
-The active desktop item uses cyan text, a raised slate fill, and `aria-current="page"`. Workspaces also remain reachable through the compact mode selector. Keep setup credentials in their connection task and keep **Board editor**, **Ink & notes**, and **Second display** directly findable.
+The active desktop item uses cyan text, a raised slate fill, and `aria-current="page"`. Workspaces also remain reachable through the compact mode selector. Keep setup credentials in their connection task and keep **Board editor**, **Ink & notes**, **Pen tablet**, and **Second display** directly findable.
 
 ### Board preview and inspector
 
@@ -250,11 +259,19 @@ Soundpad's **All**, **Favourites**, and **Recent** choices stay beside search an
 
 ### Ink & notes
 
-Keep Pen/Eraser, ink color, width, Undo/Redo/Clear, and **Ignore fingers on canvas** together above the paper. The palm control is persistent and labeled. The selected tool uses cyan and `aria-pressed`. Notes remain an ordinary labeled text area beside or beneath the canvas; handwriting is an entry method for that field. Saved/error status and export remain visible without occupying the drawing itself.
+Keep Pen/Eraser, ink color, width, Undo/Redo/Clear, and **Ignore fingers on canvas** together above the paper. The palm control is persistent and labeled. The selected tool uses cyan and `aria-pressed`. Notes remain an ordinary labeled text area beside or beneath the canvas; handwriting is an entry method for that field. Local backup status and PC-sharing status are different messages. Explicit conflict controls explain both versions before replacing either one. The amber-outlined conflict panel stays readable in fullscreen.
+
+Fullscreen keeps **Exit fullscreen**, the tool strip, and compact sync state available. Notes are optional through Show/Hide notes. Secondary explanation and, on narrow screens, Export may move out of the focused view; exiting fullscreen restores them. Keep the fixed paper ratio and preserve committed data when a partial stroke is cancelled.
+
+### Pen tablet
+
+Visually distinguish the live Windows input surface from the shared paper document. Show the selected display/application, readiness, and whether a pen session is active. Start/Stop and the fullscreen exit must remain discoverable. Pressure and other telemetry describe input samples; they are not evidence that a specific target app painted a stroke. A change of focus, geometry, connection, or lifecycle must visibly end the current session when the input contract requires it.
+
+The input pad uses the regular slate surface within an inset field-colored stage, fits the chosen target's aspect ratio, and adds a cyan border for an active connection. A small outlined cyan cursor becomes filled during contact. Keep its explanatory hint distinct from real app pixels: this mode does not show a target-app video. Fullscreen retains target/session controls and hides PC target configuration; entering or leaving fullscreen ends the old session before using the new pad geometry.
 
 ### Second display
 
-Give the shared desktop area room and keep its lifecycle/sharing state legible. Its visual presentation must not imply full-motion playback, transmitted audio, or pen/touch interaction with Windows. The existing transport is a silent bounded JPEG view.
+Give the shared desktop area room and keep its lifecycle/sharing state legible. Its visual presentation must not imply full-motion playback, transmitted audio, or input forwarding by the display view itself. The existing display transport is a silent bounded JPEG view. Windows pen input is a separate explicitly started workspace; do not make a display screenshot look interactive merely because that other mode exists.
 
 ## Do's and Don'ts
 
@@ -273,4 +290,4 @@ Give the shared desktop area room and keep its lifecycle/sharing state legible. 
 - Don't make editor preview keys perform live actions.
 - Don't hide save failures, draft conflicts, or source availability behind a toast alone.
 - Don't decorate the canvas with sample ink that could be mistaken for a saved drawing.
-- Don't visually promise full palm rejection, built-in handwriting recognition, or a full-motion second display.
+- Don't visually promise full palm rejection, built-in handwriting recognition, universal drawing-app support, or a full-motion second display.

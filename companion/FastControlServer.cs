@@ -52,6 +52,7 @@ internal sealed class FastControlServer(DataStore store,FastCommands commands,St
         var principal=Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token)));
         principals[client]=principal;
         var ownedLease="";
+        var ownedPenLease="";
         var seen=new HashSet<int>();var recent=new Queue<int>();
         using var sendGate=new SemaphoreSlim(1,1);using var requestSlots=new SemaphoreSlim(4,4);
         async Task Send(byte[] bytes) {
@@ -83,7 +84,7 @@ internal sealed class FastControlServer(DataStore store,FastCommands commands,St
                 var body=request.TryGetProperty("body",out var value)?value.Clone():JsonSerializer.SerializeToElement(new{});
                 pending.RemoveAll(task=>task.IsCompleted);
                 pending.Add(Task.Run(async()=>{
-                    try{closed.Token.ThrowIfCancellationRequested();if(!store.Authenticate(token))throw new InvalidOperationException("This tablet was revoked.");var result=await commands.Execute(path,body,principal);if(result is FastCommands.HoldLease lease)Volatile.Write(ref ownedLease,lease.Lease);await Reply(new{id,result});}
+                    try{closed.Token.ThrowIfCancellationRequested();if(!store.Authenticate(token))throw new InvalidOperationException("This tablet was revoked.");var result=await commands.Execute(path,body,principal);if(result is FastCommands.HoldLease lease)Volatile.Write(ref ownedLease,lease.Lease);if(result is WindowsPen.PenLease penLease)Volatile.Write(ref ownedPenLease,penLease.Lease);await Reply(new{id,result});}
                     catch(Exception ex) when(ex is not OutOfMemoryException){try{await Reply(new{id,error=ex.Message});}catch(Exception failure) when(failure is not OutOfMemoryException){closed.Cancel();client.Dispose();}}
                     finally{requestSlots.Release();}
                 }));
@@ -95,7 +96,7 @@ internal sealed class FastControlServer(DataStore store,FastCommands commands,St
             try{await Task.WhenAll(pending);}catch(Exception ex) when(ex is not OutOfMemoryException){}
             holdsRelease();
         }
-        void holdsRelease(){commands.Release(principal,Volatile.Read(ref ownedLease));}
+        void holdsRelease(){commands.Release(principal,Volatile.Read(ref ownedLease));commands.ReleasePen(principal,Volatile.Read(ref ownedPenLease));}
     }
     public void Revoke(string principal){foreach(var connection in principals)if(connection.Value==principal)connection.Key.Dispose();}
     public async ValueTask DisposeAsync()

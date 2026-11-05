@@ -1,6 +1,6 @@
 # DeskWing security review — 2026-11-05
 
-Status: integrated scan, remediation, rescan, and dependency audits complete. No newly introduced Snyk finding remains. Seven pre-existing Low findings remain documented below.
+Status: the initial integrated scan, remediation, rescan, and dependency audits are complete. The expanded shared-ink/native-Windows-pen scan reported three additional warnings; remediation and a final rescan are in progress. Seven pre-existing Low findings remain documented below.
 
 ## Scanner availability and method
 
@@ -25,9 +25,13 @@ The new native pen routes use bounded text/PNG payloads. PNG export validates it
 
 The app does not add a remote handwriting-recognition service. The installed keyboard's own privacy policy and processing behavior still apply; handwriting recognition must not be advertised as guaranteed offline merely because the app adds no remote OCR.
 
-The iOS source uses a bundled-page/main-frame bridge gate, exact route allowlists, a private numeric PC address, immutable SHA-256 certificate pins verified before credentials are sent, bounded responses, no redirects, and a device-only Keychain item. A queued-write concern was corrected with a two-second deadline for controls whose request body has not started; release/cancel requests are exempt, long macro responses are not cut off merely for taking time, and ambiguous on-wire races are never retried. This is source review only: macOS compilation, Apple trust-stack behavior, URLSession timing, and physical-device validation remain separate gates.
+The iOS source uses a bundled-page/main-frame bridge gate, exact route allowlists, a private numeric PC address, immutable SHA-256 certificate pins verified before credentials are sent, bounded responses, no redirects, and a device-only Keychain item. A queued-write concern was corrected with a two-second deadline for controls whose request body has not started; pen writes use a shorter half-second deadline. Release/cancel requests are exempt, long macro responses are not cut off merely for taking time, and ambiguous on-wire races are never retried. This security review is source-only; macOS compilation, Apple trust-stack behavior, URLSession timing, and physical-device validation are separate checks recorded by their build/device owners.
 
 The Android packaging scripts confine proto-resource extraction to their new module directory, verify pinned tool hashes before execution, keep development signing/package identity separate, pass signing passwords by file, and refuse missing release keys. These PowerShell scripts were manually reviewed; PowerShell is not among the supported languages listed by the Snyk Code tool. The installer shortcut migration compares full canonical targets and preserves unrelated shortcuts.
+
+The expanded shared-ink service accepts only the documented JSON fields, finite bounded stroke coordinates, and a bounded notes document. Authenticated writes use a revision compare-and-swap and a private temporary file followed by atomic replacement. Invalid existing data is quarantined under a generated local name. Polling accepts one exact revision query; it does not expose board credentials or executable targets.
+
+An independent source review of native Windows pen input found no actionable new issue in the PC-local enable/target consent, authenticated paired-device ownership, exact-lease release, sequence/age limits, focus/geometry cancellation, pointer cleanup, keyboard/update exclusion, or Android/iOS suspension handling. Coordinate conversion follows the [Microsoft synthetic-pointer API specification](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-injectsyntheticpointerinput). This security review did not inject input; the separate verification owner reported that the opt-in, own-window native receiver test passed. That receiver source is included in the root scan scope.
 
 ## Final verification
 
@@ -40,6 +44,9 @@ The root-directory `snyk_code_scan` call included the integrated C#, Android Jav
 | Relevant regression | Author rebuilt cleanly and ran 16 reliability API checks successfully |
 | Post-fix `snyk_code_scan` | Success; 7 Low, 0 Medium, 0 High; no new findings compared with baseline |
 | Follow-up after default self-test stopped performing WAV playback | Root-directory `snyk_code_scan` again succeeded with the same 7 Low / 0 Medium / 0 High findings; no new findings |
+| Expanded shared-ink/native-Windows-pen scope | Success; 9 Low, 1 Medium, 0 High. Three newly reported warnings are being remediated: Android custom trust-manager validation, a literal ink-test secret, and the ink-test HTTP upload helper |
+| Expanded-scope remediations | `PinnedTrustManager` verifies the expected fingerprint and certificate validity before creating a platform trust manager anchored only to that certificate, then delegates server-chain validation. The ink fixture uses a per-run cryptographic secret and trusted HTTPS for oversized uploads |
+| Relevant expanded-scope regressions | Android SDK 36 Java compilation passed; production trust manager passed 31 fast API + 17 native Java checks with the real self-signed companion fixture, including wrong-pin and empty-chain rejection. The ink API owner reported all 38 assertions passing, including both oversized HTTPS upload cases |
 | `npm audit --prefix tests --json` | Exit 0; 0 vulnerabilities across the reported 6 dependencies |
 | `dotnet list companion/TabletDeck.csproj package --vulnerable --include-transitive --format json` | Exit 0; no vulnerable direct or transitive packages reported by NuGet |
 

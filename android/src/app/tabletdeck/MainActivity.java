@@ -49,9 +49,9 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public final class MainActivity extends Activity {
     private static final String UI_HOST="app.tabletdeck.local";
-    private static final Set<String> GET_PATHS=new HashSet<>(Arrays.asList("/api/computer/media","/api/computer","/api/computer/display","/api/ping","/api/mixer","/api/soundpad/recent","/api/profiles","/api/soundpad/favourites","/api/board","/api/state","/api/execution","/api/apps","/api/soundpad/library"));
-    private static final Set<String> POST_PATHS=new HashSet<>(Arrays.asList("/api/computer/follow","/api/computer/media/action","/api/computer/action","/api/computer/preset","/api/computer/display/frame","/api/monitor/frame","/api/ping","/api/profile-lock","/api/soundpad/recent/clear","/api/profile","/api/soundpad/favourites","/api/cancel","/api/hold","/api/action","/api/audio","/api/mute","/api/apps","/api/layout","/api/soundpad/play","/api/soundpad/library"));
-    private static final Set<String> UI_ASSETS=new HashSet<>(Arrays.asList("/modes.js","/modes.css","/readiness.css","/editor.js","/editor.css","/macro-editor.js","/macro-editor.css","/pen.js","/pen.css","/tablet-workflows.css","/soundpad-board.js","/media-touchbar.js","/media-touchbar.css","/computer.js","/computer.css","/index.html","/app.js","/features.js","/boards.js","/desktop.js","/studio.js","/monitor.js","/hardening.js","/latency.js","/style.css","/fonts/Manrope.ttf","/vendor/purify.min.js"));
+    private static final Set<String> GET_PATHS=new HashSet<>(Arrays.asList("/api/ink","/api/pen","/api/computer/media","/api/computer","/api/computer/display","/api/ping","/api/mixer","/api/soundpad/recent","/api/profiles","/api/soundpad/favourites","/api/board","/api/state","/api/execution","/api/apps","/api/soundpad/library"));
+    private static final Set<String> POST_PATHS=new HashSet<>(Arrays.asList("/api/ink","/api/pen","/api/computer/follow","/api/computer/media/action","/api/computer/action","/api/computer/preset","/api/computer/display/frame","/api/monitor/frame","/api/ping","/api/profile-lock","/api/soundpad/recent/clear","/api/profile","/api/soundpad/favourites","/api/cancel","/api/hold","/api/action","/api/audio","/api/mute","/api/apps","/api/layout","/api/soundpad/play","/api/soundpad/library"));
+    private static final Set<String> UI_ASSETS=new HashSet<>(Arrays.asList("/pen-tablet.js","/pen-tablet.css","/modes.js","/modes.css","/readiness.css","/editor.js","/editor.css","/macro-editor.js","/macro-editor.css","/pen.js","/pen.css","/tablet-workflows.css","/soundpad-board.js","/media-touchbar.js","/media-touchbar.css","/computer.js","/computer.css","/index.html","/app.js","/features.js","/boards.js","/desktop.js","/studio.js","/monitor.js","/hardening.js","/latency.js","/style.css","/fonts/Manrope.ttf","/vendor/purify.min.js"));
     private WebView web;
     private ChatPane chatPane;
     private NativePenTools penTools;
@@ -59,9 +59,12 @@ public final class MainActivity extends Activity {
     private final ExecutorService network=boundedExecutor(2,32);
     private final ExecutorService controls=boundedExecutor(3,16);
     private final ExecutorService urgent=boundedExecutor(1,8);
+    private final ExecutorService penControls=boundedExecutor(1,2);
     private final ExecutorService previews=boundedExecutor(1,2);
     private final AtomicLong lifecycleGeneration=new AtomicLong();
     private final ConcurrentHashMap<Integer,Boolean> fastPending=new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer,PenRequest> fastPenPending=new ConcurrentHashMap<>();
+    private final PenLeaseTracker<PenTarget> penLeases=new PenLeaseTracker<>();
     private FastLink fastLink;
     private int pendingScan;
     private SSLSocketFactory cachedFactory;
@@ -121,10 +124,10 @@ public final class MainActivity extends Activity {
                 JSONObject message=new JSONObject(json);String type=message.optString("type");
                 if(type.equals("ready"))return message.optInt("protocol")==1;
                 if(type.equals("state")){final String state=message.getJSONObject("state").toString();runOnUiThread(()->{if(!closed)web.evaluateJavascript("if(window.deckPush)window.deckPush("+state+");",null);});}
-                else if(message.has("id")){int id=message.getInt("id");if(id==0){fastLink.pong();return false;}if(fastPending.remove(id)!=null)deliver(id,message.has("error")?new JSONObject().put("error",message.getString("error")):message.getJSONObject("result"));}
+                else if(message.has("id")){int id=message.getInt("id");if(id==0){fastLink.pong();return false;}PenRequest penRequest=fastPenPending.remove(id);if(fastPending.remove(id)!=null){JSONObject result=message.has("error")?new JSONObject().put("error",message.getString("error")):message.getJSONObject("result");observePenResult(penRequest,result);deliver(id,result);}}
                 return false;
             }
-            public void disconnected(){runOnUiThread(()->{if(!closed)web.evaluateJavascript("if(window.deckStreamClosed)window.deckStreamClosed();",null);});for(Integer id:fastPending.keySet())if(fastPending.remove(id)!=null){try{deliver(id,new JSONObject().put("error","Fast link closed before confirmation. The action may have run; it was not repeated."));}catch(Exception ignored){}}}
+            public void disconnected(){cancelPenLease(penLeases.takeIf(target->target.fast));runOnUiThread(()->{if(!closed)web.evaluateJavascript("if(window.deckStreamClosed)window.deckStreamClosed();",null);});for(Integer id:fastPending.keySet())if(fastPending.remove(id)!=null){fastPenPending.remove(id);try{deliver(id,new JSONObject().put("error","Fast link closed before confirmation. The action may have run; it was not repeated."));}catch(Exception ignored){}}}
         });fastLink.start();
     }
     private static WebResourceResponse blocked(){return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));}
@@ -134,10 +137,10 @@ public final class MainActivity extends Activity {
     }
     public final class Bridge {
         @JavascriptInterface public void dispatch(String message) {
-            if(message==null||message.length()>((NativePenTools.MAX_PNG_BYTES+2)/3)*4+2048||closed)return;
+            if(message==null||message.length()>BridgeRequestLimits.MAX_EXPORT_ENVELOPE_BYTES||closed)return;
             final String requestedPath;final JSONObject request;
             try{request=new JSONObject(message);requestedPath=request.getString("path");}catch(Exception ignored){return;}
-            if(message.length()>16384&&!requestedPath.equals("/local/export-image")){failRequest(request,"This request exceeds the tablet control limit.");return;}
+            try{BridgeRequestLimits.validate(requestedPath,request.optString("method","POST"),message,request.optJSONObject("body")==null?"{}":request.getJSONObject("body").toString());}catch(Exception ex){failRequest(request,friendly(ex));return;}
             if(requestedPath.equals("/local/handwriting")||requestedPath.equals("/local/export-image")){
                 if(!request.optString("method","POST").equals("POST")){failRequest(request,"Local pen tools require a POST request.");return;}
                 runOnUiThread(()->{try{if(paused||closed)throw new IllegalStateException("Open the tablet workspace before using pen tools.");penTools.request(request.getInt("id"),requestedPath,request.optJSONObject("body")==null?new JSONObject():request.getJSONObject("body"));}catch(Exception ex){failRequest(request,friendly(ex));}});return;
@@ -145,8 +148,9 @@ public final class MainActivity extends Activity {
             if(requestedPath.equals("/native/chat")){runOnUiThread(()->{try{deliver(request.getInt("id"),chatPane.command(request.getJSONObject("body")));}catch(Exception ex){try{deliver(request.getInt("id"),new JSONObject().put("error",ex.getMessage()));}catch(Exception ignored){}}});return;}
             final long submittedNanos=System.nanoTime(),submittedGeneration=lifecycleGeneration.get();
             JSONObject submittedBody=request.optJSONObject("body");
-            boolean safetyRequest=requestedPath.equals("/api/cancel")||requestedPath.equals("/api/hold")&&submittedBody!=null&&submittedBody.optString("operation").equals("release");
-            ExecutorService executor=safetyRequest?urgent:requestedPath.equals("/api/monitor/frame")||requestedPath.equals("/api/computer/display/frame")?previews:ControlRequestPolicy.isInteractiveWrite(requestedPath,request.optString("method","POST"))?controls:network;
+            String submittedOperation=submittedBody==null?"":submittedBody.optString("operation");
+            boolean safetyRequest=requestedPath.equals("/api/cancel")||requestedPath.equals("/api/hold")&&submittedOperation.equals("release")||requestedPath.equals("/api/pen")&&(submittedOperation.equals("end")||submittedOperation.equals("cancel"));
+            ExecutorService executor=safetyRequest?urgent:requestedPath.equals("/api/pen")&&request.optString("method","POST").equals("POST")?penControls:requestedPath.equals("/api/monitor/frame")||requestedPath.equals("/api/computer/display/frame")?previews:ControlRequestPolicy.isInteractiveWrite(requestedPath,request.optString("method","POST"))?controls:network;
             try{executor.execute(()->{
                 int id=0;JSONObject result;
                 try {
@@ -156,27 +160,30 @@ public final class MainActivity extends Activity {
                     if(path.equals("/native/connection"))result=connection();
                     else if(path.equals("/native/scan")){startScan(id);return;}
                     else if(path.equals("/native/diagnostics/reset")){fastLink.clearStatistics();result=connection();}
-                    else if(path.equals("/native/forget")){lifecycleGeneration.incrementAndGet();preferences.edit().clear().commit();updateWifiLock();fastLink.reset();result=connection();}
+                    else if(path.equals("/native/forget")){lifecycleGeneration.incrementAndGet();cancelActivePen();preferences.edit().clear().commit();updateWifiLock();fastLink.reset();result=connection();}
                     else if(path.equals("/native/transport")){
                         String mode=body.getString("mode");if(!mode.equals("usb")&&!mode.equals("wifi"))throw new Exception("Choose Wi-Fi or USB.");
                         String host=body.optString("host",preferences.getString("host","")).trim();
                         if(mode.equals("wifi"))validateHost(host);
-                        lifecycleGeneration.incrementAndGet();preferences.edit().putString("mode",mode).putString("host",host).commit();updateWifiLock();fastLink.clearStatistics();fastLink.reset();result=connection();
+                        lifecycleGeneration.incrementAndGet();cancelActivePen();preferences.edit().putString("mode",mode).putString("host",host).commit();updateWifiLock();fastLink.clearStatistics();fastLink.reset();result=connection();
                     }
                     else if(path.equals("/native/pair"))result=pair(body);
                     else {
-                        if(!(method.equals("GET")&&GET_PATHS.contains(path))&&!(method.equals("POST")&&POST_PATHS.contains(path)))throw new Exception("This request is not allowed from the tablet.");
+                        if(!(method.equals("GET")&&GET_PATHS.contains(path))&&!BridgeRequestLimits.isInkRead(path,method)&&!(method.equals("POST")&&POST_PATHS.contains(path)))throw new Exception("This request is not allowed from the tablet.");
                         String token=preferences.getString("token","");if(token.isEmpty())throw new Exception("Pair this tablet with your PC first.");
                         ControlRequestPolicy.validate(path,method,body.optString("operation"),paused,submittedNanos,System.nanoTime(),lifecycleGeneration.get(),submittedGeneration);
                         if(paused&&(path.equals("/api/monitor/frame")||path.equals("/api/computer/display/frame")))throw new Exception("Previews are paused while the tablet app is in the background.");
                         final String operation=body.optString("operation");
                         Runnable beforeCommit=()->ControlRequestPolicy.validate(path,method,operation,paused,submittedNanos,System.nanoTime(),lifecycleGeneration.get(),submittedGeneration);
+                        PenRequest penRequest=path.equals("/api/pen")&&method.equals("POST")?new PenRequest(operation,body.optString("lease"),submittedGeneration,submittedNanos,penTarget()):null;
                         if(method.equals("POST")&&fastPath(path)&&fastLink!=null&&fastLink.connected()){
                             fastPending.put(id,Boolean.TRUE);
-                            try{if(fastLink.send(request.toString(),beforeCommit))return;fastPending.remove(id);}catch(IllegalStateException ex){fastPending.remove(id);throw ex;}catch(Exception ex){fastPending.remove(id);throw new Exception("Connection lost before confirmation. The action may have run; it was not repeated.",ex);}
+                            if(penRequest!=null)fastPenPending.put(id,penRequest.forFastLink());
+                            try{if(fastLink.send(request.toString(),beforeCommit))return;fastPending.remove(id);fastPenPending.remove(id);}catch(IllegalStateException ex){fastPending.remove(id);fastPenPending.remove(id);throw ex;}catch(Exception ex){fastPending.remove(id);fastPenPending.remove(id);throw new Exception("Connection lost before confirmation. The action may have run; it was not repeated.",ex);}
                         }
                         String host=preferences.getString("mode","wifi").equals("usb")?"127.0.0.1":preferences.getString("host","");
                         result=send(host,path,method,body,preferences.getString("fingerprint",""),token,null,beforeCommit);
+                        observePenResult(penRequest,result);
                     }
                 }catch(Exception ex){result=new JSONObject();try{result.put("error",friendly(ex));}catch(Exception ignored){}}
                 deliver(id,result);
@@ -184,7 +191,34 @@ public final class MainActivity extends Activity {
         }
     }
     private void failRequest(JSONObject request,String message){try{deliver(request.getInt("id"),new JSONObject().put("error",message));}catch(Exception ignored){}}
-    private static boolean fastPath(String path){return path.equals("/api/ping")||path.equals("/api/cancel")||path.equals("/api/apps")||path.equals("/api/action")||path.equals("/api/audio")||path.equals("/api/mute")||path.equals("/api/hold");}
+    private static final class PenTarget {
+        final String host,fingerprint,token;final int port;final boolean fast;
+        PenTarget(String host,int port,String fingerprint,String token,boolean fast){this.host=host;this.port=port;this.fingerprint=fingerprint;this.token=token;this.fast=fast;}
+        PenTarget forFastLink(){return new PenTarget(host,port,fingerprint,token,true);}
+    }
+    private static final class PenRequest {
+        final String operation,lease;final long generation,submittedNanos;final PenTarget target;
+        PenRequest(String operation,String lease,long generation,long submittedNanos,PenTarget target){this.operation=operation;this.lease=lease;this.generation=generation;this.submittedNanos=submittedNanos;this.target=target;}
+        PenRequest forFastLink(){return new PenRequest(operation,lease,generation,submittedNanos,target.forFastLink());}
+    }
+    private PenTarget penTarget(){return new PenTarget(preferences.getString("mode","wifi").equals("usb")?"127.0.0.1":preferences.getString("host",""),preferences.getInt("port",8743),preferences.getString("fingerprint",""),preferences.getString("token",""),false);}
+    private void observePenResult(PenRequest request,JSONObject result) throws Exception {
+        if(request==null||result.has("error"))return;
+        if(request.operation.equals("begin")){
+            String lease=result.optString("lease","");
+            boolean timely=PenLeaseTracker.timelyBegin(request.submittedNanos,System.nanoTime());
+            cancelPenLease(penLeases.accepted(lease,request.target,request.generation,lifecycleGeneration.get(),!paused&&!closed&&timely));
+            // A pause can race the argument snapshot above. Detach this exact response only;
+            // a newly started replacement lease must never be cancelled by an older result.
+            if(paused||closed||request.generation!=lifecycleGeneration.get()||!timely){cancelPenLease(penLeases.take(lease));result.put("error",timely?"The pen session was cancelled when the workspace changed. Start a new session.":"The pen session start arrived too late. Check the connection and start again.");}
+        }else if(request.operation.equals("end")||request.operation.equals("cancel"))penLeases.ended(request.lease);
+    }
+    private void cancelActivePen(){cancelPenLease(penLeases.take());}
+    private void cancelPenLease(PenLeaseTracker.Lease<PenTarget> lease){
+        if(lease==null)return;
+        try{urgent.execute(()->{try{PenTarget target=lease.target;sendTo(target.host,"/api/pen","POST",new JSONObject().put("operation","cancel").put("lease",lease.value),target.fingerprint,target.token,null,target.port);}catch(Exception ignored){/* The PC also releases exact fast-link leases and expires missing renewals. */}});}catch(RejectedExecutionException ignored){/* A bounded queue never retains pointer movements for replay. */}
+    }
+    private static boolean fastPath(String path){return path.equals("/api/pen")||path.equals("/api/ping")||path.equals("/api/cancel")||path.equals("/api/apps")||path.equals("/api/action")||path.equals("/api/audio")||path.equals("/api/mute")||path.equals("/api/hold");}
     private synchronized void startScan(int id) throws Exception {if(pendingScan!=0)throw new Exception("A pairing scan is already open.");pendingScan=id;runOnUiThread(()->{try{startActivityForResult(new Intent(this,QrScanActivity.class),42);}catch(Exception ex){int request=pendingScan;pendingScan=0;try{deliver(request,new JSONObject().put("error","Camera scanner unavailable. Use manual pairing."));}catch(Exception ignored){}}});}
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(penTools!=null&&penTools.activityResult(request,result,data))return;if(request!=42)return;int id=pendingScan;pendingScan=0;if(id==0)return;try{if(result!=RESULT_OK||data==null)throw new Exception(data==null?"Scan cancelled. You can pair manually.":data.getStringExtra("error")==null?"Scan cancelled.":data.getStringExtra("error"));PairingPayload p=PairingPayload.parse(data.getStringExtra("pairing"));deliver(id,new JSONObject().put("host",p.host).put("mode",p.mode).put("port",p.port).put("controlPort",p.controlPort).put("certificate",p.certificate).put("code",p.code));}catch(Exception ex){try{deliver(id,new JSONObject().put("error",ex.getMessage()));}catch(Exception ignored){}}}
     private void deliver(int id,JSONObject result){final String json=result.toString();runOnUiThread(()->{if(!closed)web.evaluateJavascript("window.nativeResult("+id+","+json+");",null);});}
@@ -201,7 +235,7 @@ public final class MainActivity extends Activity {
         JSONObject request=new JSONObject().put("code",code).put("name",Build.MANUFACTURER+" "+Build.MODEL);
         JSONObject response=sendTo(mode.equals("usb")?"127.0.0.1":host,"/api/pair","POST",request,certificate,"",actualFingerprint,port);
         if(actualFingerprint[0]==null||!actualFingerprint[0].equals(response.getString("fingerprint")))throw new Exception("The PC certificate changed. Generate a new pairing code.");
-        lifecycleGeneration.incrementAndGet();preferences.edit().putString("pairingId",java.util.UUID.randomUUID().toString()).putInt("port",port).putInt("controlPort",controlPort).putString("host",host).putString("mode",mode).putString("fingerprint",actualFingerprint[0]).putString("token",response.getString("token")).commit();
+        lifecycleGeneration.incrementAndGet();cancelActivePen();preferences.edit().putString("pairingId",java.util.UUID.randomUUID().toString()).putInt("port",port).putInt("controlPort",controlPort).putString("host",host).putString("mode",mode).putString("fingerprint",actualFingerprint[0]).putString("token",response.getString("token")).commit();
         updateWifiLock();fastLink.clearStatistics();fastLink.reset();return connection();
     }
     private static void validateHost(String host) throws Exception {
@@ -235,7 +269,8 @@ public final class MainActivity extends Activity {
             InputStream stream=status>=200&&status<300?conn.getInputStream():conn.getErrorStream();
             if(stream==null)throw new Exception("The PC refused the connection ("+status+").");
             ByteArrayOutputStream data=new ByteArrayOutputStream();
-            try(InputStream input=stream){byte[] buffer=new byte[8192];int count;while((count=input.read(buffer))!=-1){data.write(buffer,0,count);if(data.size()>8*1024*1024)throw new Exception("PC response exceeds limit.");}}
+            int responseLimit=path.equals("/api/ink")||BridgeRequestLimits.isInkRead(path,method)?BridgeRequestLimits.MAX_INK_ENVELOPE_BYTES:8*1024*1024;
+            try(InputStream input=stream){byte[] buffer=new byte[8192];int count;while((count=input.read(buffer))!=-1){data.write(buffer,0,count);if(data.size()>responseLimit)throw new Exception("PC response exceeds limit.");}}
             complete=true;JSONObject response=new JSONObject(data.toString("UTF-8"));
             if(status<200||status>=300)throw new Exception(response.optString("error","The PC refused this action ("+status+")."));
             return response;
@@ -243,18 +278,7 @@ public final class MainActivity extends Activity {
     }
     private synchronized SSLSocketFactory pinnedFactory(String expected,String[] actual) throws Exception {
         if(actual==null&&cachedFactory!=null&&cachedPin.equals(expected))return cachedFactory;
-        X509TrustManager trust=new X509TrustManager(){
-            public X509Certificate[] getAcceptedIssuers(){return new X509Certificate[0];}
-            public void checkClientTrusted(X509Certificate[] chain,String auth) throws CertificateException {throw new CertificateException("Client certificates are not supported.");}
-            public void checkServerTrusted(X509Certificate[] chain,String auth) throws CertificateException {
-                try {
-                    if(chain.length==0)throw new CertificateException("No PC certificate.");
-                    chain[0].checkValidity();String found=hash(chain[0]);
-                    if(!MessageDigest.isEqual(found.substring(0,expected.length()).getBytes(StandardCharsets.US_ASCII),expected.getBytes(StandardCharsets.US_ASCII)))throw new CertificateException("PC certificate code does not match.");
-                    if(actual!=null)actual[0]=found;
-                }catch(CertificateException ex){throw ex;}catch(Exception ex){throw new CertificateException("Cannot verify this PC.",ex);}
-            }
-        };
+        X509TrustManager trust=new PinnedTrustManager(expected,actual==null?null:fingerprint->actual[0]=fingerprint);
         SSLContext context=SSLContext.getInstance("TLS");context.init(null,new TrustManager[]{trust},new java.security.SecureRandom());
         SSLSocketFactory factory=context.getSocketFactory();if(actual==null){cachedFactory=factory;cachedPin=expected;}return factory;
     }
@@ -271,7 +295,7 @@ public final class MainActivity extends Activity {
         }catch(RuntimeException ignored){/* Unsupported Wi-Fi hardware keeps the normal transport. */}
     }
     @Override public void onBackPressed(){web.evaluateJavascript("(function(){var d=document.querySelector('#confirm-dialog');if(d.open){d.close('cancel');return true;}if(document.querySelector('#panel').open){document.querySelector('#close-panel').click();return true;}return false;})()",result->{if("false".equals(result))finish();});}
-    @Override protected void onPause(){paused=true;lifecycleGeneration.incrementAndGet();if(penTools!=null)penTools.pause();updateWifiLock();if(chatPane!=null)chatPane.pause();if(fastLink!=null)fastLink.pause();if(web!=null){web.evaluateJavascript("if(typeof releaseDeckHold===\'function\')releaseDeckHold();if(window.monitorSuspend)window.monitorSuspend();if(window.penSuspend)window.penSuspend();",null);web.onPause();}super.onPause();}
-    @Override protected void onResume(){super.onResume();paused=false;updateWifiLock();if(chatPane!=null)chatPane.resume();if(fastLink!=null)fastLink.resume();if(web!=null){web.onResume();web.evaluateJavascript("if(window.monitorResume)window.monitorResume();",null);}}
-    @Override protected void onDestroy(){closed=true;lifecycleGeneration.incrementAndGet();if(penTools!=null)penTools.close();updateWifiLock();if(chatPane!=null)chatPane.hide();if(fastLink!=null)fastLink.close();network.shutdownNow();controls.shutdownNow();urgent.shutdownNow();previews.shutdownNow();web.removeJavascriptInterface("DeckNative");web.destroy();super.onDestroy();}
+    @Override protected void onPause(){paused=true;lifecycleGeneration.incrementAndGet();cancelActivePen();if(penTools!=null)penTools.pause();updateWifiLock();if(chatPane!=null)chatPane.pause();if(fastLink!=null)fastLink.pause();if(web!=null){web.evaluateJavascript("if(window.penTabletSuspend)window.penTabletSuspend();if(typeof releaseDeckHold===\'function\')releaseDeckHold();if(window.monitorSuspend)window.monitorSuspend();if(window.penSuspend)window.penSuspend();",null);web.onPause();}super.onPause();}
+    @Override protected void onResume(){super.onResume();paused=false;updateWifiLock();if(chatPane!=null)chatPane.resume();if(fastLink!=null)fastLink.resume();if(web!=null){web.onResume();web.evaluateJavascript("if(window.monitorResume)window.monitorResume();if(window.penTabletResume)window.penTabletResume();",null);}}
+    @Override protected void onDestroy(){closed=true;lifecycleGeneration.incrementAndGet();cancelActivePen();if(penTools!=null)penTools.close();updateWifiLock();if(chatPane!=null)chatPane.hide();if(fastLink!=null)fastLink.close();network.shutdownNow();controls.shutdownNow();penControls.shutdownNow();urgent.shutdownNow();previews.shutdownNow();web.removeJavascriptInterface("DeckNative");web.destroy();super.onDestroy();}
 }

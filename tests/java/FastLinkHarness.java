@@ -1,4 +1,5 @@
 import app.tabletdeck.FastLink;
+import app.tabletdeck.PinnedTrustManager;
 import javax.net.ssl.*;
 import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
@@ -13,14 +14,15 @@ public final class FastLinkHarness {
         final String pin=System.getenv("DECK_TEST_PIN"),token=System.getenv("DECK_TEST_TOKEN"),action=System.getenv("DECK_TEST_ACTION");
         final int port=Integer.parseInt(System.getenv("DECK_TEST_PORT"));
         SSLContext context=SSLContext.getInstance("TLS");
-        context.init(null,new TrustManager[]{new X509TrustManager(){
-            public X509Certificate[] getAcceptedIssuers(){return new X509Certificate[0];}
-            public void checkClientTrusted(X509Certificate[] chain,String auth) throws java.security.cert.CertificateException{throw new java.security.cert.CertificateException("No client certificates");}
-            public void checkServerTrusted(X509Certificate[] chain,String auth) throws java.security.cert.CertificateException{
-                try{chain[0].checkValidity();StringBuilder found=new StringBuilder();for(byte value:MessageDigest.getInstance("SHA-256").digest(chain[0].getEncoded()))found.append(String.format("%02X",value));if(!found.toString().equals(pin))throw new java.security.cert.CertificateException("Wrong fixture certificate");}
-                catch(java.security.cert.CertificateException ex){throw ex;}catch(Exception ex){throw new java.security.cert.CertificateException(ex);}
-            }
-        }},null);
+        context.init(null,new TrustManager[]{new PinnedTrustManager(pin,null)},null);
+        try(SSLSocket probe=(SSLSocket)context.getSocketFactory().createSocket("127.0.0.1",port)){
+            probe.setSoTimeout(3000);probe.startHandshake();
+            X509Certificate peer=(X509Certificate)probe.getSession().getPeerCertificates()[0];
+            final String[] found={null};new PinnedTrustManager(pin.substring(0,24),fingerprint->found[0]=fingerprint).checkServerTrusted(new X509Certificate[]{peer},"RSA");
+            check(pin.equals(found[0]),"pairing code verifies the full self-signed PC certificate through platform trust validation");
+            try{new PinnedTrustManager(new String(new char[64]).replace('\0','0'),value->{throw new AssertionError("Wrong pin callback");}).checkServerTrusted(new X509Certificate[]{peer},"RSA");throw new AssertionError("Wrong pin accepted");}catch(java.security.cert.CertificateException expected){check(true,"wrong certificate pin is rejected before trust-anchor creation");}
+            try{new PinnedTrustManager(pin,null).checkServerTrusted(new X509Certificate[0],"RSA");throw new AssertionError("Empty chain accepted");}catch(java.security.cert.CertificateException expected){check(true,"empty certificate chain is rejected");}
+        }
         CountDownLatch ready=new CountDownLatch(1),result=new CountDownLatch(1),state=new CountDownLatch(1),reconnected=new CountDownLatch(2),pong=new CountDownLatch(1);
         FastLink link=new FastLink(new FastLink.Listener(){
             public FastLink.Settings settings(){return new FastLink.Settings("127.0.0.1",port,token,pin,context.getSocketFactory());}

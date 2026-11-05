@@ -1,5 +1,5 @@
 'use strict';
-// One navigation boundary for the board, contextual controls, local ink and display view.
+// One navigation boundary for the board, contextual controls, shared ink, Windows pen and display view.
 (function(){
   const baseSwitch=setComputerMode,baseRender=renderComputer;
   let current='studio',switching=false;
@@ -13,16 +13,16 @@
       const display=document.getElementById('computer-display');if(display)display.open=true;
     }
     if(desktopConsole){
-      if(current==='computer'||current==='pen'||current==='display'){
+      if(current==='computer'||current==='pen'||current==='pentablet'||current==='display'){
         document.querySelectorAll('.console-nav button').forEach(button=>button.removeAttribute('aria-current'));
-        document.getElementById(current==='pen'?'console-pen':current==='display'?'console-display':'console-computer')?.setAttribute('aria-current','page');
-        document.getElementById('console-title').textContent=panel.open?document.getElementById('panel-title').textContent:current==='pen'?'Ink & notes':current==='display'?'Second display':'Computer Copilot';
+        document.getElementById(current==='pen'?'console-pen':current==='pentablet'?'console-pen-tablet':current==='display'?'console-display':'console-computer')?.setAttribute('aria-current','page');
+        document.getElementById('console-title').textContent=panel.open?document.getElementById('panel-title').textContent:current==='pen'?'Ink & notes':current==='pentablet'?'Pen tablet':current==='display'?'Second display':'Computer Copilot';
       }
     }
   }
   renderComputer=function(...args){baseRender(...args);reflect();};
   async function change(value){
-    const next=['studio','computer','pen','display'].includes(value)?value:'studio';
+    const next=['studio','computer','pen','pentablet','display'].includes(value)?value:'studio';
     if(switching){reflect();return false;}
     if(typeof DeckEditor!=='undefined'&&DeckEditor.isOpen()&&DeckEditor.isSaving?.()){notice('Wait for the board save to finish before changing workspaces.',true);reflect();return false;}
     if(next===current){reflect();return true;}
@@ -42,6 +42,7 @@
       if(typeof setMonitorOpen==='function')setMonitorOpen(false);
       if(next!=='display'&&typeof stopComputerDisplayView==='function')stopComputerDisplayView();
       window.DeskPen?.setActive(next==='pen');
+      window.DeskPenTablet?.setActive(next==='pentablet');
       current=next;reflect();
       if(next==='display')await refreshComputerDisplay();
       return true;
@@ -54,6 +55,7 @@
   document.addEventListener('DOMContentLoaded',()=>{
     if(selector())selector().onchange=()=>change(selector().value);
     document.getElementById('console-pen')?.addEventListener('click',()=>change('pen'));
+    document.getElementById('console-pen-tablet')?.addEventListener('click',()=>change('pentablet'));
     document.getElementById('console-display')?.addEventListener('click',()=>change('display'));
   },{once:true});
 })();

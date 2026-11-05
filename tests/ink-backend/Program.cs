@@ -1,0 +1,1 @@
+TabletDeck.InkWorkspaceTests.Run();

@@ -35,8 +35,8 @@ Requested 2026-11-05: implement every inspection finding, improve the design, an
 - [x] Add a complete regression entry point and Windows CI coverage.
 - [x] Run relevant existing and new regression suites and build both components.
 - [x] Run required Snyk scan when its tool is available; record any concrete tooling blocker.
-- [ ] Inspect desktop/tablet layouts, pen/scratchpad states and accessibility; fix material findings.
-- [ ] Document changes, compatibility, hardware rehearsal procedure and actual verification limits.
+- [x] Inspect desktop/tablet layouts, pen/scratchpad states and accessibility; fix material findings.
+- [x] Document changes, compatibility, hardware rehearsal procedure and actual verification limits.
 - [ ] Rehearse physical Xiaomi stylus, handwriting IME, USB/Wi-Fi interruptions, held keys and concurrent media when hardware is available.
 
 ## Verified checkpoint
@@ -48,11 +48,13 @@ Requested 2026-11-05: implement every inspection finding, improve the design, an
 ## 7. Store and iOS preparation
 - [x] Add SDK36 Android APK/AAB packaging with original-signer verification.
 - [x] Prepare secure iOS host, shared-asset sync, XCTest and macOS CI.
-- [ ] Run hosted macOS build/tests and resolve compilation/runtime issues (user authorized development branch push).
+- [x] Run hosted macOS build/tests and resolve compilation/runtime issues (unsigned iOS simulator job passed for e56f21e on hosted macOS).
 - [ ] Finish privacy/support/store assets, signing and device rehearsal before any store submission.
 
 ## 8. Expanded pen workflows (added by user)
-- [ ] Mirror scratchpad ink and notes to the PC with local backup, revision conflicts and reconnection handling.
-- [ ] Add native Windows pen input for Whiteboard/Photoshop and other Windows Ink apps, with pressure/tilt and explicit PC target/permission.
-- [ ] Add fullscreen scratchpad and fullscreen pen-tablet surface with reachable exit.
+- [x] Mirror scratchpad ink and notes to the PC with local backup, revision conflicts and reconnection handling.
+- [x] Add native Windows pen input for Windows Ink apps, with pressure/tilt and explicit PC target/permission (Whiteboard web/Teams and Photoshop still need app-specific tests).
+- [x] Add fullscreen scratchpad and fullscreen pen-tablet surface with reachable exit.
 - [ ] Validate expanded pen modes, update packages, rerun security/regressions and document verified app compatibility.
+
+Expanded pen evidence: shared ink passed 50 backend and 38 HTTP checks; native Windows receiver confirmed real position, pressure, tilt and clean release; 56 two-client/fullscreen browser checks passed. Independent visual review passed all 16 final captures. Microsoft retired standalone Whiteboard; physical testing uses the local diagnostic canvas unless a supported web/Teams account is available.

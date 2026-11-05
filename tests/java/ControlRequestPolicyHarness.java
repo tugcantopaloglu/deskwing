@@ -5,7 +5,7 @@ public final class ControlRequestPolicyHarness {
     private static final long NOW = 10_000_000_000L;
     private static final String[] CONTROLS = {
         "/api/action", "/api/audio", "/api/mute", "/api/apps", "/api/hold",
-        "/api/soundpad/play", "/api/computer/action", "/api/computer/media/action",
+        "/api/soundpad/play", "/api/pen", "/api/computer/action", "/api/computer/media/action",
         "/api/computer/preset", "/api/computer/follow", "/api/layout", "/api/profile",
         "/api/soundpad/favourites", "/api/soundpad/recent/clear"
     };
@@ -53,8 +53,20 @@ public final class ControlRequestPolicyHarness {
         reject("/api/hold", "renew", true, NOW, NOW, 7, 7, "hold renewal cannot keep background keys alive");
         reject("/api/hold", "Release", true, NOW, NOW, 7, 7, "release exemption requires exact operation");
         reject("/api/action", "release", true, NOW, NOW, 7, 7, "other actions cannot claim hold-release exemption");
+        for (String operation : new String[]{"end", "cancel"}) {
+            validate("/api/pen", "POST", operation, true, 0, NOW, 8, 7);
+            check(true, "pen " + operation + " survives pause, stale queue and generation change");
+            reject("/api/action", operation, true, NOW, NOW, 7, 7, "other actions cannot claim pen " + operation + " exemption");
+        }
+        for (String operation : new String[]{"begin", "samples", "renew", "END", "Cancel"}) {
+            reject("/api/pen", operation, true, NOW, NOW, 7, 7, "pen " + operation + " cannot run in background");
+            reject("/api/pen", operation, false, NOW, NOW + ControlRequestPolicy.MAX_QUEUE_AGE_NANOS + 1, 7, 7,
+                "pen " + operation + " cannot replay stale data");
+        }
+        validate("/api/pen", "POST", "samples", false, NOW, NOW, 7, 7);
+        check(true, "fresh foreground pen samples remain allowed");
 
-        for (String path : new String[]{"/api/ping", "/api/soundpad/library", "/api/monitor/frame", "/api/computer/display/frame"}) {
+        for (String path : new String[]{"/api/ping", "/api/soundpad/library", "/api/monitor/frame", "/api/computer/display/frame", "/api/ink"}) {
             validate(path, "POST", "", true, 0, NOW, 8, 7);
             check(!ControlRequestPolicy.isInteractiveWrite(path, "POST"), "read-like POST has no interactive write policy " + path);
         }

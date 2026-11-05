@@ -10,7 +10,7 @@ public final class ControlRequestPolicy {
     public static final long MAX_QUEUE_AGE_NANOS = 2_000_000_000L;
     private static final Set<String> INTERACTIVE_WRITES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
         "/api/action", "/api/audio", "/api/mute", "/api/apps", "/api/hold",
-        "/api/soundpad/play", "/api/computer/action", "/api/computer/media/action",
+        "/api/soundpad/play", "/api/pen", "/api/computer/action", "/api/computer/media/action",
         "/api/computer/preset", "/api/computer/follow", "/api/layout", "/api/profile",
         "/api/soundpad/favourites", "/api/soundpad/recent/clear"
     )));
@@ -31,6 +31,7 @@ public final class ControlRequestPolicy {
                                 long lifecycleGeneration, long submittedGeneration) {
         if (!isInteractiveWrite(path, method)) return;
         if ("/api/hold".equals(path) && "release".equals(operation)) return;
+        if ("/api/pen".equals(path) && ("end".equals(operation) || "cancel".equals(operation))) return;
         if (paused || lifecycleGeneration != submittedGeneration) {
             throw new IllegalStateException("Controls are paused while the tablet app is in the background. Return to the app and try again.");
         }

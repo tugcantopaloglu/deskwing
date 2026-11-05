@@ -11,17 +11,20 @@ const {once}=require('node:events');
 
 const root=path.resolve(__dirname,'..');
 const suites=[
-  ...['self','hardening','boards','studio','monitor','extended-display','live-soundpad','update','reliability','aux-recovery'].map(name=>({name:'companion-'+name,group:'core',flag:'--'+(name==='self'?'self-test':name+'-self-test')})),
-  ...['headless','execution','boards','desktop','updates-api','computer-api','reliability-api'].map(name=>({name,group:'core',script:name+'.cjs'})),
+  ...['self','hardening','boards','studio','monitor','extended-display','live-soundpad','update','reliability','aux-recovery','ink','pen','pen-integration'].map(name=>({name:'companion-'+name,group:'core',flag:'--'+(name==='self'?'self-test':name+'-self-test')})),
+  ...['headless','execution','boards','desktop','updates-api','computer-api','reliability-api','ink-api','pen-api'].map(name=>({name,group:'core',script:name+'.cjs'})),
   ...['fast','studio','monitor'].map(name=>({name,group:'android',script:name+'.cjs',java:true})),
-  ...['studio-ui','monitor-ui','update-ui','tablet-workflows','workspace-modes','readiness-ui','readiness-api'].map(name=>({name,group:'core',script:name+'.cjs'})),
+  ...['studio-ui','monitor-ui','update-ui','tablet-workflows','workspace-modes','readiness-ui','readiness-api','pen-tablet-ui'].map(name=>({name,group:'core',script:name+'.cjs'})),
   {name:'android-control-policy',group:'android',java:true,javaClass:'ControlRequestPolicyHarness',javaSources:['android/src/app/tabletdeck/ControlRequestPolicy.java','tests/java/ControlRequestPolicyHarness.java']},
+  {name:'android-bridge-limits',group:'android',java:true,javaClass:'BridgeRequestLimitsHarness',javaSources:['android/src/app/tabletdeck/BridgeRequestLimits.java','tests/java/BridgeRequestLimitsHarness.java']},
+  {name:'android-pen-leases',group:'android',java:true,javaClass:'PenLeaseTrackerHarness',javaSources:['android/src/app/tabletdeck/PenLeaseTracker.java','tests/java/PenLeaseTrackerHarness.java']},
   {name:'copilot-backend',group:'core',project:'tests/copilot-backend/CopilotBackendTests.csproj'},
   {name:'media-sessions',group:'core',project:'tests/media-sessions/MediaSessionTests.csproj'},
   {name:'readiness-backend',group:'core',project:'tests/readiness-backend/ReadinessBackendTests.csproj'},
+  {name:'ink-backend',group:'core',project:'tests/ink-backend/InkBackendTests.csproj'},
   {name:'shortcut-migration',group:'core',project:'tests/shortcut-migration/ShortcutMigrationTests.csproj'},
   {name:'integration-api',group:'core',integration:true},
-  ...['layout','copilot-ui','soundpad-sync-ui','media-touchbar-ui','live-soundpad-board','live-sync','desktop-rendered','editor-workflow','macro-editor','pen-ui','workspace-rendered'].map(name=>({name,group:'ui',script:name+'.cjs',browser:true})),
+  ...['layout','copilot-ui','soundpad-sync-ui','media-touchbar-ui','live-soundpad-board','live-sync','desktop-rendered','editor-workflow','macro-editor','pen-ui','workspace-rendered','ink-rendered'].map(name=>({name,group:'ui',script:name+'.cjs',browser:true})),
   {name:'features',group:'ui',integration:true,browser:true},
   ...['installer','installer-update'].map(name=>({name,group:'installer',script:name+'.cjs'}))
 ];

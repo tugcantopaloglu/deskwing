@@ -6,6 +6,10 @@ const root=path.resolve(__dirname,'..'),webroot=fs.realpathSync(path.join(root,'
 const output=process.env.TABLETDECK_TEST_OUTPUT?path.join(path.resolve(process.env.TABLETDECK_TEST_OUTPUT),'workspace-rendered'):path.join(root,'.impeccable/review'),origin='http://127.0.0.1:18998';
 const captureOnly=new Set((process.env.TABLETDECK_CAPTURE_ONLY||'').split(',').filter(Boolean));
 let browser,checks=0,pendingSave=null,holdSave=false,saveCount=0;
+const emptyInk=()=>({workspaceId:'fixture-ink',revision:'0'.repeat(64),document:{version:1,strokes:[],notes:'',penOnly:true,updatedAt:'2026-11-05T00:00:00.000Z'}});
+let sharedInk=emptyInk(),inkRevision=0;
+const penTarget={id:'fixture-screen',kind:'screen',label:'Fixture display',width:1920,height:1080};
+const penStatus={supported:true,enabled:false,active:false,target:penTarget};
 const errors=[],failures=[],unhandled=[],controlRequests=[],captures=[],externalRequests=[];
 const check=(value,label)=>{checks++;if(!value){failures.push(label);console.error('FAIL '+label);}else console.log('PASS '+label);};
 const labels=['Starting soon','Gameplay','Just chatting','Short break','Microphone','Desktop audio','Replay clip','Camera','Applause','Discord','Studio lights','End stream'];
@@ -17,6 +21,13 @@ async function routeFixture(route){
  const send=(value,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(value)});
  if(url.pathname.startsWith('/api/')){
   switch(url.pathname){
+   case '/api/ink':{
+    if(request.method()==='GET')return send(url.searchParams.get('revision')===sharedInk.revision?{unchanged:true,workspaceId:sharedInk.workspaceId,revision:sharedInk.revision}:sharedInk);
+    const body=request.postDataJSON();if(body.expectedRevision!==sharedInk.revision)return send({error:'Ink revision changed',code:'ink_conflict'},409);
+    sharedInk={...sharedInk,revision:(++inkRevision).toString(16).padStart(64,'0'),document:structuredClone(body.document)};return send(sharedInk);
+   }
+   case '/api/pen':if(request.method()!=='GET'){controlRequests.push(request.method()+' '+url.pathname);return send({error:'Pen input disabled in workspace fixture'},409);}return send(penStatus);
+   case '/api/admin/pen':return send({status:penStatus,targets:[penTarget]});
    case '/api/board':return send({...saved,pages:saved.pages.map(page=>({...page,buttons:page.buttons.map(button=>({...button,configured:true}))}))});
    case '/api/state':return send({pcConnected:true,obsConnected:true,scene:'Gameplay',streaming:false,recording:false,inputs:{mic:{available:true,db:-8,muted:false},desktop:{available:true,db:-14,muted:false}},session:'fixture',revision:1,execution:{session:'fixture',revision:1,active:null}});
    case '/api/execution':return send({session:'fixture',revision:1,active:null});
@@ -118,6 +129,7 @@ async function run(){
  for(const [width,height,name] of [[1280,800,'desktop-editor'],[1280,720,'desktop-editor-720'],[900,620,'desktop-editor-small'],[390,844,'desktop-editor-narrow']]){await desktop.setViewportSize({width,height});await capture(desktop,name,'#panel-body',['#page-name','#add-button','#save-config']);}
  await desktop.setViewportSize({width:1280,height:800});await desktop.locator('#page-name').fill('Unsaved review');await desktop.locator('#app-mode').selectOption('pen');await desktop.locator('#confirm-dialog').waitFor();
  check(await desktop.locator('#page-name').inputValue()==='Unsaved review','mode switch keeps dirty draft until a decision');await desktop.locator('#confirm-dialog button[value="cancel"]').click();
+ await desktop.waitForFunction(()=>!document.querySelector('#confirm-dialog').open&&DeskWorkspace.mode==='studio'&&document.querySelector('#app-mode').value==='studio'&&document.querySelector('#board-editor')?.getClientRects().length>0);
  check(await desktop.locator('#app-mode').inputValue()==='studio'&&await desktop.locator('#board-editor').isVisible(),'cancelled mode switch keeps board editor and mode');
  holdSave=true;await desktop.locator('#save-config').click();await desktop.waitForFunction(()=>document.querySelector('#save-config').disabled);
  while(!pendingSave)await new Promise(resolve=>setTimeout(resolve,10));await desktop.locator('#app-mode').selectOption('pen');await settle(desktop);
@@ -132,7 +144,7 @@ async function run(){
  check(await desktop.locator('#computer-display').evaluate(node=>node.open),'display workspace expands independent-display status');await capture(desktop,'desktop-display','#computer-workspace',['#app-mode']);
  await mode(desktop,'pen','Ink & notes');check(await desktop.locator('#pen-notes').inputValue().then(text=>text.includes('Next stream')),'ink notes survive workspace changes');
  await desktop.locator('#console-editor').click();await desktop.locator('#page-name').waitFor();await settle(desktop);check(await desktop.locator('#console-title').innerText()==='Board editor','returning to editor restores its header after ink');
- await desktop.context().close();saved.pages[0].name='Live studio';
+ await desktop.context().close();saved.pages[0].name='Live studio';sharedInk=emptyInk();
  const tablet=await createPage(false);
  for(const [width,height,name] of [[1280,800,'tablet-board'],[800,600,'tablet-board-small'],[668,1070,'tablet-board-portrait']]){await tablet.setViewportSize({width,height});await capture(tablet,name,'#workspace',['.key:first-child','#app-mode'],44);}
  await tablet.setViewportSize({width:1280,height:800});await mode(tablet,'pen');await ink(tablet);

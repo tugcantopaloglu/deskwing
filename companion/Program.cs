@@ -7,8 +7,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Diagnostics;
 using System.Globalization;
+using Microsoft.AspNetCore.Http.Features;
 
-var flagOptions=new HashSet<string>(StringComparer.Ordinal){"--self-test","--reliability-self-test","--aux-recovery-self-test","--boards-self-test","--studio-self-test","--monitor-self-test","--extended-display-self-test","--live-soundpad-self-test","--update-self-test","--desktop-window-self-test","--audio-smoke-test","--hardening-self-test","--no-browser","--no-tray","--tray","--after-update"};
+var flagOptions=new HashSet<string>(StringComparer.Ordinal){"--self-test","--ink-self-test","--pen-self-test","--pen-integration-self-test","--reliability-self-test","--aux-recovery-self-test","--boards-self-test","--studio-self-test","--monitor-self-test","--extended-display-self-test","--live-soundpad-self-test","--update-self-test","--desktop-window-self-test","--audio-smoke-test","--hardening-self-test","--no-browser","--no-tray","--tray","--after-update"};
 var valueOptions=new HashSet<string>(StringComparer.Ordinal){"--data-dir","--http-port","--https-port","--control-port"};
 for(var i=0;i<args.Length;i++){
     if(flagOptions.Contains(args[i]))continue;
@@ -16,6 +17,9 @@ for(var i=0;i<args.Length;i++){
     Console.Error.WriteLine("Unknown or incomplete command-line option. No companion or control panel was started.");Environment.ExitCode=2;return;
 }
 if(args.Contains("--self-test")) { SelfTests.Run();return; }
+if(args.Contains("--ink-self-test")) {InkWorkspaceTests.Run();return;}
+if(args.Contains("--pen-self-test")) {WindowsPenTests.Run();return;}
+if(args.Contains("--pen-integration-self-test")) {await PenIntegrationTests.Run();return;}
 if(args.Contains("--reliability-self-test")) {await ReliabilityTests.Run();return;}
 if(args.Contains("--aux-recovery-self-test")) {AuxRecoveryTests.Run();return;}
 if(args.Contains("--boards-self-test")) {BoardStorageTests.Run();return;}
@@ -66,6 +70,8 @@ var engine=new DeckEngine(store,obs);
 using var appMixer=new AppAudioMixer();
 using var holds=new HoldKeys();
 var fastCommands=new FastCommands(store,engine,holds,appMixer);
+using var windowsPen=new WindowsPen();fastCommands.ConfigurePen(windowsPen);
+var inkWorkspace=new InkWorkspace(store.DirectoryPath);
 var computer=new ComputerCopilot(store.DirectoryPath,fastCommands.ExecuteConfigured);
 using var mediaSessions=new MediaSessions();
 using var extendedDisplay=new ExtendedDisplay();
@@ -96,9 +102,13 @@ app.Use(async (ctx,next)=>{
         if(ctx.Request.Headers["Sec-Fetch-Site"]=="cross-site") {ctx.Response.StatusCode=403;return;}
         if(ctx.Request.Path.StartsWithSegments("/api/admin")&&!IsAdmin(ctx)) {ctx.Response.StatusCode=403;return;}
         if(ctx.Request.Path!="/api/pair"&&!IsAuthorized(ctx)) {ctx.Response.StatusCode=401;await ctx.Response.WriteAsJsonAsync(new{error="Pair this tablet with the companion first."});return;}
-        if(fastCommands.Maintenance&&ctx.Request.Method!="GET"&&ctx.Request.Path!="/api/hold"&&ctx.Request.Path!="/api/cancel"){ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{error="The companion is restarting for an update."});return;}
+        if(ctx.Request.Path=="/api/pen"&&ctx.Request.Method=="POST"){
+            if(ctx.Request.ContentLength>FastCommands.PenRequestBytes){ctx.Response.StatusCode=413;await ctx.Response.WriteAsJsonAsync(new{error="Keep pen packets below 16 KB."});return;}
+            var size=ctx.Features.Get<IHttpMaxRequestBodySizeFeature>();if(size is not null&&!size.IsReadOnly)size.MaxRequestBodySize=FastCommands.PenRequestBytes;
+        }
+        if(fastCommands.Maintenance&&ctx.Request.Method!="GET"&&ctx.Request.Path!="/api/hold"&&ctx.Request.Path!="/api/cancel"&&ctx.Request.Path!="/api/pen"){ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{error="The companion is restarting for an update."});return;}
         try {await next(ctx);} catch(Exception ex) when(ex is not OutOfMemoryException) {
-            ctx.Response.StatusCode=ex is JsonException or ArgumentException ? 400 : 409;
+            ctx.Response.StatusCode=ex is BadHttpRequestException bad?bad.StatusCode:ex is JsonException or ArgumentException ? 400 : 409;
             await ctx.Response.WriteAsJsonAsync(new {error=ex is OperationCanceledException?"The action timed out. Check OBS and try again.":ex.Message});
         }
     } else {
@@ -108,6 +118,11 @@ app.Use(async (ctx,next)=>{
     }
 });
 app.UseDefaultFiles();app.UseStaticFiles();
+app.MapInk(inkWorkspace);
+app.MapGet("/api/pen",()=>windowsPen.Status);
+app.MapPost("/api/pen",(PenRequest req,HttpContext ctx)=>fastCommands.Pen(req,Principal(ctx)));
+app.MapGet("/api/admin/pen",()=>windowsPen.AdminState());
+app.MapPost("/api/admin/pen",(PenSettings req)=>fastCommands.ConfigurePenSettings(req));
 app.MapStudio(store,engine,fastCommands,autoProfiles,boardPacks,Principal,()=>pairing.Open(),NetworkAddresses,fingerprint,httpsPort,controlPort,obs);
 app.MapPost("/api/monitor/frame",(PreviewRequest req,CancellationToken ct)=>livePreview.Frame(req,ct));
 app.MapGet("/api/computer",()=>computer.Snapshot());
@@ -199,7 +214,7 @@ app.MapPost("/api/pair",(PairRequest req)=>{
 });
 app.MapGet("/api/admin/info",()=>new {httpPort,httpsPort,controlPort,fingerprint,certificateCode=fingerprint[..24],addresses=NetworkAddresses(),lanAddresses=NetworkLanAddresses(),connectedTablets=fastControl.ConnectedDevices,dataDirectory=store.DirectoryPath,deviceRecoveryWarning=store.DeviceRecoveryWarning,devices=store.Devices.Select(d=>new{d.Id,d.Name,d.Added,lastSeen=store.LastSeen(d),fastConnected=fastControl.Connected(d.TokenHash)})});
 app.MapPost("/api/admin/pairing",()=>new{code=pairing.Open(),expiresIn=300,certificateCode=fingerprint[..24]});
-app.MapPost("/api/admin/revoke",(RevokeRequest req)=>{var owner=store.Devices.FirstOrDefault(device=>device.Id==req.Id)?.TokenHash;store.Revoke(req.Id);if(owner is not null){holds.ReleaseOwner(owner);fastControl.Revoke(owner);}return Results.Ok(new{ok=true});});
+app.MapPost("/api/admin/revoke",(RevokeRequest req)=>{var owner=store.Devices.FirstOrDefault(device=>device.Id==req.Id)?.TokenHash;store.Revoke(req.Id);if(owner is not null){holds.ReleaseOwner(owner);fastCommands.RevokePen(owner);fastControl.Revoke(owner);}return Results.Ok(new{ok=true});});
 app.MapGet("/api/admin/desktop",()=>new{settings=desktop.Get(),recoveryWarning=desktop.RecoveryWarning,startWithWindows=DesktopPreferences.StartsWithWindows(),usbStatus=usb.Status,update=updates.Status,installation=selfUpdate.Status,tabletUpdate=usbApkUpdate.Status});
 app.MapPost("/api/admin/desktop",(DesktopRequest req)=>{DesktopPreferences.Validate(req.Settings);if(req.StartWithWindows is not null)DesktopPreferences.SetStartup(req.StartWithWindows.Value);desktop.Save(req.Settings);return Results.Ok(new{ok=true});});
 app.MapPost("/api/admin/updates",async (CancellationToken ct)=>await updates.Check(true,ct));
@@ -264,7 +279,7 @@ app.Lifetime.ApplicationStarted.Register(()=>{
     autoProfiles.Start();
 });
 var updateLoop=Task.Run(async()=>{while(!backgroundStop.IsCancellationRequested){try{if(desktop.Get().UpdateNotifications)await updates.Check(false,backgroundStop.Token);await Task.Delay(TimeSpan.FromMinutes(15),backgroundStop.Token);}catch(OperationCanceledException){break;}}});
-try {await app.RunAsync();} finally {backgroundStop.Cancel();await updateLoop;tray?.Dispose();holds.ReleaseAll();VoicemeeterClient.Shutdown();WindowsActions.StopSounds();cert.Dispose();}
+try {await app.RunAsync();} finally {backgroundStop.Cancel();await updateLoop;tray?.Dispose();windowsPen.CancelAll("The companion is closing.");holds.ReleaseAll();VoicemeeterClient.Shutdown();WindowsActions.StopSounds();cert.Dispose();}
 static FileStream? AcquireLock(string path) {try{return new FileStream(path,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None);}catch(IOException){return null;}}
 static bool SafeEqual(string a,string b)=>a.Length==b.Length&&CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(a),System.Text.Encoding.UTF8.GetBytes(b));
 static string[] NetworkAddresses()=>NetworkLanAddresses().Concat(System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces().Where(n=>n.OperationalStatus==System.Net.NetworkInformation.OperationalStatus.Up).SelectMany(n=>n.GetIPProperties().UnicastAddresses).Where(a=>a.Address.AddressFamily==AddressFamily.InterNetwork&&!IPAddress.IsLoopback(a.Address)).Select(a=>a.Address.ToString())).Distinct(StringComparer.Ordinal).ToArray();

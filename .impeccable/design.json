@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-05T17:53:02.286Z",
+  "generatedAt": "2026-11-05T18:05:24.335Z",
   "title": "Design System: DeskWing",
   "extensions": {
     "sourceTokens": {
@@ -154,6 +154,17 @@
         "pen-paper": {
           "backgroundColor": "{colors.paper}",
           "rounded": "{rounded.control}"
+        },
+        "pen-input-pad": {
+          "backgroundColor": "{colors.surface}",
+          "textColor": "{colors.secondary}",
+          "rounded": "{rounded.control}"
+        },
+        "pen-sync-conflict": {
+          "backgroundColor": "{colors.surface}",
+          "textColor": "{colors.secondary}",
+          "rounded": "{rounded.field}",
+          "padding": "14px 16px"
         }
       }
     },
@@ -166,7 +177,9 @@
       "companion/wwwroot/readiness.css",
       "companion/wwwroot/pen.css",
       "companion/wwwroot/pen.js",
-      "companion/wwwroot/modes.css"
+      "companion/wwwroot/modes.css",
+      "companion/wwwroot/pen-tablet.css",
+      "companion/wwwroot/pen-tablet.js"
     ],
     "colorMeta": {
       "canvas": {
@@ -555,7 +568,7 @@
       },
       "headline": {
         "displayName": "Ink workspace heading",
-        "purpose": "Workspace task title."
+        "purpose": "Shared ink and Windows pen-input workspace task titles."
       },
       "title": {
         "displayName": "Desktop header",
@@ -673,6 +686,11 @@
         "name": "pen-narrow",
         "value": "580px",
         "query": "(max-width:580px)"
+      },
+      {
+        "name": "fullscreen-notes-stack",
+        "value": "700px",
+        "query": "(max-width:700px)"
       }
     ],
     "layout": {
@@ -695,7 +713,20 @@
       "pen": {
         "columns": "minmax(0,3fr) minmax(240px,1fr)",
         "gap": "24px",
-        "paperAspectRatio": "8/5"
+        "paperAspectRatio": "8/5",
+        "fullscreen": {
+          "position": "fixed",
+          "inset": "0",
+          "zIndex": 1100,
+          "height": "100dvh",
+          "gap": "8px",
+          "padding": "max(10px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))",
+          "paperAspectRatio": "8/5",
+          "paperRadius": "8px",
+          "notesColumns": "minmax(0,1fr) minmax(220px,26%)",
+          "narrowNotesRows": "minmax(120px,1fr) minmax(130px,40%)",
+          "exit": "Visible Exit fullscreen; Show/Hide notes; committed strokes retained, unfinished strokes cancelled."
+        }
       },
       "reviewViewports": [
         {
@@ -722,7 +753,27 @@
           "width": 390,
           "surface": "narrow fallback"
         }
-      ]
+      ],
+      "penTablet": {
+        "padding": "20px 24px 24px",
+        "gap": "16px",
+        "stageMinHeight": "260px",
+        "stageMaxHeight": "65vh",
+        "stageBackground": "{colors.field}",
+        "padAspectRatio": "Selected Windows target width / height; fitted without distortion.",
+        "padRadius": "12px",
+        "fullscreen": {
+          "position": "fixed",
+          "inset": "0",
+          "zIndex": 1100,
+          "height": "100%",
+          "gap": "10px",
+          "padding": "max(12px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))",
+          "stageMinHeight": "140px",
+          "narrowStageMinHeight": "100px",
+          "exit": "Visible Exit fullscreen and Back to controls; entering/exiting stops the session."
+        }
+      }
     },
     "groups": [
       {
@@ -770,17 +821,62 @@
         ]
       },
       {
-        "name": "Ink and notes",
+        "name": "Shared ink and notes",
         "sources": [
           "pen.css",
           "pen.js"
         ],
         "components": [
           "pen-paper",
+          "pen-sync-conflict",
           "button-quiet"
         ]
+      },
+      {
+        "name": "Windows pen input",
+        "sources": [
+          "pen-tablet.css",
+          "pen-tablet.js"
+        ],
+        "components": [
+          "pen-input-pad",
+          "button-primary",
+          "button-danger"
+        ],
+        "behavior": "PC selects a display/window; active session is explicit; fullscreen and interruptions stop input. No target-app image stream."
       }
-    ]
+    ],
+    "inkStates": {
+      "localBackup": "Saved on this device · local backup kept",
+      "shared": "Shared with your PC",
+      "pending": "Sharing changes…",
+      "offline": "Offline · local copy kept",
+      "conflict": "Two versions need your choice",
+      "actions": [
+        "Sync now",
+        "Retry sync",
+        "Use PC version",
+        "Use this version on PC",
+        "Recovery copy"
+      ],
+      "fullDocumentReplacement": "Revision checked; no automatic merge; one local alternate recovery copy.",
+      "preference": "Ignore fingers remains device-local."
+    },
+    "penInputStates": {
+      "target": "Windows target",
+      "enable": "Enable pen input",
+      "retarget": "Use this target",
+      "disable": "Disable pen input",
+      "start": "Start pen session",
+      "stop": "Stop pen",
+      "fullscreen": [
+        "Fullscreen",
+        "Exit fullscreen",
+        "Back to controls"
+      ],
+      "scope": "Pen-only input; no mouse/touch drawing; PC target app owns the resulting document.",
+      "telemetry": "X/Y and reported pressure describe input, not app delivery."
+    }
   },
   "components": [
     {
@@ -862,11 +958,19 @@
       "description": "Paper reserved for user ink; the empty hint is not a sample drawing.",
       "html": "<section class=\"ds-paper\" aria-label=\"Empty drawing surface\"><div class=\"ds-paper-hint\"><strong>Room for your next idea</strong><span>Draw with your pen. Your strokes save here.</span></div></section>",
       "css": ".ds-paper{font-family:Manrope,system-ui,sans-serif;position:relative;background:#f6f3e9;border-radius:12px;overflow:hidden;aspect-ratio:8/5;min-width:0}.ds-paper-hint{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:10px;color:#53606a;text-align:center;padding:24px}.ds-paper-hint strong{font-size:clamp(18px,2vw,26px);font-weight:650;color:#35434f}.ds-paper-hint span{font-size:14px}@media(max-width:580px){.ds-paper{border-radius:8px}.ds-paper-hint strong{font-size:17px}.ds-paper-hint span{font-size:12px}}"
+    },
+    {
+      "name": "Windows pen input surface",
+      "kind": "custom",
+      "refersTo": "pen-input-pad",
+      "description": "A mapped input surface with target and explicit session controls; no target-app screenshot.",
+      "html": "<section class=\"ds-pen-input\"><div class=\"ds-pen-target\"><strong>Selected Windows window</strong><p>Start a pen session when your Windows app is ready.</p></div><div class=\"ds-pen-actions\"><button class=\"ds-pen-start\">Start pen session</button><button class=\"ds-pen-exit\">Fullscreen</button><button class=\"ds-pen-exit\">Back to controls</button></div><div class=\"ds-pen-stage\"><div class=\"ds-pen-pad\"><p>Your pen controls the selected Windows screen or window.</p></div></div><output>X 0% · Y 0% · Pressure 0%</output></section>",
+      "css": ".ds-pen-input{font-family:Manrope,system-ui,sans-serif;display:flex;flex-direction:column;gap:16px;padding:20px 24px 24px;background:var(--canvas,#101318);color:var(--ink,#f5f7fa)}.ds-pen-target strong{display:block;font-size:15px;overflow-wrap:anywhere}.ds-pen-target p{font-size:13px;line-height:1.6;color:var(--secondary,#b8c3d1);margin:5px 0 0}.ds-pen-actions{display:flex;flex-wrap:wrap;gap:8px}.ds-pen-actions button{font-family:Manrope,system-ui,sans-serif;min-height:44px;padding:10px 16px;font-size:13px;font-weight:700;border-radius:12px;cursor:pointer;border:1px solid var(--outline,#354151)}.ds-pen-start{background:var(--cyan,#78dce8);color:#101e22;border-color:transparent!important}.ds-pen-exit{background:var(--surface,#1c222b);color:var(--ink,#f5f7fa)}.ds-pen-actions button:hover:enabled{filter:brightness(1.12)}.ds-pen-actions button:focus-visible{outline:3px solid var(--cyan,#78dce8);outline-offset:3px}.ds-pen-actions button:disabled{opacity:.5;cursor:default}.ds-pen-stage{display:flex;align-items:center;justify-content:center;min-height:260px;max-height:65vh;overflow:hidden;background:#131922;border-radius:12px}.ds-pen-pad{width:100%;aspect-ratio:8/5;position:relative;overflow:hidden;background:var(--surface,#1c222b);border:1px solid var(--outline,#354151);border-radius:12px}.ds-pen-pad p{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:28px;margin:0;text-align:center;color:var(--secondary,#b8c3d1);line-height:1.6;font-size:clamp(14px,1.5vw,18px)}.ds-pen-input output{font-size:12px;line-height:1.6;font-variant-numeric:tabular-nums;color:var(--secondary,#b8c3d1)}@media(max-width:580px){.ds-pen-input{padding:12px;gap:12px}.ds-pen-actions button{padding:10px 12px}.ds-pen-stage{min-height:220px}}"
     }
   ],
   "narrative": {
     "northStar": "A working surface beside your PC",
-    "overview": "DeskWing retains the established studio interface: a near-black canvas, slate controls, bundled Manrope, authored line icons, and cyan emphasis. The direction is an extension of the working product. Large, legible controls and stable status positions support touch operation while the PC carries configuration and review.\n\nThe interface expands into four workspaces: Stream Studio, Computer Copilot, Ink & notes, and Second display. Each task gets a useful working area. The board editor shows the board beside its inspector; ink gets a quiet paper canvas; secondary Windows content gets an unobstructed view. Connection and save state remain explicit.",
+    "overview": "DeskWing retains the established studio interface: a near-black canvas, slate controls, bundled Manrope, authored line icons, and cyan emphasis. The direction is an extension of the working product. Large, legible controls and stable status positions support touch operation while the PC carries configuration and review.\n\nThe interface includes Stream Studio, Computer Copilot, shared Ink & notes, Pen tablet, and Second display. Each task gets a useful working area. The board editor shows the board beside its inspector; shared ink gets a quiet paper canvas; Windows pen input gets a clearly labeled target and session state; secondary Windows content gets an unobstructed view. Connection, local save, sharing, and active input state remain explicit.",
     "keyCharacteristics": [
       "Dark, compact studio surfaces with clear boundaries.",
       "One bundled type family and a small functional color vocabulary.",
@@ -899,7 +1003,7 @@
       "Don't make editor preview keys perform live actions.",
       "Don't hide save failures, draft conflicts, or source availability behind a toast alone.",
       "Don't decorate the canvas with sample ink that could be mistaken for a saved drawing.",
-      "Don't visually promise full palm rejection, built-in handwriting recognition, or a full-motion second display."
+      "Don't visually promise full palm rejection, built-in handwriting recognition, universal drawing-app support, or a full-motion second display."
     ]
   }
 }
