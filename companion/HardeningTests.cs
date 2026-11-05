@@ -50,14 +50,14 @@ public static class HardeningTests
         Check(DesktopPreferences.StartupCommand(@"C:\Program Files\TabletDeck\deck.exe")=="\"C:\\Program Files\\TabletDeck\\deck.exe\" --tray --no-browser","startup executable path is quoted and starts quietly");
         Check(ReleaseUpdates.Parse("{\"tag_name\":\"v2.0.0\",\"draft\":false,\"prerelease\":false}","1.3.0").Available,"stable update comparison");
         Check(!ReleaseUpdates.Parse("{\"tag_name\":\"v1.2.0\",\"draft\":false,\"prerelease\":false}","1.3.0").Available,"older release is not offered as update");
-        using(var updates=new ReleaseUpdates(new HttpClient(new FakeReleaseHandler()),"1.3.0")){var result=await updates.Check(true);Check(result.Available&&result.Url.EndsWith("/tag/v2.0.0"),"update HTTP fixture uses fixed official repository and trusted release URL");}
+        using(var updates=new ReleaseUpdates(new HttpClient(new FakeReleaseHandler()),"1.3.0")){var result=await updates.Check(true);Check(result.Available&&result.Url=="https://github.com/tugcantopaloglu/deskwing/releases/tag/v2.0.0","update HTTP fixture uses fixed official repository and trusted release URL");}
         Console.WriteLine(passed+" hardening self-tests passed; no GUI, keyboard injection, registry writes, or external app control used.");
     }
     private sealed class FakeReleaseHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken ct)
         {
-            if(request.RequestUri?.AbsoluteUri!="https://api.github.com/repos/tugcantopaloglu/tablet-deck-studio/releases/latest")throw new Exception("Unexpected update endpoint");
+            if(request.RequestUri?.AbsoluteUri!="https://api.github.com/repos/tugcantopaloglu/deskwing/releases/latest")throw new Exception("Unexpected update endpoint");
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent("{\"tag_name\":\"v2.0.0\",\"draft\":false,\"prerelease\":false,\"html_url\":\"https://invalid.test\"}")});
         }
     }

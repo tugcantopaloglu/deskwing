@@ -85,7 +85,7 @@ async function uiTests(){
   f=fixture();c=f.context;legacy(f);c.api=()=>new Promise(r=>resolve=r);const closed=c[name]();c.panel.close();resolve(f.values);await closed;
   check(!c.panel.open,name+' cannot reopen a dismissed panel');
  }
- f=fixture();c=f.context;legacy(f);f.values.update={url:'https://github.com/tugcantopaloglu/tablet-deck-studio/releases',currentVersion:'1.8.0'};
+ f=fixture();c=f.context;legacy(f);f.values.update={url:'https://github.com/tugcantopaloglu/deskwing/releases',currentVersion:'1.8.0'};
  await c.showDesktopSettings();f.$('#desktop-serial').oninput();check(c.dirty,'Windows option edits join unsaved-changes protection');
  c.api=()=>new Promise(r=>resolve=r);const windowsSave=f.$('#desktop-save').onclick();check(f.$('#desktop-serial').disabled,'Windows settings lock fields while saving');
  c.openPanel('Editor','Newer unsaved board');c.featureView='editor';c.dirty=true;resolve({ok:true});await windowsSave;check(c.html==='Newer unsaved board'&&c.dirty,'late Windows save cannot clear dirty state in another view');

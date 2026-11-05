@@ -7,7 +7,8 @@ public sealed record ReleaseStatus(string CurrentVersion,string? LatestVersion,b
 public sealed record InstallerRelease(string Version,string Url,long Size,string Sha256);
 public sealed class ReleaseUpdates : IDisposable
 {
-    public const string ReleasesUrl="https://github.com/tugcantopaloglu/tablet-deck-studio/releases";
+    public const string ReleasesUrl="https://github.com/tugcantopaloglu/deskwing/releases";
+    private const string LatestReleaseApi="https://api.github.com/repos/tugcantopaloglu/deskwing/releases/latest";
     private readonly HttpClient client;
     private readonly SemaphoreSlim gate=new(1,1);
     private readonly string version;
@@ -15,7 +16,7 @@ public sealed class ReleaseUpdates : IDisposable
     private DateTimeOffset checkedAt;
     public event Action<ReleaseStatus>? Found;
     public ReleaseUpdates():this(new HttpClient(new HttpClientHandler{AllowAutoRedirect=false}),typeof(ReleaseUpdates).Assembly.GetName().Version?.ToString(3)??"1.3.0") { }
-    internal ReleaseUpdates(HttpClient client,string version){this.client=client;this.version=version;status=new(version,null,false,ReleasesUrl);client.Timeout=TimeSpan.FromSeconds(8);client.DefaultRequestHeaders.UserAgent.ParseAdd("TabletDeck-Studio/"+version);client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));}
+    internal ReleaseUpdates(HttpClient client,string version){this.client=client;this.version=version;status=new(version,null,false,ReleasesUrl);client.Timeout=TimeSpan.FromSeconds(8);client.DefaultRequestHeaders.UserAgent.ParseAdd("DeskWing/"+version);client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));}
     public ReleaseStatus Status=>Volatile.Read(ref status);
     internal static InstallerRelease ParseInstaller(string json,string current)
         =>ParseAsset(json,current,"TabletDeck-Setup.exe",250L*1024*1024);
@@ -27,7 +28,7 @@ public sealed class ReleaseUpdates : IDisposable
         if(name is not ("TabletDeck-Setup.exe" or "TabletDeck-Studio.apk"))throw new IOException("Unsupported update asset.");
         var assets=release.GetProperty("assets").EnumerateArray().Where(a=>a.GetProperty("name").GetString()==name).ToArray();
         if(assets.Length!=1)throw new IOException("This release does not include a Windows updater.");var asset=assets[0];
-        var expected=$"https://github.com/tugcantopaloglu/tablet-deck-studio/releases/download/{tag}/{name}";
+        var expected=$"{ReleasesUrl}/download/{tag}/{name}";
         var size=asset.GetProperty("size").GetInt64();var digest=asset.GetProperty("digest").GetString()??"";
         if(asset.GetProperty("browser_download_url").GetString()!=expected||size<1024||size>limit||!digest.StartsWith("sha256:",StringComparison.Ordinal)||digest.Length!=71||!digest[7..].All(Uri.IsHexDigit))throw new IOException("The release asset has invalid download or checksum metadata.");
         return new(status.LatestVersion!,expected,size,digest[7..].ToUpperInvariant());
@@ -36,7 +37,7 @@ public sealed class ReleaseUpdates : IDisposable
     public Task<InstallerRelease> Apk(CancellationToken ct=default)=>Asset("TabletDeck-Studio.apk","0.0.0",64L*1024*1024,ct);
     private async Task<InstallerRelease> Asset(string name,string current,long limit,CancellationToken ct)
     {
-        using var response=await client.GetAsync("https://api.github.com/repos/tugcantopaloglu/tablet-deck-studio/releases/latest",HttpCompletionOption.ResponseHeadersRead,ct);response.EnsureSuccessStatusCode();
+        using var response=await client.GetAsync(LatestReleaseApi,HttpCompletionOption.ResponseHeadersRead,ct);response.EnsureSuccessStatusCode();
         await using var stream=await response.Content.ReadAsStreamAsync(ct);using var bytes=new MemoryStream();var buffer=new byte[8192];int count;
         while((count=await stream.ReadAsync(buffer,ct))>0){bytes.Write(buffer,0,count);if(bytes.Length>256*1024)throw new IOException("Release response exceeds the size limit.");}
         return ParseAsset(System.Text.Encoding.UTF8.GetString(bytes.ToArray()),current,name,limit);
@@ -55,7 +56,7 @@ public sealed class ReleaseUpdates : IDisposable
             if(!force&&DateTimeOffset.UtcNow-checkedAt<TimeSpan.FromMinutes(15))return Status;
             using var deadline=CancellationTokenSource.CreateLinkedTokenSource(ct);deadline.CancelAfter(TimeSpan.FromSeconds(8));ct=deadline.Token;
             try {
-                using var response=await client.GetAsync("https://api.github.com/repos/tugcantopaloglu/tablet-deck-studio/releases/latest",HttpCompletionOption.ResponseHeadersRead,ct);response.EnsureSuccessStatusCode();
+                using var response=await client.GetAsync(LatestReleaseApi,HttpCompletionOption.ResponseHeadersRead,ct);response.EnsureSuccessStatusCode();
                 await using var stream=await response.Content.ReadAsStreamAsync(ct);using var bytes=new MemoryStream();var buffer=new byte[8192];int count;
                 while((count=await stream.ReadAsync(buffer,ct))>0){bytes.Write(buffer,0,count);if(bytes.Length>256*1024)throw new IOException("Release response exceeds the size limit.");}
                 var next=Parse(System.Text.Encoding.UTF8.GetString(bytes.ToArray()),version);var notify=next.Available&&next.LatestVersion!=Status.LatestVersion;
