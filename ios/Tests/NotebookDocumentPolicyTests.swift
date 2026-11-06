@@ -44,7 +44,12 @@ final class NotebookDocumentPolicyTests: XCTestCase {
         let square=try NotebookDocumentPolicy.rasterSize(CGRect(x:0,y:0,width:4096,height:4096),rotation:0)
         XCTAssertEqual(square.width,2000); XCTAssertEqual(square.height,2000)
         XCTAssertLessThanOrEqual(square.width * square.height,4_000_000)
-        for bounds in [CGRect.zero, CGRect(x:0,y:0,width:-2,height:4),CGRect(x:0,y:0,width:1_000_001,height:1)] {
+        // Core Graphics standardizes a rectangle's negative stored size when reading width/height.
+        // It describes the same bounded geometry, rather than an invalid PDF page dimension.
+        let reversed=CGRect(x:0,y:0,width:-600,height:800)
+        XCTAssertEqual(try NotebookDocumentPolicy.rasterSize(reversed,rotation:0),normal)
+        XCTAssertEqual(try NotebookDocumentPolicy.rasterSize(reversed.standardized,rotation:0),normal)
+        for bounds in [CGRect.zero, CGRect(x:0,y:0,width:0,height:4),CGRect(x:0,y:0,width:1_000_001,height:1),CGRect(x:0,y:0,width:CGFloat.infinity,height:1)] {
             XCTAssertThrowsError(try NotebookDocumentPolicy.rasterSize(bounds,rotation:0))
         }
     }

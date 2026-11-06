@@ -10,7 +10,7 @@ final class NotebookStorageWebTests: XCTestCase {
         let fixture = try await openFixture(includeStore: false)
         defer { fixture.close() }
         let name = "DeskWingNotebookFixture-" + UUID().uuidString
-        let response = try await fixture.web.callAsyncJavaScript(#"""
+        let result = try await evaluate(fixture.web, body: #"""
         let database = null, expired = false;
         let timer;
         const cleanup = async () => {
@@ -49,8 +49,7 @@ final class NotebookStorageWebTests: XCTestCase {
             });
             return await Promise.race([work, new Promise((_, reject) => { timer = setTimeout(() => { expired = true; reject(Error('IndexedDB fixture exceeded eight seconds')); }, 8000); })]);
         } finally { clearTimeout(timer); await cleanup(); }
-        """#, arguments: ["databaseName":name], in: nil, in: .page)
-        let result = try XCTUnwrap(response as? [String:Any])
+        """#, arguments: ["databaseName":name])
         XCTAssertEqual(result["protocol"] as? String, "deskwing:")
         XCTAssertEqual(result["host"] as? String, "app")
         XCTAssertEqual(result["secure"] as? Bool, true, "Registered local assets must run in a secure context.")
@@ -65,7 +64,7 @@ final class NotebookStorageWebTests: XCTestCase {
         defer { fixture.close() }
         let ids = (0..<3).map { _ in UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased() }
         let key = "deskwing.notebooks.page.v1:" + ids.joined(separator:":")
-        let response = try await fixture.web.callAsyncJavaScript(#"""
+        let result = try await evaluate(fixture.web, body: #"""
         const store = window.DeskNotebookStore;
         if (!store) throw Error('Bundled notebook store was not loaded');
         let timer;
@@ -93,8 +92,7 @@ final class NotebookStorageWebTests: XCTestCase {
             };
             return await Promise.race([work(),new Promise((_,reject) => { timer=setTimeout(() => reject(Error('Bundled notebook fixture exceeded nine seconds')),9000); })]);
         } finally { clearTimeout(timer); await cleanup(); }
-        """#, arguments: ["pageKey":key], in: nil, in: .page)
-        let result = try XCTUnwrap(response as? [String:Any])
+        """#, arguments: ["pageKey":key])
         XCTAssertEqual(result["secure"] as? Bool,true)
         XCTAssertEqual(result["mode"] as? String,"indexeddb")
         XCTAssertEqual(result["atomic"] as? Bool,true)
@@ -106,6 +104,30 @@ final class NotebookStorageWebTests: XCTestCase {
         XCTAssertEqual((after["document"] as? [String:Any])?["notes"] as? String,"native custom-origin notebook")
         XCTAssertEqual((after["recovery"] as? [String:Any])?["notes"] as? String,"kept recovery")
         XCTAssertEqual((after["sync"] as? [String:Any])?["revision"] as? String,"fixture")
+    }
+
+    /// The optional-completion overload returns Void; explicitly await its real Promise result.
+    @MainActor
+    private func evaluate(_ web:WKWebView, body:String, arguments:[String:Any]) async throws -> [String:Any] {
+        try await withCheckedThrowingContinuation { (continuation:CheckedContinuation<[String:Any],Error>) in
+            var completed=false
+            let deadline=DispatchWorkItem {
+                guard !completed else { return }; completed=true
+                continuation.resume(throwing:DeskError.message("The isolated notebook JavaScript operation exceeded ten seconds."))
+            }
+            DispatchQueue.main.asyncAfter(deadline:.now()+10,execute:deadline)
+            web.callAsyncJavaScript(body,arguments:arguments,in:nil,in:.page,completionHandler:{ response in
+                guard !completed else { return }; completed=true; deadline.cancel()
+                switch response {
+                case .failure(let error): continuation.resume(throwing:error)
+                case .success(let value):
+                    guard let result=value as? [String:Any] else {
+                        continuation.resume(throwing:DeskError.message("The notebook JavaScript fixture returned \(String(reflecting:type(of:value))) instead of its result object.")); return
+                    }
+                    continuation.resume(returning:result)
+                }
+            })
+        }
     }
 
     @MainActor

@@ -115,7 +115,7 @@ Implement all five agreed areas in parallel on `codex/workspace-expansion`. Use 
 - [x] Show each live Soundpad page's Speakers / Microphone / Both route.
 - [x] Add guided read-only connection/audio diagnostics and an explicit user-triggered sound test.
 - [x] Prevent an inherited packaged-host context silently opening a different implicit data location.
-- [ ] Verify existing board contents and routing survive the upgrade unchanged.
+- [x] Verify existing board contents and routing survive the Windows companion upgrade unchanged.
 
 ### B. High-refresh pen display
 - [x] Combine the native 60 Hz / Match tablet viewer with pressure/tilt pen input and explicit single-finger touch controls.
@@ -153,12 +153,13 @@ Implement all five agreed areas in parallel on `codex/workspace-expansion`. Use 
 - [ ] Pass hosted Windows regression, iOS simulator tests and unsigned iOS archive validation on the final pushed commit.
 - [x] Run actual Snyk Code scanning and dependency/license checks; repair and rescan new actionable findings, recording the reviewed residual Low warnings.
 - [x] Build and verify original-signer Android APK/AAB packages and the matching isolated Windows companion.
-- [ ] Deploy through the normal production data context, verify the board fingerprint, and perform the relevant tablet checks.
+- [x] Deploy the Windows companion through the normal production data context and verify the preserved board and private-file fingerprints, with the prior runtime retained.
+- [ ] Install the Play internal update on the Xiaomi tablet and rehearse the 1.15 pen, display and handwriting workflows.
 - [x] Record the current verification results, artifact hashes and development-branch changes for repository delivery.
 - [ ] Finish hosted validation and repository integration after the development-branch push.
-- [ ] Enroll the original signing identity and publish the verified AAB to Google Play internal testing.
+- [x] Enroll the original signing identity and publish the verified 1.15.0/code 18 AAB to Google Play internal testing.
 
-The [1.15 verification record](docs/VERIFICATION-1.15-2026-11-06.md) distinguishes the 80-suite aggregate from an uninterrupted green full run and preserves the earlier failures. All product inputs and 245 published web assets stayed unchanged while six test fixtures were repaired or hardened. Actual security checkpoint 6 retained 14 reviewed Low warnings, with no High, Medium or unexpected actionable new findings. Hosted final-commit validation, 1.15 physical-device rehearsal, Play internal distribution, release screenshots and signed iOS distribution remain separate gates.
+The [1.15 verification record](docs/VERIFICATION-1.15-2026-11-06.md) preserves the local aggregate and subsequent hosted results. Commit `79bdbd0` passed all 80 Windows suites and both unsigned beta workflows; its 70 iOS tests exposed three XCTest-harness failures, corrected in two test files without product changes. Google Play internal testing now has 1.15.0/code 18 available to invited testers, with the original app-signing certificate verified in Console. The matching Windows companion is deployed: all six pages, 21 saved buttons, Memes output and four protected files were preserved, and the old runtime was retained. Final hosted iOS validation, 1.15 physical-device rehearsal, release screenshots, production store rollout and signed iOS distribution remain separate gates.
 
 ### F. Complete DeskWing branding — added by owner
 - [x] Confirm DeskWing as the public name while retaining the existing Android installation/data identity.
