@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-06T15:50:06.995Z",
+  "generatedAt": "2026-11-06T16:37:09.000Z",
   "title": "Design System: DeskWing",
   "extensions": {
     "sourceTokens": {
@@ -1290,7 +1290,7 @@
       "ios": "Requests hidden status bar, home-indicator auto-hide, and window-bounds layout. System Home/edge gestures remain; Split View/Stage Manager are not forced to fill the display. Exit/mode exit, resign-active/background, native tools, disconnect/re-pair, navigation/reload, or renderer termination restore safe-area layout.",
       "failure": "App-filling canvas remains with visible warning when system bars cannot be hidden.",
       "lifecycle": "Native deskwing-fullscreen event carries enabled/reason; disabled event restores the web layout and ends pen input where applicable.",
-      "verification": "Stable main commit 66d20d88b37a6a65349fd3534e469c3706b89d23 passed 58 Windows suites and 11 unsigned iOS simulator tests. The user physically confirmed corrected Pen tablet image/fullscreen stability on the tested Xiaomi setup. Physical iPad behavior remains unverified. The resumed experimental H.264 display path is excluded from this checkpoint."
+      "verification": "Final candidate 9989c864c1eb3fc3befff0654f7de45dddb26c4b passed 65 Windows suites and 39 unsigned iOS simulator tests. The user previously confirmed corrected Pen tablet image/fullscreen stability on the Xiaomi setup and now confirmed native display motion, counters, and Home/reopen/start. Physical iPad behavior remains unverified."
     },
     "penPreview": {
       "source": "companion/PenPreview.cs",
@@ -1493,7 +1493,7 @@
       "retention": "No streamed frame files saved to disk.",
       "verification": {
         "tabletCapability": "ADB reported 120 Hz current and 165 Hz maximum on the user's tablet; capability reading only.",
-        "performance": "Warm isolated PC-side capture/encode measured 60.01 fps at 60 Hz target and 118.75 fps at 120 Hz target on an owned 165 Hz display with an animated fixture. Network and tablet playback were not measured; final integration/device validation remains pending.",
+        "performance": "Earlier PC-only capture/encode measured 60.01/118.75 fps at targets 60/120 Hz, excluding network and tablet. Separate bounded physical moving-cursor checks received 59.87–59.88 fps at 60 Hz and 118.72–119.80 fps at Match tablet 120 Hz; the user confirmed smooth viewing. After the metrics fix, decoder-rendered estimates reached 120.10 fps with 120.69/119.83 received fps and zero drops. These are not end-to-end latency or universal-workload guarantees.",
         "pcSideMeasurement": {
           "scope": "Warm isolated PC capture/encode, animated fixture, owned 165 Hz monitor; excludes network and tablet.",
           "sourceRefreshHz": 165,
@@ -1510,25 +1510,87 @@
           "cleanup": "Owned monitor removed; physical monitor topology unchanged.",
           "endToEndTabletMeasured": false
         },
-        "androidCleanup": "Pending: build, lifecycle regression, and physical launch/playback validation after the Android cleanup fix."
+        "androidCleanup": "Fixed and regression-tested. The installed Android candidate opens without the historical UI-thread TLS-cleanup exception. Exit from 60 Hz and explicit restart at 120 Hz succeeded without a crash; the user also confirmed Home/reopen/start on the final build.",
+        "physicalPlayback": {
+          "date": "2026-11-06",
+          "workload": "Bounded moving-cursor checks on an owned 1280x800 display with a 165 Hz source.",
+          "userConfirmedSmooth": true,
+          "observations": [
+            {
+              "mode": "60",
+              "targetHz": 60,
+              "receivedFpsRange": [59.87, 59.88],
+              "renderCounts": "Kept pace with received counts.",
+              "reportedDroppedFrames": 0
+            },
+            {
+              "mode": "match",
+              "targetHz": 120,
+              "screenHz": 120,
+              "receivedFpsRange": [118.72, 119.80],
+              "receivedRenderedCountSamples": [[232, 231], [470, 470]],
+              "reportedDroppedFrames": 0
+            }
+          ],
+          "staticContent": "Still image retained without artificial frames.",
+          "exitAndExplicitRestartVerified": true,
+          "shownFpsCounterVerified": true,
+          "finalDecoderRenderedEstimateFps": 120.10,
+          "finalReceivedFpsSamples": [120.69, 119.83],
+          "finalReportedDroppedFrames": 0,
+          "homeReopenStartVerified": true,
+          "homeReopenObservation": "User confirmed success. A new 60 Hz session advanced render counts; the app stayed alive with no AndroidRuntime error.",
+          "measurementLimit": "Shown rate is a decoder callback estimate, not camera-measured panel cadence.",
+          "endToEndLatencyMeasured": false
+        },
+        "sharingRevocation": {
+          "verified": true,
+          "observation": "Disabling sharing during live video removed all three DeskWing SurfaceView layers; the app stayed alive with no AndroidRuntime error."
+        },
+        "ownedDisplayRemoval": {
+          "verified": true,
+          "removedSource": "DISPLAY5",
+          "physicalMonitors": "Names, positions and sizes matched exactly after removal.",
+          "continuedUse": "A new owned 1280x800 165 Hz display was recreated with sharing enabled and intentionally remains active."
+        },
+        "metricsFix": {
+          "commit": "9989c864c1eb3fc3befff0654f7de45dddb26c4b",
+          "reason": "Freshness compared different clock origins; it now uses the callback's local observation clock while cadence retains render-time intervals.",
+          "metricChecksPassed": 78,
+          "sdk36Java8Compile": "success",
+          "security": "Actual scan retained seven existing Low findings with no new issues.",
+          "installedUniversalApkSha256": "9bef037cf14fb60aec8b693967e05976cfd33fdaba8c2c1d9509ce8ef35ed850",
+          "physicalCounterCheck": "passed",
+          "homeReopenCheck": "passed"
+        }
       },
       "developmentStatus": {
-        "status": "resumed-in-progress",
+        "status": "verified-candidate",
         "date": "2026-11-06",
-        "branch": "codex/display-high-refresh",
-        "androidBlocker": "Earlier candidate crashed on launch during UI-thread TLS cleanup. Checkpointed asynchronous cleanup remains unfinished and unverified.",
-        "physicalPlaybackVerified": false,
-        "stableMainTransport": "JPEG compatibility preview, at most four frames per second."
+        "implementationBranch": "codex/display-high-refresh",
+        "candidateCommit": "9989c864c1eb3fc3befff0654f7de45dddb26c4b",
+        "historicalAndroidFailure": "The earlier UI-thread TLS-cleanup launch crash was fixed; current installed launch and tested lifecycle paths succeed.",
+        "physicalPlaybackVerified": true,
+        "physicalPlaybackScope": "Bounded 60/120 Hz motion, corrected decoder FPS estimate, explicit exit/restart, Home/reopen/start, sharing revocation, and owned-display removal/recreation.",
+        "remainingLimits": [
+          "Exhaustive USB/Wi-Fi interruption and load testing",
+          "End-to-end latency measurement",
+          "Physical iPad and Apple Pencil behavior",
+          "App-specific Windows pen compatibility",
+          "Store submission and approval"
+        ],
+        "previousStableMainTransport": "Checkpoint 66d20d8 had JPEG compatibility preview only, at most four frames per second."
       }
     },
     "validationBaseline": {
-      "commit": "66d20d88b37a6a65349fd3534e469c3706b89d23",
-      "url": "https://github.com/tugcantopaloglu/deskwing/actions/runs/42108057065",
+      "commit": "9989c864c1eb3fc3befff0654f7de45dddb26c4b",
+      "url": "https://github.com/tugcantopaloglu/deskwing/actions/runs/42252632169",
       "windowsRegression": "success",
-      "windowsSuites": 58,
+      "windowsSuites": 65,
       "iosSimulator": "success",
-      "iosTests": 11,
-      "scope": "Stable main pen-preview corrections and canonical repository rename; excludes resumed native H.264 Second display."
+      "iosTests": 39,
+      "androidMetricChecks": 78,
+      "scope": "Final resumed native-video startup, recovery, lifecycle and metrics-clock correction; original-signer Android build and bounded Xiaomi hardware checks are recorded separately above."
     }
   },
   "components": [

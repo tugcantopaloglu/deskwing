@@ -176,6 +176,12 @@ dotnet list .\companion\TabletDeck.csproj package --vulnerable --include-transit
 
 Snyk authentication may be required. `.dcignore` excludes generated builds and separately audited third-party code. The initial scan retains the informational `java/JavaScriptEnabled` note for the bundled Android interface. That does not justify loading arbitrary remote pages into its native bridge.
 
+## Development host and real user data
+
+On this development PC, a companion launched from Codex's packaged Windows host saw a virtualized AppData view that differed from the same user's normal Windows session. The development copy had eight board pages; the actual active board had five pages and 21 buttons before its missing live Memes page was repaired. A matching account name or apparent `%LOCALAPPDATA%\TabletDeck` path alone did not establish that both processes were using the same data.
+
+Keep tests on an explicit disposable `--data-dir` outside the real user data. Deploy and launch the real companion from the normal unpackaged same-user context, verify the active board and data location, and back up that actual configuration before changes. Never overwrite the real board with a development-host copy. The resumed deployment preserved four existing private files by hash and retained the repaired six-page board.
+
 ## Architecture
 
 Android bundled UI → restricted Java bridge → pinned persistent TLS control (8744) or pinned HTTPS fallback/metadata (8743) → Windows companion → authenticated OBS v5 or a configured Windows action. PC panels receive authenticated state events.

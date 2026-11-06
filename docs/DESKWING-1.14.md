@@ -10,7 +10,7 @@ DeskWing brings Stream Studio, Computer Copilot, Ink & notes, Pen tablet, and Se
 
 This guide describes 1.14.0 development behavior. It does not certify a published release or every hardware/application workflow. Specific observed checks are recorded below. Existing executable, APK, package, and configuration identities retain their TabletDeck names so upgrades can keep the established installation and pairing.
 
-**Resumed work, 6 November 2026:** native H.264 Second display is experimental on `codex/display-high-refresh`. The earlier Android candidate crashed on launch during TLS cleanup on the UI thread; the checkpointed cleanup changes are unfinished and require build, lifecycle, and device validation. The user has resumed this work and reported missing Soundpad buttons, which are under investigation. The working pen build remains the installed tablet baseline until a replacement is verified.
+**Verified candidate, 6 November 2026:** the user confirmed smooth 60 Hz and 120 Hz Match tablet viewing, a working FPS counter, Home/reopen/start, restored Memes buttons, and working Soundpad audio. The Android launch crash and metrics-clock defect are fixed in installed candidate `9989c86`; [final CI](https://github.com/tugcantopaloglu/deskwing/actions/runs/42252632169) passed 65 Windows suites and 39 iOS tests. Sharing revocation and owned-display removal passed without changing the physical monitors. A shared display was deliberately recreated for continued use. Measurement scope and remaining platform/application checks are recorded below.
 
 ## Build and edit a board
 
@@ -73,6 +73,8 @@ On a page following the live Soundpad library, **All**, **Favourites**, and **Re
 Star sounds in the Soundpad library to populate Favourites. Recent contains the last 30 distinct linked sounds accepted by Soundpad and is shared across controllers. Missing or ambiguous sound identities are not substituted with another sound. The pad explains whether the list is loading, unavailable, empty, or filtered to no matches. Keep Soundpad open and review the PC library when a file has moved or an identity is duplicated.
 
 The selected output still depends on Soundpad's configuration and the receiving app's microphone settings. A successful command is not proof that viewers or a call participant heard the sound.
+
+On 6 November 2026, the missing buttons were traced to the active board having no live Memes page. A revision-guarded save with a backup appended that page, preserving the original five pages and 21 buttons. The page uses both microphone and speaker output, and the user confirmed the buttons are visible and audio works. A packaged development host had exposed a different data copy; see [the deployment-context note](BUILDING.md#development-host-and-real-user-data).
 
 ## Follow an app or pin a Copilot layout
 
@@ -230,15 +232,23 @@ Only one native display stream runs at a time. It is separate from pen-input and
 
 **Exit display** closes the viewer while leaving the Windows monitor available. Backgrounding, disconnection, revoked pairing/sharing, changed monitor geometry/rate, decoder failure, or companion shutdown ends viewing; it does not resume automatically. **Pause tablet sharing** stops sharing, and **Remove extra display** removes the owned monitor. See [Extended display](EXTENDED-DISPLAY.md) for driver, topology, and cleanup details.
 
-An isolated PC-side test with an animated fixture on an owned 165 Hz monitor measured warmed capture/encode rates of 60.01 fps at a 60 Hz target and 118.75 fps at 120 Hz. The test removed its own monitor afterward and left physical monitor topology unchanged. These measurements exclude network transport and tablet playback. The final H.264 build and sustained physical tablet delivery remain pending; neither the tablet's refresh capability nor the PC-side rates establish end-to-end 60+ fps.
+An earlier isolated PC-side test measured warmed capture/encode rates of 60.01 fps at a 60 Hz target and 118.75 fps at 120 Hz; it excluded network and tablet delivery. In separate physical checks, the user confirmed smooth 60 Hz and Match tablet viewing. Received rates were 59.87–59.88 fps at 60 Hz and 118.72–119.80 fps at a 120 Hz target, with render counts keeping pace and zero reported drops during bounded moving-cursor tests. Static content correctly entered Still image, and exiting 60 Hz then explicitly starting 120 Hz worked without a crash.
+
+The earlier shown-FPS estimate incorrectly stayed at zero because freshness compared different clock origins. The installed correction passed its physical check: the user confirmed the counter rises and Home/reopen/start works, while final samples reported a decoder-rendered estimate of 120.10 fps beside 120.69/119.83 received fps with zero drops. Sharing revocation removed all video surfaces without a crash, and removing the owned display left physical monitor names, positions and sizes unchanged. A shared 1280×800, 165 Hz display was then deliberately recreated for continued use. These are bounded device/callback observations, not end-to-end latency or exhaustive load/interruption guarantees. See [the detailed display checkpoint](EXTENDED-DISPLAY.md#resumed-candidate-checkpoint--2026-11-06).
 
 ## Hardware rehearsal checklist
 
 Record the exact build, PC/Windows version, tablet model, Android/WebView version, pen model/firmware, and keyboard/language. Mark each result with observed behavior, not only a pass/fail label. Automated tests and rendered screenshots do not replace these checks.
 
 - [x] The user physically confirmed the corrected Pen tablet experience, image, and fullscreen are stable on the tested Xiaomi tablet.
+- [x] The user confirmed the restored Memes buttons are visible on the tablet and audio works; broader filter/error-state and receiving-app checks remain separate.
+- [x] The user confirmed the 60 Hz Second display desktop appears and motion is smooth; measured reception was 59.87–59.88 fps with matching render counts and zero reported drops.
+- [x] The user confirmed smooth Match tablet viewing at a 120 Hz target; bounded moving-cursor samples measured 118.72–119.80 received fps with zero reported drops. Exit from 60 Hz and explicit 120 Hz restart worked without a crash.
+- [x] Confirm the corrected shown-FPS counter rises and Home/reopen/explicit restart works on the installed final Android build, with no AndroidRuntime error.
+- [x] Disable sharing during live video: all native video surfaces disappeared while the app remained alive.
+- [x] Remove the owned display and verify unchanged physical monitor names, positions and sizes; recreate a shared 1280×800, 165 Hz display for continued normal use.
 
-- [ ] Install the signed 1.14 candidate over the prior Android app and verify pairing/settings survive. Confirm the installed version and signer before calling this an upgrade test.
+- [x] Install the verified original-signer candidate over the prior Android app, retain its data, and confirm that it opens without the previous launch crash. The matching Windows deployment preserved four existing private files and the repaired board.
 - [ ] Open the Windows companion and reconnect by Wi-Fi and USB. Lock/unlock, background/resume, rotate, disconnect, and reconnect the tablet; verify no duplicate actions or stuck held shortcuts.
 - [ ] Edit and save a harmless manual key, undo/redo changes, restart with an unsaved draft, and review a deliberate second-client save conflict without losing either export.
 - [ ] Copy and move disposable keys within and between profiles; inspect backups. Recover a single profile as an inactive copy before trying any full restore.
@@ -259,8 +269,8 @@ Record the exact build, PC/Windows version, tablet model, Android/WebView versio
 
 ## Platform and release status
 
-The source brand/version is DeskWing 1.14.0. `TabletDeck-Companion.exe`, `TabletDeck-Studio.apk`, Android package `app.tabletdeck.studio`, and `%LOCALAPPDATA%\TabletDeck` retain their compatible identities. Android uses version code 17. Rebuild and install a candidate containing native H.264 Second display before rehearsing it; an earlier 1.14 installation does not establish that this later change is present. Signed build, installation, and device/application behavior are separate pieces of evidence.
+The source brand/version is DeskWing 1.14.0. `TabletDeck-Companion.exe`, `TabletDeck-Studio.apk`, Android package `app.tabletdeck.studio`, and `%LOCALAPPDATA%\TabletDeck` retain their compatible identities. Android uses version code 17. The metrics-corrected candidate `9989c86` has been rebuilt and installed; version 1.14 alone does not distinguish it from earlier installed candidates. Signed build, installation, and device/application behavior are separate pieces of evidence.
 
-The stable main checkpoint `66d20d88b37a6a65349fd3534e469c3706b89d23` passed 58 Windows suites and 11 unsigned iOS simulator tests, including the final pen-preview corrections and canonical DeskWing repository update path. The user physically confirmed the corrected Pen tablet image and fullscreen are stable. This checkpoint excludes the resumed native H.264 display work; the Android launch crash, cleanup changes, and sustained tablet playback still need their own validation. Physical-iPad installation, Pencil/Scribble, live connection, signing, account flows, and store approval remain separate checks. [Stable Windows and iOS checkpoint](https://github.com/tugcantopaloglu/deskwing/actions/runs/42108057065).
+The earlier stable main checkpoint `66d20d8` passed 58 Windows suites and 11 iOS tests. Resumed candidate `002c3d5` passed 65 Windows suites locally and in hosted CI, plus 39 iOS tests. Final metrics-corrected candidate `9989c86` passed 78 focused metric checks, SDK 36 compilation, [final CI](https://github.com/tugcantopaloglu/deskwing/actions/runs/42252632169) with 65 Windows suites and 39 iOS tests, and [actual security review](SECURITY-DISPLAY-RESUME-2026-11-06.md) with no new findings above the seven-Low baseline. Original-signer packages were verified and the updated universal APK installed. The physical counter, Home/reopen/start, sharing revocation and display-removal checks passed as recorded above; a shared display is intentionally available for continued use. Exhaustive USB/Wi-Fi interruptions, latency/load cases, physical-iPad/Pencil behavior, app-specific Windows pen compatibility, account/signing flows and store approval remain separate checks.
 
 App Store/Play Store submission materials and account/signing requirements remain in [the separate store preparation guide](STORE-RELEASE.md); this user guide does not imply store publication or approval.
