@@ -371,6 +371,82 @@ final class DisplayVideoTests: XCTestCase {
         XCTAssertEqual(continued.0.map(\.bytes), [Data([9])])
     }
 
+    func testEstablishedPlaybackOverflowThenOnlyHeartbeatsHasAbsoluteRecoveryDeadline() throws {
+        let inbox = DisplayFrameInbox()
+        var deadline = DisplayKeyframeDeadline()
+        deadline.begin(at: 0)
+        inbox.offer(DisplayVideoUnit(bytes: picture, keyframe: true, configuration: false, presentationMicroseconds: 1))
+        XCTAssertTrue(try XCTUnwrap(inbox.take().0.first).keyframe)
+        try deadline.acceptKeyframe(at: 0.1)
+        XCTAssertFalse(deadline.recovering)
+
+        let dependent = Data([0, 0, 1, 0x61, 0x80])
+        for time in 2...5 {
+            inbox.offer(DisplayVideoUnit(bytes: dependent, keyframe: false, configuration: false, presentationMicroseconds: UInt64(time)))
+        }
+        let overflow = inbox.take()
+        XCTAssertTrue(overflow.1, "The real bounded inbox must require decoder resynchronization after its fourth unit.")
+        XCTAssertTrue(overflow.0.isEmpty)
+        deadline.wait(at: 10)
+        XCTAssertTrue(deadline.recovering)
+        for time in stride(from: 10.5, through: 14.5, by: 0.5) {
+            inbox.noteHeartbeat()
+            XCTAssertTrue(inbox.takeHeartbeat())
+            let empty = inbox.take()
+            XCTAssertTrue(empty.0.isEmpty)
+            XCTAssertEqual(empty.2, 0, "Heartbeat activity cannot count as a new video picture.")
+            XCTAssertNoThrow(try deadline.check(at: time))
+        }
+        XCTAssertThrowsError(try deadline.check(at: 15)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("recover after frames were dropped"))
+        }
+    }
+
+    func testRepeatedDecoderResetsCannotExtendRecoveryOrAcceptLateIDR() throws {
+        let inbox = DisplayFrameInbox()
+        var deadline = DisplayKeyframeDeadline()
+        deadline.begin(at: 100)
+        try deadline.acceptKeyframe(at: 100.1)
+        deadline.wait(at: 200)
+        for time in stride(from: 201.0, through: 204.0, by: 1) {
+            inbox.waitForKeyframe()
+            XCTAssertTrue(inbox.take().1)
+            deadline.wait(at: time)
+            deadline.begin(at: time)
+            XCTAssertNoThrow(try deadline.check(at: time))
+        }
+        XCTAssertThrowsError(try deadline.acceptKeyframe(at: 205), "A late keyframe cannot erase an already-expired wait.")
+        XCTAssertTrue(deadline.recovering)
+        XCTAssertThrowsError(try deadline.check(at: 206))
+    }
+
+    func testFreshRecoveryIDRAllowsAStillImageAndANewBoundedRecovery() throws {
+        var deadline = DisplayKeyframeDeadline()
+        deadline.begin(at: 0)
+        try deadline.acceptKeyframe(at: 0.1)
+        deadline.wait(at: 10)
+        try deadline.acceptKeyframe(at: 14.9)
+        XCTAssertFalse(deadline.recovering)
+        XCTAssertNoThrow(try deadline.check(at: 100), "An established still image needs no artificial replacement frames.")
+        deadline.wait(at: 200)
+        XCTAssertTrue(deadline.recovering)
+        XCTAssertNoThrow(try deadline.check(at: 204.9))
+        XCTAssertThrowsError(try deadline.check(at: 205))
+    }
+
+    func testInitialImageWaitCannotBeRenewedByTicksOrDecoderResets() {
+        var deadline = DisplayKeyframeDeadline()
+        deadline.begin(at: 0)
+        deadline.begin(at: 3)
+        deadline.wait(at: 4)
+        XCTAssertNoThrow(try deadline.check(at: 4.9))
+        XCTAssertThrowsError(try deadline.check(at: 5)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("first display image"))
+        }
+        XCTAssertFalse(deadline.receivedKeyframe)
+        XCTAssertFalse(deadline.recovering)
+    }
+
     func testInboxByteLimitAndStopCannotRetainOrAcceptFrames() {
         let inbox = DisplayFrameInbox()
         let large = Data(repeating: 1, count: DisplayVideoParser.maximumAccessUnit)

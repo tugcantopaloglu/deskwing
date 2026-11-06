@@ -49,6 +49,30 @@ final class DisplayFrameInbox {
     func stop() { lock.lock(); stopped = true; units.removeAll(); bytes = 0; heartbeatPending = false; lock.unlock() }
 }
 
+/// A live connection is not proof that its dependent video frames can be decoded. Each initial
+/// image/recovery wait has one absolute budget; heartbeats and repeated resets cannot renew it.
+struct DisplayKeyframeDeadline {
+    private var waitingSince: CFTimeInterval?
+    private(set) var receivedKeyframe = false
+    var recovering: Bool { receivedKeyframe && waitingSince != nil }
+    mutating func begin(at now: CFTimeInterval) {
+        if !receivedKeyframe { wait(at: now) }
+    }
+    mutating func wait(at now: CFTimeInterval) {
+        if waitingSince == nil { waitingSince = now }
+    }
+    mutating func acceptKeyframe(at now: CFTimeInterval) throws {
+        try check(at: now)
+        receivedKeyframe = true; waitingSince = nil
+    }
+    func check(at now: CFTimeInterval) throws {
+        guard let waitingSince, now - waitingSince >= 5 else { return }
+        throw DeskError.message(receivedKeyframe
+            ? "The display could not recover after frames were dropped. Start the display again."
+            : "The PC did not send the first display image in time. Start the display again.")
+    }
+}
+
 enum DisplayH264Format {
     static func make(sps: Data, pps: Data, expected: DisplayVideoFormat) throws -> CMVideoFormatDescription {
         guard !sps.isEmpty, !pps.isEmpty, sps.count <= 64 * 1024, pps.count <= 64 * 1024,
@@ -87,6 +111,7 @@ private final class DisplaySampleBuilder {
     private var format: CMVideoFormatDescription?
     private var waitingForKeyframe = true
     private var lastVideoPresentation: UInt64?
+    var needsKeyframe: Bool { waitingForKeyframe }
     init(format: DisplayVideoFormat) { expected = format }
     func reset() { waitingForKeyframe = true }
     func sample(_ unit: DisplayVideoUnit) throws -> (CMSampleBuffer, Bool)? {
@@ -161,10 +186,9 @@ final class DisplayVideoController: UIViewController {
     private var received = 0
     private var dropped = 0
     private var reportedAt: CFTimeInterval = 0
-    private var startedAt: CFTimeInterval = 0
     private var lastVideoAt: CFTimeInterval = 0
     private var lastHeartbeatAt: CFTimeInterval = 0
-    private var receivedFirstKeyframe = false
+    private var keyframeDeadline = DisplayKeyframeDeadline()
     private(set) var currentRefreshRate = 0
 
     init(format: DisplayVideoFormat, sourceRefresh: Int, close: @escaping (String) -> Void) {
@@ -204,30 +228,31 @@ final class DisplayVideoController: UIViewController {
     @objc private func exitPressed() { close("closed") }
     @objc private func tick(_ link: CADisplayLink) {
         guard !ended else { return }
-        if startedAt == 0 { startedAt = link.timestamp }
+        keyframeDeadline.begin(at: link.timestamp)
         let interval = link.targetTimestamp - link.timestamp
         if interval > 0 { currentRefreshRate = Int((1 / interval).rounded()) }
         let (units, resync, count, lost) = inbox.take(); received += count; dropped += lost
         if inbox.takeHeartbeat() { lastHeartbeatAt = link.timestamp }
-        if resync { displayLayer.flushAndRemoveImage(); builder.reset() }
+        if resync { beginRecovery(at: link.timestamp) }
         do {
+            try keyframeDeadline.check(at: link.timestamp)
             for unit in units {
                 let ready: Bool
                 if #available(iOS 17, *) { ready = displayLayer.sampleBufferRenderer.isReadyForMoreMediaData }
                 else { ready = displayLayer.isReadyForMoreMediaData }
-                guard ready else { displayLayer.flushAndRemoveImage(); builder.reset(); inbox.waitForKeyframe(); dropped += 1; break }
+                guard ready else { beginRecovery(at: link.timestamp); inbox.waitForKeyframe(); dropped += 1; break }
                 if let (sample, changed) = try builder.sample(unit) {
                     lastVideoAt = link.timestamp
-                    if unit.keyframe { receivedFirstKeyframe = true }
-                    if changed { displayLayer.flushAndRemoveImage() }
+                    if changed { displayLayer.flush() }
                     if #available(iOS 17, *) { displayLayer.sampleBufferRenderer.enqueue(sample) }
                     else { displayLayer.enqueue(sample) }
+                    if unit.keyframe { try keyframeDeadline.acceptKeyframe(at: link.timestamp) }
+                } else if builder.needsKeyframe {
+                    keyframeDeadline.wait(at: link.timestamp)
                 }
             }
             if displayLayer.status == .failed { throw DeskError.message("The tablet could not decode this video. Start the display again.") }
-            if !receivedFirstKeyframe && link.timestamp - startedAt > 5 {
-                throw DeskError.message("The PC did not send the first display image in time. Start the display again.")
-            }
+            try keyframeDeadline.check(at: link.timestamp)
         } catch { close(error.localizedDescription); return }
         if reportedAt == 0 { reportedAt = link.timestamp }
         let elapsed = link.timestamp - reportedAt
@@ -236,12 +261,17 @@ final class DisplayVideoController: UIViewController {
             let imageReady: Bool
             if #available(iOS 17.4, *) { imageReady = displayLayer.isReadyForDisplay }
             else { imageReady = false } // Older systems report received fps without claiming a visible still image.
-            let still = receivedFirstKeyframe && imageReady && lastVideoAt > 0 &&
+            let still = keyframeDeadline.receivedKeyframe && !keyframeDeadline.recovering && imageReady && lastVideoAt > 0 &&
                 link.timestamp - lastVideoAt >= 1 && lastHeartbeatAt > 0 && link.timestamp - lastHeartbeatAt <= 1.5
-            let activity = still ? "Still image" : "\(rate) fps received"
+            let activity = keyframeDeadline.recovering ? "Recovering video" : still ? "Still image" : "\(rate) fps received"
             status.text = " \(activity) · \(currentRefreshRate) Hz screen\n Target \(format.refreshRate) Hz · source \(sourceRefresh) Hz" + (dropped > 0 ? " · \(dropped) frames dropped " : " ")
             received = 0; dropped = 0; reportedAt = link.timestamp
         }
+    }
+    private func beginRecovery(at now: CFTimeInterval) {
+        // Preserve the last image during this bounded same-session recovery. A flush still
+        // requires a fresh IDR; stop/revocation removes the retained image immediately below.
+        displayLayer.flush(); builder.reset(); keyframeDeadline.wait(at: now)
     }
     func stop() {
         guard !ended else { return }; ended = true; inbox.stop(); displayLink?.invalidate(); displayLink = nil

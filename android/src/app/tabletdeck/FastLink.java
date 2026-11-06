@@ -23,12 +23,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class FastLink implements AutoCloseable {
     public static final class Settings {
         final String host,token,fingerprint;final SSLSocketFactory factory;final int port;
-        public Settings(String host,int port,String token,String fingerprint,SSLSocketFactory factory){if(!token.matches("[A-F0-9]{64}")||!fingerprint.matches("[A-F0-9]{64}"))throw new IllegalArgumentException("Pair this tablet first.");this.host=host;this.port=port;this.token=token;this.fingerprint=fingerprint;this.factory=factory;}
+        public final Object context;
+        public Settings(String host,int port,String token,String fingerprint,SSLSocketFactory factory){this(host,port,token,fingerprint,factory,null);}
+        public Settings(String host,int port,String token,String fingerprint,SSLSocketFactory factory,Object context){if(!token.matches("[A-F0-9]{64}")||!fingerprint.matches("[A-F0-9]{64}"))throw new IllegalArgumentException("Pair this tablet first.");this.host=host;this.port=port;this.token=token;this.fingerprint=fingerprint;this.factory=factory;this.context=context;}
     }
     public interface Listener {
         Settings settings() throws Exception;
-        boolean packet(String json) throws Exception;
-        void disconnected();
+        default boolean packet(String json) throws Exception {return false;}
+        default void disconnected(){}
+        default boolean packet(String json,Settings settings,long generation) throws Exception {return packet(json);}
+        default void disconnected(Settings settings,long generation){disconnected();}
     }
     private final Listener listener;
     private final Object writeGate=new Object(),wake=new Object(),connectionGate=new Object();
@@ -44,8 +48,9 @@ public final class FastLink implements AutoCloseable {
     private final ThreadPoolExecutor cleanup=new ThreadPoolExecutor(1,1,0L,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<Runnable>(1),r->{Thread t=new Thread(r,"TabletDeck TLS cleanup");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
     private static final class Connection {
         final SSLSocket socket;final AtomicBoolean closeScheduled=new AtomicBoolean();final CountDownLatch closed=new CountDownLatch(1);
+        final Settings settings;long generation;boolean admitted;
         volatile boolean invalidated;
-        Connection(SSLSocket socket){this.socket=socket;}
+        Connection(SSLSocket socket,Settings settings){this.socket=socket;this.settings=settings;}
     }
     private final ScheduledExecutorService heartbeat=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"TabletDeck link heartbeat");t.setDaemon(true);return t;});
     private volatile long pingAt;
@@ -60,13 +65,16 @@ public final class FastLink implements AutoCloseable {
     public FastLink(Listener listener){this.listener=listener;worker=new Thread(this::run,"TabletDeck fast TLS");worker.setDaemon(true);}
     public void start(){if(!started.compareAndSet(false,true)||!running)throw new IllegalStateException("The fast link has already started or closed.");worker.start();heartbeat.scheduleAtFixedRate(()->{try{synchronized(writeGate){if(ready){if(pingAt!=0){if(System.nanoTime()-pingAt>12000000000L){synchronized(statsGate){timeouts++;}reset();}return;}pingAt=System.nanoTime();write("{\"id\":0,\"path\":\"/api/ping\",\"body\":{}}");}}}catch(IOException ignored){reset();}},2,8,TimeUnit.SECONDS);}
     public boolean connected(){return ready;}
+    // A queued callback must check this again when it reaches the UI. Natural disconnect keeps
+    // its generation until the next socket is admitted; reset/pause/close invalidate it at once.
+    public boolean isCurrentGeneration(long generation){synchronized(connectionGate){return running&&!paused&&connectionGeneration==generation;}}
     public double roundTripMs(){return roundTrip;}
     public void pong(){synchronized(statsGate){if(pingAt!=0){roundTrip=(System.nanoTime()-pingAt)/1000000.0;pingAt=0;samples.addLast(roundTrip);while(samples.size()>120)samples.removeFirst();}}}
     public boolean send(String json) throws IOException {
         return send(json,()->{});
     }
     public boolean send(String json,Runnable beforeCommit) throws IOException {
-        synchronized(writeGate){if(!ready)return false;beforeCommit.run();write(json);return true;}
+        synchronized(writeGate){Connection owned=connection;if(!ready||!current(owned))return false;beforeCommit.run();if(!ready||!current(owned))throw new IOException("The connection changed before the control request was sent.");write(json);return true;}
     }
     private void write(String json) throws IOException {
         byte[] bytes=json.getBytes(StandardCharsets.UTF_8);if(bytes.length>16384)throw new IOException("Control request exceeds limit.");
@@ -82,8 +90,8 @@ public final class FastLink implements AutoCloseable {
                 if(paused){waitFor(1000);continue;}
                 final long generation;synchronized(connectionGate){generation=connectionGeneration;}
                 Settings settings=listener.settings();if(settings==null){waitFor(1000);continue;}
-                owned=new Connection((SSLSocket)settings.factory.createSocket());
-                synchronized(connectionGate){if(!running||paused||generation!=connectionGeneration)throw new IOException("The connection changed before the socket opened.");connection=owned;}
+                owned=new Connection((SSLSocket)settings.factory.createSocket(),settings);
+                synchronized(connectionGate){if(!running||paused||generation!=connectionGeneration)throw new IOException("The connection changed before the socket opened.");owned.generation=++connectionGeneration;owned.admitted=true;connection=owned;}
                 SSLSocket socket=owned.socket;
                 socket.setTcpNoDelay(true);socket.setKeepAlive(true);socket.connect(new InetSocketAddress(settings.host,settings.port),2500);socket.setSoTimeout(20000);socket.startHandshake();
                 verify((X509Certificate)socket.getSession().getPeerCertificates()[0],settings.fingerprint);
@@ -91,7 +99,8 @@ public final class FastLink implements AutoCloseable {
                 DataInputStream input=new DataInputStream(socket.getInputStream());
                 while(running&&!paused&&!owned.invalidated){int length=input.readInt();if(length<2||length>1024*1024)throw new IOException("Control response exceeds limit.");byte[] bytes=new byte[length];input.readFully(bytes);
                     String json=StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();
-                    if(listener.packet(json)){synchronized(connectionGate){if(running&&!paused&&connection==owned&&!owned.invalidated){if(!sessionWasReady){synchronized(statsGate){connects++;}event("connected");}sessionWasReady=true;ready=true;retry=250;}}}
+                    if(!current(owned))throw new IOException("The connection changed while receiving a packet.");
+                    if(listener.packet(json,owned.settings,owned.generation)){synchronized(connectionGate){if(running&&!paused&&connection==owned&&!owned.invalidated){if(!sessionWasReady){synchronized(statsGate){connects++;}event("connected");}sessionWasReady=true;ready=true;retry=250;}}}
                 }
             }catch(Exception ignored){/* HTTPS remains available; failures never replay controls. */}
             finally{
@@ -101,7 +110,7 @@ public final class FastLink implements AutoCloseable {
                 // No new connection can overtake an unfinished close or be closed by its callback.
                 if(owned!=null){boolean interrupted=false;for(;;)try{owned.closed.await();break;}catch(InterruptedException ex){interrupted=true;running=false;}if(interrupted)Thread.currentThread().interrupt();}
                 synchronized(writeGate){output=null;pingAt=0;}
-                listener.disconnected();
+                if(owned!=null&&owned.admitted)try{listener.disconnected(owned.settings,owned.generation);}catch(RuntimeException ignored){/* A listener cannot prevent transport cleanup. */}
             }
             if(running){waitFor(retry);retry=Math.min(5000,retry*2);}
         }}finally{cleanup.shutdown();}
@@ -110,6 +119,7 @@ public final class FastLink implements AutoCloseable {
         if(owned==null||!owned.closeScheduled.compareAndSet(false,true))return;
         cleanup.execute(()->{try{owned.socket.close();}catch(IOException|RuntimeException ignored){/* Cleanup stays on this dedicated worker, even if a TLS provider fails. */}finally{owned.closed.countDown();}});
     }
+    private boolean current(Connection owned){synchronized(connectionGate){return owned!=null&&running&&!paused&&!owned.invalidated&&connection==owned&&connectionGeneration==owned.generation;}}
     private static void verify(X509Certificate certificate,String expected) throws Exception {
         certificate.checkValidity();byte[] digest=MessageDigest.getInstance("SHA-256").digest(certificate.getEncoded());StringBuilder found=new StringBuilder();for(byte value:digest)found.append(String.format(java.util.Locale.ROOT,"%02X",value));
         if(!MessageDigest.isEqual(found.toString().getBytes(StandardCharsets.US_ASCII),expected.getBytes(StandardCharsets.US_ASCII)))throw new javax.net.ssl.SSLException("PC certificate pin mismatch.");

@@ -155,7 +155,8 @@ function normalizeComputerDisplayCapabilities(value){
   return{available:true,currentRefreshRate:rate,maxRefreshRate:maximum,supportedRefreshRates:Array.isArray(value.supportedRefreshRates)?value.supportedRefreshRates.filter(rate=>Number.isFinite(rate)&&rate>=1&&rate<=240):[],detail:typeof value.detail==='string'?value.detail.slice(0,500):''};
 }
 function computerDisplayRateProblem(){
-  const source=computerDisplaySnapshot?.refreshRate,target=computerDisplayRefreshMode==='match'&&computerDisplayCapabilities?.available?Math.max(60,Math.round(computerDisplayCapabilities.currentRefreshRate)):60;
+  const source=computerDisplaySnapshot?.refreshRate,target=computerDisplayRefreshMode==='match'&&computerDisplayCapabilities?.available?Math.round(computerDisplayCapabilities.currentRefreshRate):60;
+  if(computerDisplayRefreshMode==='match'&&target<60)return 'Match tablet is unavailable while the tablet reports below 60 Hz. Check its power and display settings, or choose 60 Hz.';
   return Number.isFinite(source)&&source>0&&source+0.1<target?`Create the PC Second display at ${target} Hz or higher to use this setting.`:'';
 }
 function updateComputerDisplayRateUI(){
@@ -167,11 +168,12 @@ function appendComputerDisplayRefresh(content){
   const capabilities=computerDisplayCapabilities;
   const label=computerText('label','computer-display-choice','Refresh rate'),select=computerText('select','app-mode');select.id='computer-display-rate';
   const fixed=computerText('option','','60 Hz');fixed.value='60';select.append(fixed);
-  const target=capabilities?.available?Math.max(60,Math.round(capabilities.currentRefreshRate)):null;
-  const match=computerText('option','',target?`Match tablet (${target} Hz)`:'Match tablet');match.value='match';match.disabled=!target;select.append(match);
+  const target=capabilities?.available?Math.round(capabilities.currentRefreshRate):null,matchAvailable=target>=60;
+  const match=computerText('option','',target?`Match tablet (${target} Hz)`:'Match tablet');match.value='match';match.disabled=!matchAvailable;select.append(match);
   select.value=computerDisplayRefreshMode;select.onchange=()=>{computerDisplayRefreshMode=select.value==='match'?'match':'60';updateComputerDisplayRateUI();};label.append(select);content.append(label);
   const rates=capabilities?.available?`Tablet: ${Math.round(capabilities.currentRefreshRate)} Hz now · up to ${Math.round(capabilities.maxRefreshRate)} Hz. `:'';
-  const help=computerText('p','computer-display-rate-help',rates+'The viewer shows the received video frame rate. The extra Windows display must be set to at least the selected rate.');help.id='computer-display-rate-help';content.append(help);
+  const unavailable=target&&!matchAvailable?'Match tablet is unavailable below 60 Hz. Check the tablet’s power and display settings, or choose 60 Hz. ':'';
+  const help=computerText('p','computer-display-rate-help',rates+unavailable+'The viewer shows the received video frame rate. The extra Windows display must be set to at least the selected rate.');help.id='computer-display-rate-help';content.append(help);
   const warning=computerText('p','computer-display-rate-warning');warning.id='computer-display-rate-warning';warning.setAttribute('role','status');warning.hidden=true;content.append(warning);
 }
 function renderComputerDisplay(fallback=''){

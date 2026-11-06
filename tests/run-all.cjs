@@ -22,6 +22,7 @@ const suites=[
   {name:'android-display-protocol',group:'android',java:true,javaClass:'app.tabletdeck.DisplayVideoProtocolHarness',javaSources:['android/src/app/tabletdeck/DisplayVideoProtocol.java','android/src/app/tabletdeck/DisplayReadDeadline.java','tests/java/DisplayVideoProtocolHarness.java']},
   {name:'android-bridge-tickets',group:'android',java:true,javaClass:'app.tabletdeck.BridgeRequestTicketsHarness',javaSources:['android/src/app/tabletdeck/BridgeRequestTickets.java','tests/java/BridgeRequestTicketsHarness.java']},
   {name:'android-frame-metrics',group:'android',java:true,javaClass:'app.tabletdeck.RenderedFrameMetricsHarness',javaSources:['android/src/app/tabletdeck/RenderedFrameMetrics.java','tests/java/RenderedFrameMetricsHarness.java']},
+  {name:'android-display-lifecycle',group:'android',java:true,javaClass:'app.tabletdeck.DisplayLifecycleHarness',javaSources:['android/src/app/tabletdeck/NetworkCloseQueue.java','android/src/app/tabletdeck/DisplayReadDeadline.java','android/src/app/tabletdeck/DisplayDecoderStartup.java','tests/java/DisplayLifecycleHarness.java']},
   {name:'copilot-backend',group:'core',project:'tests/copilot-backend/CopilotBackendTests.csproj'},
   {name:'media-sessions',group:'core',project:'tests/media-sessions/MediaSessionTests.csproj'},
   {name:'readiness-backend',group:'core',project:'tests/readiness-backend/ReadinessBackendTests.csproj'},

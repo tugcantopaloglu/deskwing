@@ -22,7 +22,7 @@ final class NetworkCloseQueue implements AutoCloseable {
                 submitted=true;
                 if(action==null){release();return;}
                 // The reservation count prevents overflow, and shutdown waits for all reservations.
-                executor.execute(()->{try{action.run();}finally{release();}});
+                executor.execute(()->{try{action.run();}catch(RuntimeException ignored){/* A failing TLS provider must not crash the app's cleanup worker. */}finally{release();}});
             }
         }
         private void release(){synchronized(gate){reserved--;if(closed&&reserved==0)executor.shutdown();}}
