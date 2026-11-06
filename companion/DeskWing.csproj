@@ -5,9 +5,13 @@
     <OutputType>Exe</OutputType>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>TabletDeck-Companion</AssemblyName>
+    <AssemblyName>DeskWing-Companion</AssemblyName>
+    <Product>DeskWing</Product>
+    <Title>DeskWing</Title>
+    <AssemblyTitle>DeskWing</AssemblyTitle>
+    <Description>DeskWing Windows companion</Description>
     <RootNamespace>TabletDeck</RootNamespace>
-    <Version>1.14.0</Version>
+    <Version>1.15.0</Version>
     <ApplicationIcon>..\assets\app-icon.ico</ApplicationIcon>
     <UseWindowsForms>true</UseWindowsForms>
     <PublishSingleFile>true</PublishSingleFile>
@@ -17,8 +21,8 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
   <ItemGroup>
-    <EmbeddedResource Include="..\assets\app-icon.ico" LogicalName="TabletDeck.AppIcon.ico" />
-    <Content Include="..\assets\app-icon.ico" Link="TabletDeck.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <EmbeddedResource Include="..\assets\app-icon.ico" LogicalName="DeskWing.AppIcon.ico" />
+    <Content Include="..\assets\app-icon.ico" Link="DeskWing.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Sounds\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <Content Include="Licenses\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />

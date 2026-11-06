@@ -104,3 +104,69 @@ The native path uses DXGI GPU capture, software Media Foundation H.264 encoding,
 - [x] Verify the connected tablet: the user confirmed that the buttons are visible and audio works.
 
 The actual board contained five pages and 21 buttons but no Memes page; the old Codex-virtualized data view showed eight pages and was not the user's active board. The repair added one live Memes page and compared the original five pages/buttons after saving to confirm they were identical. Its initial microphone-only output was corrected to **both microphone and speakers**, matching the original intended setting. The user confirmed visible buttons and working audio. No Soundpad product-code change was required, and this confirmation does not certify audio routing in every receiving application. See [the deployment-context note](docs/BUILDING.md#development-host-and-real-user-data).
+
+## 11. Workspace expansion — requested 2026-11-06
+
+Implement all five agreed areas in parallel on `codex/workspace-expansion`. Use source, isolated test fixtures, ADB and authenticated app APIs. The owner subsequently authorized computer use for Google Play deployment, which is now the first distribution priority. Preserve the existing production board, profile IDs, original pages/buttons, Soundpad routing, pairing and signing identity. Never copy the development host's board over the user's board.
+
+### A. Tablet context, setup and sound routing
+- [x] Record an actual-production board fingerprint and create a private backup before deployment (six pages, 21 saved buttons; no page contents changed).
+- [x] Show connected PC, active board and workspace identity clearly on the tablet.
+- [x] Show each live Soundpad page's Speakers / Microphone / Both route.
+- [x] Add guided read-only connection/audio diagnostics and an explicit user-triggered sound test.
+- [x] Prevent an inherited packaged-host context silently opening a different implicit data location.
+- [ ] Verify existing board contents and routing survive the upgrade unchanged.
+
+### B. High-refresh pen display
+- [x] Combine the native 60 Hz / Match tablet viewer with pressure/tilt pen input and explicit single-finger touch controls.
+- [x] Require separate PC input opt-in and bind input to the exact owned monitor, active video owner and fresh geometry.
+- [x] Implement Android and iOS native input, palm handling, release, timeout and lifecycle cleanup.
+- [x] Test permission refusal, stale/replaced sessions, mapping, pressure, cancellation and shutdown without real input in fixtures.
+- [ ] Rehearse the connected Xiaomi tablet after verified packaging.
+
+### C. Notebooks and PDF work
+- [x] Add named documents, multiple pages and page thumbnails.
+- [x] Add zoom/pan, document history and recovery.
+- [x] Preserve the existing shared scratchpad and local backup through separate notebook storage and compatibility routes.
+- [x] Add bounded PDF import, page rendering, annotation and PDF export.
+- [x] Verify document/page revisions, concurrent edits, resource limits, recovery failures and export/import behavior in isolated fixtures.
+
+### D. Display quality and power
+- [x] Add Balanced, Quality and Battery saver presets with measured status.
+- [x] Add bounded adaptive quality for varying delivery and load.
+- [x] Implement optional supported hardware H.264 encoding with a compatible software fallback.
+- [x] Keep refresh selection, actual frame delivery, encoder choice and adaptation truthful.
+- [ ] Verify sustained performance and reconnect/revocation behavior in appropriate isolated and device checks.
+
+### E. Distributable beta
+- [x] Refresh release guides and claims to match the implemented candidate and its verification limits.
+- [x] Prepare privacy, support and beta overview pages using the approved public developer/contact details.
+- [x] Prepare verified Google Play and App Store icon assets.
+- [ ] Capture and review release screenshots from the final candidate.
+- [x] Prepare secure Android internal-test and signed iOS archive/TestFlight build workflows (signing is protected manual dispatch; store upload remains separate).
+- [x] Separate direct Android installation from Play-distributed update behavior.
+- [ ] Complete account/team/signing inputs and device gates when supplied; do not claim store submission or signed distribution before it succeeds.
+
+### Integration and delivery
+- [x] Integrate shared route, asset allowlist and build/version changes without concurrent-file overwrites.
+- [x] Run focused tests and a fresh isolated Windows publish; verify all 80 current default suites through the retained full baseline, targeted retries and owner fixture runs.
+- [ ] Pass hosted Windows regression, iOS simulator tests and unsigned iOS archive validation on the final pushed commit.
+- [x] Run actual Snyk Code scanning and dependency/license checks; repair and rescan new actionable findings, recording the reviewed residual Low warnings.
+- [x] Build and verify original-signer Android APK/AAB packages and the matching isolated Windows companion.
+- [ ] Deploy through the normal production data context, verify the board fingerprint, and perform the relevant tablet checks.
+- [x] Record the current verification results, artifact hashes and development-branch changes for repository delivery.
+- [ ] Finish hosted validation and repository integration after the development-branch push.
+- [ ] Enroll the original signing identity and publish the verified AAB to Google Play internal testing.
+
+The [1.15 verification record](docs/VERIFICATION-1.15-2026-11-06.md) distinguishes the 80-suite aggregate from an uninterrupted green full run and preserves the earlier failures. All product inputs and 245 published web assets stayed unchanged while six test fixtures were repaired or hardened. Actual security checkpoint 6 retained 14 reviewed Low warnings, with no High, Medium or unexpected actionable new findings. Hosted final-commit validation, 1.15 physical-device rehearsal, Play internal distribution, release screenshots and signed iOS distribution remain separate gates.
+
+### F. Complete DeskWing branding — added by owner
+- [x] Confirm DeskWing as the public name while retaining the existing Android installation/data identity.
+- [x] Create the DeskWing Google Play app record after the owner's policy/export declarations.
+- [x] Use DeskWing throughout visible app text, exported filenames, installers, helper scripts, candidate release assets and current documentation.
+- [x] Rename public Windows binaries/projects and Android APK output; preserve a verified upgrade bridge for older clients.
+- [x] Audit the DeskWing repository identity and current setup/download instructions.
+- [ ] Publish the renamed release assets with the required legacy upgrade aliases when creating a release.
+- [x] Re-run actual security scanning and affected local regression/package checks after branding changes.
+
+Compatibility identifiers (Android installation/component IDs, saved-data directories, storage keys, QR/protocol formats, existing install records and recovered signing material) retain their established values so existing installations and content continue working. Historical evidence keeps the exact artifact names that were tested at the time. The current Play record is DeskWing; its package remains `app.tabletdeck.studio` by the owner's explicit choice.

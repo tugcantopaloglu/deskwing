@@ -1,6 +1,6 @@
 # DeskWing iOS host
 
-This directory contains a native iPhone/iPad host for the shared tablet UI. The preceding pen-preview build passed 11 tests in the hosted iPad simulator; the native high-refresh display changes add 19 tests and still require a fresh hosted Mac run. It is not yet a signed or released iOS app. Development uses Windows; GitHub's hosted Mac runner provides compilation and simulator validation. Physical iPad, Apple Pencil, pairing and distribution gates below remain required.
+This directory contains a native iPhone/iPad host for the shared tablet UI. The `ab55af0` baseline passed **39 tests** in the hosted iPad simulator, including native display framing/recovery policies. The workspace expansion requires its own hosted build and tests. It is not yet a signed or released iOS app. Development uses Windows; GitHub's hosted Mac runner provides compilation, simulator validation and the prepared beta-archive path. Physical iPad, Apple Pencil, pairing and distribution gates below remain required.
 
 ## Included
 
@@ -58,9 +58,11 @@ For a real device, open the generated project, select the user's Apple Developer
 4. Specifically test the self-signed local-IP certificate with `NSAllowsLocalNetworking` on supported iOS versions. No global `NSAllowsArbitraryLoads` exception is configured. Do not add one to make a failed test pass; resolve the pinned local connection policy first.
 5. Exercise simultaneous preview/polling and action traffic, queued-write expiry, held-key and pen-lease renewal/release, lost-network ambiguity, long macros, cancellation and restoring the app while a response is pending. Pending actions/sample batches must not replay after reconnect. Verify shared ink conflict recovery and bounded large-document sync separately from latency-sensitive pen input. For the PC drawing preview, verify target alignment, lease/focus changes, one frame in flight, timeout cleanup, stale-image hiding and pen responsiveness during slow image transfer.
 6. Test Scribble with actual Apple Pencil, enabled languages, keyboard fallback, long text, cancelling a sheet, pressure/palm handling and drawing save/share. Verify full-screen entry/exit, Home/status-bar behavior, safe-area placement of Exit/Stop controls, Split View, and restoration after backgrounding or native tools. A simulated stylus cannot verify physical palm rejection or system recognition.
-7. Provide an App Store icon asset catalog with the required opaque 1024px artwork, accessibility/release screenshots, support/privacy policy URLs, and app review instructions explaining the required Windows companion. The current source target intentionally does not pretend those submission assets are complete.
+7. The `Resources/Assets.xcassets/AppIcon.appiconset` catalog now supplies opaque 1024px artwork generated from the original DeskWing SVG by `scripts/Build-StoreAssets.ps1`. Capture real accessibility/release screenshots, activate and verify the public support/privacy URLs, and prepare review instructions explaining the Windows companion. The prepared icon and pages do not mean store submission materials or hosting are approved.
 8. Audit the privacy manifest and App Store privacy answers against final provider behavior and any added SDKs. The supplied manifest is a native-host baseline with no tracking SDKs or required-reason APIs used directly in the current Swift code; it is not an automatic assertion that all product/store disclosures are complete. Do not add an export-compliance exemption flag until the account's accurate declaration is selected.
 9. Archive, validate and distribute a signed TestFlight build. Complete an iPad rehearsal before marking iOS support released.
+
+Manual beta workflows and the exact environment/secret setup are documented in [BETA-RELEASE.md](../docs/BETA-RELEASE.md). They produce reviewable artifacts and do not upload them automatically. Developer and support identity: **Tuğcan Topaloğlu**, **tugcan@tugcan.dev**.
 
 ## Security boundaries and primary references
 
@@ -73,6 +75,8 @@ The writing field uses the standard text input system. Recognition availability 
 Project generation follows [XcodeGen's source/resource specification](https://github.com/yonaskolb/XcodeGen/blob/master/Docs/ProjectSpec.md). Store preparation is tracked in [STORE-RELEASE.md](../docs/STORE-RELEASE.md) and [IOS-PLAN.md](../docs/IOS-PLAN.md).
 
 ## Recorded validation
+
+- Final baseline validation on 2026-11-06: [main `ab55af0`](https://github.com/tugcantopaloglu/deskwing/actions/runs/42254754760) passed all **39 iOS tests** with zero failures, alongside 65 Windows suites. This establishes compilation and deterministic policy coverage for that source, not physical iOS video/input or signing.
 
 - Hosted Mac validation passed on 2026-11-05 for commit `702d40b575133baf1160c285fcb0698599c9ff65`: Xcode 26.6, iPad Pro 13-inch (M5) simulator, iPadOS 26.4.1. The unsigned Debug app compiled and all nine `DeskWingTests` passed with zero failures. [iOS simulator job and logs](https://github.com/tugcantopaloglu/deskwing/actions/runs/42086833842/job/127454109100).
 - Tests cover private-address and certificate-pin policy, bridge route/origin boundaries, background release rules, ink request limits, PNG validation, malformed certificates, stale callback isolation after a renderer restart, and strict full-screen requests with background-safe exit. They do not exercise live TLS pairing, visual full-screen behavior or hardware pen input.

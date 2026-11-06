@@ -46,6 +46,8 @@ async function routeFixture(route){
    case '/api/computer':return send({settings,activePresetId:'coding',foreground:{application:'Code.exe',available:true},contextToken:'fixture-context',status:'Ready for Code.exe',capabilities:{displayNote:'Independent display setup is optional.'}});
    case '/api/admin/computer':return send(settings);
    case '/api/computer/display':return send({available:false,active:false,sharedWithTablet:false,independentDesktop:false,driver:{installed:false,name:'Virtual display'},detail:'Install a supported virtual display driver on the PC to extend your desktop.'});
+   case '/api/computer/display/input':return send({supported:true,enabled:false,active:false,mode:'view',error:'Pen input is off.',sourceName:'',targetIdentity:'',leaseTimeoutMs:1200,maxBatch:32});
+   case '/api/computer/display/stream/status':return send({active:false,qualityPreset:'',adaptiveQuality:false,targetRefreshRate:0,captureRate:0,bitrate:0,encoder:'',hardwareAccelerated:false,detail:'No video session is active.'});
    case '/api/computer/media':return send({sessions:[]});
    case '/api/apps':return send({apps:[]});
    default:if(request.method()!=='GET'){controlRequests.push(request.method()+' '+url.pathname);return send({error:'PC actions disabled in fixture'},409);}unhandled.push(request.method()+' '+url.pathname);return send({error:'Unexpected fixture endpoint'},404);
@@ -61,10 +63,12 @@ async function routeFixture(route){
 async function createPage(desktop){
  const context=await browser.newContext({viewport:{width:1280,height:800},hasTouch:!desktop});await context.route('**/*',routeFixture);
  if(!desktop)await context.addInitScript(()=>{
-  window.fixtureNativeRequests=[];
+  window.fixtureNativeRequests=[];window.fixtureWritingEnvelopes=[];window.fixturePairingId='11111111-1111-4111-8111-111111111111';window.fixtureRejectedWriting=0;
   window.DeckNative={dispatch(text){
    const request=JSON.parse(text);window.fixtureNativeRequests.push(request.path);
-   const result=request.path==='/native/connection'?Promise.resolve({paired:true,mode:'usb',host:'127.0.0.1'}):request.path==='/local/handwriting'?Promise.resolve({cancelled:true}):request.path==='/local/fullscreen'?Promise.resolve({enabled:request.body.enabled===true}):request.path.startsWith('/api/')?fetch(request.path,{method:request.method,headers:{'Content-Type':'application/json'},body:request.body===undefined?undefined:JSON.stringify(request.body)}).then(response=>response.json()):Promise.resolve({error:'Unexpected native fixture request'});
+   const writing=/^(?:\/api\/notebooks(?:\/|\?|$)|\/api\/ink(?:\?|$))/.test(request.path);
+   if(writing)window.fixtureWritingEnvelopes.push({path:request.path,expectedPairingId:request.expectedPairingId});
+   const result=request.path==='/native/connection'?Promise.resolve({paired:true,mode:'usb',host:'127.0.0.1',pairingId:window.fixturePairingId}):writing&&request.expectedPairingId!==window.fixturePairingId?(window.fixtureRejectedWriting++,Promise.resolve({error:'Writing pairing changed before fixture HTTP delivery.'})):request.path==='/local/handwriting'?Promise.resolve({cancelled:true}):request.path==='/local/fullscreen'?Promise.resolve({enabled:request.body.enabled===true}):request.path.startsWith('/api/')?fetch(request.path,{method:request.method,headers:{'Content-Type':'application/json'},body:request.body===undefined?undefined:JSON.stringify(request.body)}).then(response=>response.json()):Promise.resolve({error:'Unexpected native fixture request'});
    result.then(value=>window.nativeResult(request.id,value)).catch(error=>window.nativeResult(request.id,{error:error.message}));
   }};
  });
@@ -148,12 +152,14 @@ async function run(){
  await desktop.locator('#console-editor').click();await desktop.locator('#page-name').waitFor();await settle(desktop);check(await desktop.locator('#console-title').innerText()==='Board editor','returning to editor restores its header after ink');
  await desktop.context().close();saved.pages[0].name='Live studio';sharedInk=emptyInk();
  const tablet=await createPage(false);
+ check(await tablet.locator('#soundpad-button').evaluate(button=>{const box=button.getBoundingClientRect(),header=button.closest('.topbar').getBoundingClientRect(),workspace=document.querySelector('#workspace').getBoundingClientRect();return document.body.classList.contains('studio-tools-ready')&&box.bottom<=header.bottom&&workspace.top>=header.bottom&&document.elementFromPoint(box.x+box.width/2,box.y+box.height/2)===button;}),'full native-host Studio allocates its wrapped header and keeps Soundpad above the board');
  for(const [width,height,name] of [[1280,800,'tablet-board'],[800,600,'tablet-board-small'],[668,1070,'tablet-board-portrait']]){await tablet.setViewportSize({width,height});await capture(tablet,name,'#workspace',['.key:first-child','#app-mode'],44);}
  await tablet.setViewportSize({width:1280,height:800});await mode(tablet,'pen');await ink(tablet);
  for(const [width,height,name] of [[1280,800,'tablet-ink'],[800,600,'tablet-ink-small'],[668,1070,'tablet-ink-portrait'],[390,844,'tablet-ink-narrow']]){await tablet.setViewportSize({width,height});await capture(tablet,name,'#pen-workspace',['#pen-tool','#pen-eraser','#pen-export','#pen-notes'],44);}
  await tablet.setViewportSize({width:1280,height:800});await mode(tablet,'computer');await tablet.locator('.computer-control').first().waitFor();await capture(tablet,'tablet-computer','#computer-workspace',['[data-computer-focus="control-save"]','#app-mode'],44);
  await mode(tablet,'display');check(await tablet.locator('#computer-display-status').innerText().then(text=>text.includes('virtual display driver')),'tablet display shows setup guidance without starting a display');await capture(tablet,'tablet-display','#computer-workspace',['#app-mode'],44);
  await mode(tablet,'pen');await tablet.reload();await mode(tablet,'pen');check(await tablet.locator('#pen-notes').inputValue().then(text=>text.includes('Next stream')),'ink notes survive reload');check(await tablet.evaluate(()=>JSON.parse(localStorage.getItem('deskwing.pen.v1')).strokes.length)===3,'ink pointer strokes survive reload');
+ check(await tablet.evaluate(()=>fixtureRejectedWriting===0&&fixtureWritingEnvelopes.length>0&&fixtureWritingEnvelopes.every(request=>request.expectedPairingId===fixturePairingId)),'native ink fixture retains the original pairing guard on every writing request');
  check(controlRequests.length===0,'workspace navigation and ink never dispatch PC controls or playback');check(externalRequests.length===0,'all requests remain inside the intercepted fixture');check(unhandled.length===0,'all fixture API paths are accounted for: '+unhandled.join(', '));check(errors.length===0,'all rendered workspaces have no uncaught JavaScript errors: '+errors.join('; '));
  fs.writeFileSync(path.join(output,'workspace-rendered-results.json'),JSON.stringify({checks,failures,captures,errors,unhandled,controlRequests,externalRequests,saveCount,fixtureOnly:true,narrowFallback:'At 390px navigation and drawing/notes stack; individual panes scroll vertically.',physicalPenTested:false,nativeHandwritingTested:false},null,2));
  assert.equal(failures.length,0,failures.join('\n'));console.log(checks+' workspace checks passed; '+captures.filter(item=>item.screenshot).length+' screenshots in '+output);

@@ -40,9 +40,38 @@ struct PenPreviewRequests {
     mutating func reset() { lease = nil; pending = nil }
 }
 
+/// Binds notebook, PDF and legacy scratchpad operations to their original public pairing context.
+/// It never stores or exposes the PC's authentication token or certificate pin.
+struct NotebookPCRequestScope {
+    let pairingID: String?
+
+    init(path: String, expectedPairingID: Any?, currentPairingID: String?) throws {
+        guard HostPolicy.notebookNeedsContext(path) else { pairingID = nil; return }
+        guard let expected = expectedPairingID as? String, Self.validID(expected),
+              let current = currentPairingID, Self.validID(current), expected == current else {
+            throw DeskError.message("The notebook's connected PC changed. Reopen its library before continuing.")
+        }
+        pairingID = expected
+    }
+    private static func validID(_ value: String) -> Bool {
+        guard value.utf8.count == 36, let range = value.range(of: #"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"#, options: .regularExpression) else { return false }
+        return range == (value.startIndex..<value.endIndex)
+    }
+    func requireCurrent(_ currentPairingID: String?) throws {
+        guard let expected = pairingID else { return }
+        guard currentPairingID == expected else {
+            throw DeskError.message("The notebook's connected PC changed. Reopen its library before continuing.")
+        }
+    }
+    func perform<T>(currentPairingID: String?, _ operation: () throws -> T) throws -> T {
+        try requireCurrent(currentPairingID)
+        return try operation()
+    }
+}
+
 enum HostPolicy {
     static let getPaths: Set<String> = [
-        "/api/computer/media", "/api/computer", "/api/computer/display", "/api/ping", "/api/mixer",
+        "/api/computer/media", "/api/computer", "/api/computer/display", "/api/computer/display/input", "/api/computer/display/stream/status", "/api/ping", "/api/mixer",
         "/api/soundpad/recent", "/api/profiles", "/api/soundpad/favourites", "/api/board", "/api/state",
         "/api/execution", "/api/apps", "/api/soundpad/library", "/api/ink", "/api/pen"
     ]
@@ -76,7 +105,41 @@ enum HostPolicy {
         return zip(left, right).reduce(UInt8(0)) { $0 | ($1.0 ^ $1.1) } == 0
     }
     static func allowed(_ path: String, method: String) -> Bool {
-        (method == "GET" && (getPaths.contains(path) || inkRevision(path) != nil)) || (method == "POST" && postPaths.contains(path))
+        (method == "GET" && (getPaths.contains(path) || inkRevision(path) != nil)) ||
+            (method == "POST" && postPaths.contains(path)) || notebookAllowed(path, method: method)
+    }
+    private enum NotebookRoute: Equatable { case none, catalog, page, history, restore, revisionPage }
+    private static func notebookRoute(_ path: String) -> NotebookRoute {
+        guard path.utf8.count <= 256 else { return .none }
+        if path == "/api/notebooks" { return .catalog }
+        func isPage(_ value: String) -> Bool {
+            guard let range = value.range(of: #"^/api/notebooks/[0-9A-Fa-f]{32}/pages/[0-9A-Fa-f]{32}$"#, options: .regularExpression) else { return false }
+            return range == (value.startIndex..<value.endIndex)
+        }
+        let parts = path.split(separator: "?", omittingEmptySubsequences: false)
+        if parts.count > 1 {
+            guard parts.count == 2, isPage(String(parts[0])), parts[1].hasPrefix("revision=") else { return .none }
+            let revision = parts[1].dropFirst("revision=".count)
+            guard revision.utf8.count == 64, revision.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) else { return .none }
+            return .revisionPage
+        }
+        if isPage(path) { return .page }
+        if path.hasSuffix("/history/restore"), isPage(String(path.dropLast("/history/restore".count))) { return .restore }
+        if path.hasSuffix("/history"), isPage(String(path.dropLast("/history".count))) { return .history }
+        return .none
+    }
+    static func notebookAllowed(_ path: String, method: String) -> Bool {
+        let route = notebookRoute(path)
+        return method == "GET" && [.catalog,.page,.history,.revisionPage].contains(route) ||
+            method == "POST" && [.catalog,.page,.restore].contains(route)
+    }
+    static func notebookNeedsContext(_ path: String) -> Bool {
+        path == "/api/ink" || inkRevision(path) != nil ||
+            path == "/api/notebooks" || path.hasPrefix("/api/notebooks/") || path.hasPrefix("/api/notebooks?")
+    }
+    static func notebookRevision(_ path: String) -> String? {
+        guard notebookRoute(path) == .revisionPage, let question = path.firstIndex(of: "?") else { return nil }
+        return String(path[path.index(after: question)...].dropFirst("revision=".count))
     }
     static func inkRevision(_ path: String) -> String? {
         let prefix = "/api/ink?revision="
@@ -91,12 +154,17 @@ enum HostPolicy {
     }
     static func maximumBodyBytes(_ path: String) -> Int {
         if path == "/api/pen/frame" { return 1024 }
+        if [.catalog,.page].contains(notebookRoute(path)) { return 4 * 1024 * 1024 }
         return path == "/api/ink" ? 4 * 1024 * 1024 : 16384
     }
-    static func maximumBridgeBytes(_ path: String) -> Int {
+    static func maximumBridgeBytes(_ path: String, method: String = "POST") -> Int {
         if path == "/local/export-image" { return 12 * 1024 * 1024 }
-        if path == "/api/ink" { return maximumBodyBytes(path) + 16384 }
+        if path == "/api/ink", method == "POST" { return maximumBodyBytes(path) + 16384 }
+        if method == "POST", [.catalog,.page].contains(notebookRoute(path)) { return maximumBodyBytes(path) + 16384 }
         return 16384
+    }
+    static func maximumResponseBytes(_ path: String) -> Int {
+        notebookRoute(path) == .none ? 6 * 1024 * 1024 : 8 * 1024 * 1024
     }
     static func requestedFullscreen(_ body: [String: Any], foreground: Bool, presentingTool: Bool) throws -> Bool {
         guard body.count == 1, let value = body["enabled"] as? NSNumber,

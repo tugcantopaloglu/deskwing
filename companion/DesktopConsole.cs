@@ -29,7 +29,7 @@ internal sealed class DesktopConsole : Forms.Form
     internal static bool LocalOrigin(Uri expected,string target)=>Uri.TryCreate(target,UriKind.Absolute,out var uri)&&uri.Scheme=="http"&&uri.Host=="127.0.0.1"&&uri.Port==expected.Port&&uri.UserInfo.Length==0;
     internal static bool LocalDocument(Uri expected,string target)=>LocalOrigin(expected,target)&&new Uri(target).AbsolutePath=="/desktop.html";
     internal static bool ExportUri(Uri expected,string target)=>LocalOrigin(expected,target)||target.StartsWith("blob:",StringComparison.Ordinal)&&LocalOrigin(expected,target[5..]);
-    internal static string DownloadFilter(string fileName)=>Path.GetExtension(fileName).ToLowerInvariant() switch{".png"=>"PNG images (*.png)|*.png|All files (*.*)|*.*",".txt"=>"Text notes (*.txt)|*.txt|All files (*.*)|*.*",_=>"Board files (*.json;*.deckpack)|*.json;*.deckpack|All files (*.*)|*.*"};
+    internal static string DownloadFilter(string fileName)=>Path.GetExtension(fileName).ToLowerInvariant() switch{".png"=>"PNG images (*.png)|*.png|All files (*.*)|*.*",".txt"=>"Text notes (*.txt)|*.txt|All files (*.*)|*.*",".pdf"=>"PDF documents (*.pdf)|*.pdf|All files (*.*)|*.*",_=>"Board files (*.json;*.deckpack)|*.json;*.deckpack|All files (*.*)|*.*"};
     internal static bool ExternalUri(string target)=>Uri.TryCreate(target,UriKind.Absolute,out var uri)&&uri.Scheme=="https"&&uri.UserInfo.Length==0&&uri.Port==443&&!uri.IsLoopback&&Uri.CheckHostName(uri.Host)==UriHostNameType.Dns;
     private static void OpenExternal(string target){if(ExternalUri(target))Process.Start(new ProcessStartInfo(target){UseShellExecute=true});}
     private async Task Initialize()

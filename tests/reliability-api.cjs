@@ -1,7 +1,7 @@
 // Isolated editor contracts. No playback, keyboard injection, device control or live data.
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),net=require('node:net'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),fixture=fs.mkdtempSync(path.join(os.tmpdir(),'tabletdeck-reliability-api-'));
-const executable=process.env.TABLETDECK_COMPANION||path.join(root,'build/backend-review/bin/TabletDeck-Companion.exe');
+const executable=process.env.TABLETDECK_COMPANION||path.join(root,'build/backend-review/bin/DeskWing-Companion.exe');
 let child,session,passed=0;const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const check=(condition,label)=>{assert.ok(condition,label);passed++;console.log('PASS '+label);};
 async function port(){const server=net.createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const value=server.address().port;await new Promise(resolve=>server.close(resolve));return value;}

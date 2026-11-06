@@ -1,22 +1,24 @@
 # DeskWing
 
-**An extension of your PC.** Use your tablet for streaming controls, app shortcuts, media, pen input, handwriting, shared ink, and optional second-display viewing. Change OBS scenes, play sounds, control audio, open apps, and run macros over **Wi-Fi or USB**. DeskWing is the new name for Tablet Deck Studio.
+**An extension of your PC.** Use your tablet for streaming controls, app shortcuts, media, pen input, handwriting, notebooks, PDF annotation, and an optional second display. Change OBS scenes, play sounds, control audio, open apps, and run macros over **Wi-Fi or USB**.
 
-**[Download the latest release](https://github.com/tugcantopaloglu/deskwing/releases/latest)** · [Build from source](docs/BUILDING.md) · [Verification results](docs/VERIFICATION.txt)
+**[Download the latest published release](https://github.com/tugcantopaloglu/deskwing/releases/latest)** · [Build from source](docs/BUILDING.md) · [Development checklist](TODO.md) · [Prepare a beta](docs/BETA-RELEASE.md)
 
-## 1.14.0 development
+## 1.15.0 development
 
-The current development work brings the broader workspace together:
+The current source expands the existing board editor, macros, shared ink and native display viewer:
 
-- A visual board editor with button/page reuse, multi-select styling, undo/redo, recoverable drafts, and protection against stale saves.
-- A macro composer with action-specific fields, target pickers, reorderable steps, duplication, and a delay summary.
-- **All / Favourites / Recent** filters on the live Soundpad pad and tablet **Follow app / Pin layout** controls for Computer Copilot.
-- Pen-aware controls and palm protection, a saved drawing scratchpad, and Android handwriting entry through a compatible system keyboard, with typed entry as a fallback.
-- Profile readiness checks, restore-as-new-profile recovery, and improvements to held shortcuts, background requests, damaged settings, and media-session timeouts.
+- A tablet status button identifies the connected PC and current board. **Check this workspace** reads connection, OBS and Soundpad status; each live pad shows its saved speaker/microphone route. **Test output** plays only a sound the user explicitly selects and starts.
+- The native **Second display** viewer combines **60 Hz / Match tablet** video with **View**, **Pen**, or single-finger **Touch** modes. Input starts only after separate PC permission for the exact extra monitor. Touch supplies taps and drags, not multitouch gestures.
+- **Ink & notes → Notebooks** adds named notebooks, pages and thumbnails, zoom/pan, page history, archive/restore and local recovery while preserving the original shared scratchpad. PDF import renders page images locally; export produces a flattened PDF with ink and text-note pages.
+- **Balanced**, **Sharper picture**, and **Save power and bandwidth** presets tune video bitrate. Optional adaptive quality responds to measured processing/write load; compatible hardware H.264 encoding is tried with a software fallback. These options do not guarantee a higher frame rate or measured battery savings.
+- Android internal-test bundle preparation, iOS archive preparation, and privacy/support materials keep build validation, signing, device rehearsal and store distribution as separate steps.
 
-**1.14.0 is a development build, not a published release.** Follow the [implementation checklist](TODO.md) for completion and verification status. The release history and hardware results below describe earlier versions; they do not certify the new pen or editing workflows. Handwriting recognition depends on the tablet, Android version, stylus, and installed keyboard. iOS support and store releases are being prepared; this repository does not yet provide a verified iOS release.
+**1.15.0 / Android code 18 is a development candidate.** Google Play internal testing is the current distribution priority. Follow the [implementation checklist](TODO.md) and [beta guide](docs/BETA-RELEASE.md) for exact build, device, signing and account gates. Prepared workflows do not upload to either store. This page does not claim a successful 1.15 device upgrade, Play upload, signed iOS beta or store approval. Handwriting remains a platform/keyboard feature. Published downloads and the older release history below can predate the current source.
 
-**Upgrade compatibility:** the visible app name becomes **DeskWing**, while `TabletDeck-Companion.exe`, `TabletDeck-Studio.apk`, the Android package `app.tabletdeck.studio`, and existing configuration paths retain their names. Keeping these identities and the original signing key preserves the existing upgrade path, pairing, and settings. Published downloads may still display Tablet Deck Studio. The optional second display remains the documented silent preview, not full-motion video or touch forwarding.
+**Prior 1.14 evidence:** bounded Xiaomi tests confirmed smooth 60 Hz and 120 Hz viewing, a working decoder FPS estimate, Home/reopen, sharing revocation and display removal. The [1.14 display record](docs/EXTENDED-DISPLAY.md#114-hardware-checkpoint--2026-11-06) preserves those measurements. They do not certify the new 1.15 display input, notebook/PDF, adaptive-quality or encoder paths.
+
+**Names and upgrade compatibility:** current builds use `DeskWing-Companion.exe`, `DeskWing-Setup.exe`, and `DeskWing.apk`, with projects `companion/DeskWing.csproj` and `installer/DeskWing.Setup.csproj`. The Android install ID `app.tabletdeck.studio`, existing `%LOCALAPPDATA%\TabletDeck` data, signing continuity, pairing and compatibility protocol identifiers are retained deliberately. This rebrand does not replace the user's app identity or board. Historical downloads can retain their original filenames; never copy a development board over user data. Play-managed installations use Play updates. Native display video remains silent; its separately enabled input is distinct from the view-only JPEG compatibility preview. See [display modes and limits](docs/EXTENDED-DISPLAY.md).
 
 **Repository rename:** the project now lives at [tugcantopaloglu/deskwing](https://github.com/tugcantopaloglu/deskwing). Existing clones can update their remote with `git remote set-url origin https://github.com/tugcantopaloglu/deskwing.git`. Historical releases now appear under DeskWing, with their original tags and files intact. Older binaries use the former update endpoint and need manual downloads from [Releases](https://github.com/tugcantopaloglu/deskwing/releases); the current source uses the new endpoint.
 
@@ -40,7 +42,7 @@ The low-latency transport and Android packaging fix from 1.4.1 are retained. Phy
 
 **1.13.0 correction:** Spotify and browser layouts now use a selected Windows media session with its real title, artwork when supplied, playback progress and supported transport/seek controls. Spotify commands target Spotify rather than the Windows global media player. Browser players need an explicit selection because Windows does not identify the website. Other app layouts use compact shortcut strips, with a relative frame jog for configured Resolve shortcuts. A **live Soundpad page** also brings the full library into the Memes pad itself, beyond the 24/40 keys visible in one group. See [targeted media controls](docs/MEDIA-CONTROLS.md), [Memes setup](#put-the-whole-soundpad-library-on-memes), and the [1.13 extension record](docs/UI-EXTENSION-1.13.md). The [v1.13.0 release](https://github.com/tugcantopaloglu/deskwing/releases/tag/v1.13.0) is published; the final PC and matching code-16 APK installation were verified, with the media-test limits recorded below.
 
-**1.12.0 introduced Computer Copilot**, a separate tablet mode for editable app shortcut layouts, plus optional viewing of an independent Windows display through an already-installed compatible SudoVDA driver. Choose **Computer Copilot** in the mode selector; use **Edit Copilot settings** in the Windows app to enable controls and edit layouts. Automatic following uses foreground executable names; browser tools use manual layouts. The initial shortcut-only media layouts are replaced by targeted media controls in the 1.13 correction above; other presets remain keyboard shortcuts, without deep application or AI integration. Display creation and tablet sharing require explicit PC consent; no driver is included or installed. The display view is a silent JPEG preview capped at 4 fps, with no touch forwarding. See [Computer Copilot](#computer-copilot), [controller details](docs/COMPUTER-COPILOT.md), [optional second display](docs/EXTENDED-DISPLAY.md), and the [1.12 UI extension record](docs/UI-EXTENSION-1.12.md).
+**1.12.0 introduced Computer Copilot**, a separate tablet mode for editable app shortcut layouts, plus optional viewing of an independent Windows display through an already-installed compatible SudoVDA driver. Choose **Computer Copilot** in the mode selector; use **Edit Copilot settings** in the Windows app to enable controls and edit layouts. Automatic following uses foreground executable names; browser tools use manual layouts. The initial shortcut-only media layouts are replaced by targeted media controls in the 1.13 correction above; other presets remain keyboard shortcuts, without deep application or AI integration. Display creation and tablet sharing require explicit PC consent; no driver is included or installed. Its original silent JPEG preview was capped at 4 fps with no touch forwarding; the current native viewer is described above. See [Computer Copilot](#computer-copilot), [controller details](docs/COMPUTER-COPILOT.md), [optional second display](docs/EXTENDED-DISPLAY.md), and the [1.12 UI extension record](docs/UI-EXTENSION-1.12.md).
 
 **Live libraries:** an OBS scene page can now follow additions, renames, removals and scene order continuously while retaining its saved manual buttons behind a toggle. Soundpad's full library has Previous/Next and page selection in groups of 80, with automatic refresh every five seconds while open. The isolated pagination check visited all 1,421 fixture sounds; no third-party sound collection is bundled.
 
@@ -91,17 +93,17 @@ The low-latency transport and Android packaging fix from 1.4.1 are retained. Phy
 
 ## First run
 
-For a managed Windows installation, download **TabletDeck-Setup.exe**, run it, and type `INSTALL` after reviewing its destination. It creates Desktop and Start menu shortcuts without launching any apps. The ZIP remains available for portable use. See [installation and uninstalling](docs/DESKTOP-AND-HOLD.md#install-or-update-windows).
+For a managed Windows installation, use the release's Windows installer; current source builds name it **DeskWing-Setup.exe**. Run it and type `INSTALL` after reviewing its destination. It creates Desktop and Start menu shortcuts without launching any apps. The ZIP remains available for portable use. See [installation and uninstalling](docs/DESKTOP-AND-HOLD.md#install-or-update-windows).
 
-Download the versioned complete ZIP for **1.13.0** from [Releases](https://github.com/tugcantopaloglu/deskwing/releases/tag/v1.13.0), or download `TabletDeck-Studio.apk` separately if you only need the Android installer. Update both components. The APK keeps the original signing certificate, so installing it over an older version preserves pairing. Third-party meme collections are user content and are not included in the public release.
+Choose a matching Windows package and Android installer from [published releases](https://github.com/tugcantopaloglu/deskwing/releases). Published releases can be older than this development branch; use their included filenames and instructions. Current source packages use **DeskWing.apk** and the layout below. Direct updates must retain the original signing certificate and existing data. Third-party meme collections are user content and are not included in the public release.
 
 ```text
-TabletDeck-Studio/
-├── TabletDeck-Studio.apk
+DeskWing/
+├── DeskWing.apk
 ├── SHA256SUMS.txt
 ├── Verification.txt
 └── Windows/
-    ├── TabletDeck-Companion.exe
+    ├── DeskWing-Companion.exe
     ├── Install-APK.cmd
     ├── USB-Connect.cmd
     ├── wwwroot/
@@ -110,15 +112,15 @@ TabletDeck-Studio/
 ```
 
 1. Extract the whole ZIP. Keep the Windows folder together: the executable needs its wwwroot, Sounds, and platform-tools folders.
-2. Run Windows/TabletDeck-Companion.exe on your streaming PC. It opens the native Windows console and stays in the Windows tray. Closing the window leaves it running; use the tray to reopen the same session or exit.
+2. Run Windows/DeskWing-Companion.exe on your streaming PC. It opens the native Windows console and stays in the Windows tray. Closing the window leaves it running; use the tray to reopen the same session or exit.
 3. In OBS, open Tools → WebSocket Server Settings. Enable the server and keep authentication enabled. The usual port is 4455. Copy the server password.
 4. In the Windows console, choose **OBS setup**, enter the port/password, and save. Use **Find inputs** for exact microphone/desktop names. Choose **Board editor → Import OBS scenes** to enable a continuously synced Scenes page. Existing manual buttons remain saved; turn off **Keep this page synced with live OBS** in the editor to restore them. Other example scene buttons need names matching OBS.
-5. Install TabletDeck-Studio.apk on the tablet. You can copy the APK to the tablet and allow installation from that file source, or enable USB debugging and run Windows/Install-APK.cmd.
+5. For a direct installation, install DeskWing.apk on the tablet. You can copy it to the tablet and allow installation from that file source, or enable USB debugging and run Windows/Install-APK.cmd. Keep Play-installed apps on Play updates.
 6. In the Windows sidebar choose **Tablet connections**, then follow either Wi-Fi or USB below. The desktop console configures the studio; action keys remain on the tablet.
 
 For Soundpad or Discord-only use, skip the OBS setup steps. An OBS disconnected indicator is expected while OBS is closed; Soundpad, app launches, and keyboard shortcuts remain available.
 
-The Android package has a personal signing certificate, not a Play Store identity. Windows binaries, including the installer, are unsigned and may trigger SmartScreen. The APK is signed with APK Signature Schemes v2 and v3. Verify the provided SHA256SUMS.txt if you transfer the files.
+Direct Android packages retain the original signing certificate; that certificate must not be assumed to match a future Play-delivered package's app-signing certificate. The beta guide records the separate Play identity checks. Windows binaries, including the installer, are unsigned and may trigger SmartScreen. Direct APKs use APK Signature Schemes v2 and v3. Verify the provided SHA256SUMS.txt if you transfer files.
 
 Installing by file manager: copy the APK to the tablet, open it, and allow that file source to install apps if Android prompts. Installing from Windows: authorize USB debugging, then run `Install-APK.cmd` with exactly one Android device connected.
 
@@ -130,7 +132,7 @@ Connect the PC and tablet to the same private network. Avoid guest Wi-Fi, which 
 
 Update both components and allow the fast control port 8744 as described in the [performance guide](docs/PERFORMANCE.md). On the tablet select Wi-Fi, enter the PC address listed in Pair tablet, then enter the 24-character certificate code (hyphens and spaces are optional) and the six-digit PIN. The PIN expires in five minutes, is single-use, and locks after five wrong attempts. Generate a new PIN on the PC if it expires. The certificate code must match the intended PC before the tablet sends the PIN.
 
-If Windows does not show a firewall prompt, allow TabletDeck-Companion.exe inbound on TCP ports 8743 and 8744 for the private network only. Do not forward this port on your router. No cloud account or subscription is needed.
+If Windows does not show a firewall prompt, allow DeskWing-Companion.exe inbound on TCP ports 8743 and 8744 for the private network only. Do not forward these ports on your router. No cloud account or subscription is needed.
 
 ## USB
 
@@ -202,9 +204,9 @@ If another Windows player cannot provide its details, a warning can appear while
 
 Other layouts remain configurable shortcuts that require the matching foreground app, presented in compact context strips. Resolve's **Frame jog** repeats the configured previous/next frame shortcuts while dragged and returns to center on release; it does not read Resolve's native playhead or provide an absolute timeline position. Desktop global media/app-switch controls retain their global meaning. Assistant-panel entries begin unassigned so you can match your local keymap; Computer Copilot has no default Send command and rejects Enter-containing shortcuts. It does not read chats or send prompts. Windows focus and input-permission limits still apply. See the [controller contract](docs/COMPUTER-COPILOT.md) and [targeted media details](docs/MEDIA-CONTROLS.md).
 
-For an optional separate desktop, expand **Second display** on the PC, review the already-installed compatible SudoVDA driver's trust information, and explicitly accept both driver use and sharing its pixels with the paired tablet before **Create independent display** becomes available. Choose a supported resolution; if needed, set that monitor to **Extend** in Windows Display settings. Then use **Open display view** on the tablet. **Back to controls**, **Pause tablet sharing**, and **Remove extra display** stop the corresponding viewing/sharing/session activity.
+For an optional separate desktop, expand **Second display** on the PC, review the already-installed compatible SudoVDA driver's trust information, and explicitly accept driver use and sharing its pixels with the paired tablet. Choose a supported resolution and refresh rate, then **Create independent display**; if needed, set that monitor to **Extend** in Windows Display settings. On the tablet select **60 Hz** or **Match tablet**, choose picture quality, then **Start second display**. **Exit display**, **Pause tablet sharing**, and **Remove extra display** stop the corresponding viewing/sharing/session activity.
 
-No virtual display driver is bundled, downloaded, or installed. The view sends only that session's independent monitor, up to 4 JPEG frames per second with no audio. Touch/mouse forwarding and full-motion remote-desktop performance are not provided. The driver needs its own trusted installation; contextual shortcuts work without it. See [requirements, limits, and verification](docs/EXTENDED-DISPLAY.md).
+No virtual display driver is bundled, downloaded, or installed. Native H.264 video sends only that session's independent monitor, without audio. It starts in View; Pen or single-finger Touch requires separate PC input permission. **Open compatibility preview** remains a silent, view-only JPEG path capped at 4 fps. Contextual shortcuts work without a display driver. See [requirements, input controls, quality settings and measured limits](docs/EXTENDED-DISPLAY.md).
 
 ## Action reference
 
@@ -295,9 +297,9 @@ Automatic backups keep the latest **20 snapshots** before board edits, profile c
 
 Use **Edit → Export** to download the current profile's board without the OBS password. Use **Import**, review the result, then **Save changes** to apply it to that profile. Exported boards reference absolute sound and app paths; transfer those files separately when moving PCs.
 
-For a Windows update, exit the companion through its tray menu, extract the full new package, and keep its executable, wwwroot, Sounds, and helpers together. Settings remain in `%LOCALAPPDATA%\TabletDeck`. If saved sound buttons point inside an old release folder, update those paths after moving the package.
+For a Windows update, exit the companion through its tray menu, extract the full new package, and keep its executable, wwwroot, Sounds, and helpers together. Settings remain in the existing private data directory described in the compatibility note above. If saved sound buttons point inside an old release folder, update those paths after moving the package.
 
-An APK signed with the same key can update the existing installation. Install-APK.cmd uses adb install -r. A differently signed APK requires uninstalling the old app, which clears its saved pairing.
+For eligible direct installations, an APK signed with the same key can update the existing app using the verified USB installation flow without clearing data. Keep Play-managed installations on Play updates. A signature mismatch must be resolved through the correct distribution channel and signing key; do not uninstall the app to bypass it and lose pairing or local work.
 
 To remove access, use **Revoke** in the PC's Pair tablet panel. To clear the tablet's connection, use **Forget this PC**. The companion installs no service or startup task: close it and remove its extracted folder to remove the program. Delete its local-data directory only when you also intend to erase settings, paired-device records, and the certificate.
 
@@ -334,31 +336,34 @@ When reporting an issue, include Windows/Android/OBS versions, connection mode, 
 
 The PC editor is bound to loopback port 8740 and requires a random local session credential. Remote tablet control uses TLS on port 8743, the PC certificate is pinned by the Android app, and each paired tablet gets a separately revocable random credential. Server-side device credentials are stored as SHA-256 hashes. The initial certificate code is a 96-bit SHA-256 prefix; after pairing the full certificate fingerprint is pinned. No certificates are installed into the system trust store.
 
-Settings, the OBS password, certificate private key, and device records live under %LOCALAPPDATA%/TabletDeck, protected by a directory ACL for the current Windows user and SYSTEM. The OBS password and PFX are not application-encrypted at rest; users with access to the account can read them. Android credentials are in app-private storage and Android backups are disabled. The app’s WebView loads only bundled assets, blocks external navigation and frames, sanitizes dynamic markup, and permits only the required control endpoints through its native bridge.
+Settings, the OBS password, certificate private key, and device records live in the preserved private data directory, protected by an ACL for the current Windows user and SYSTEM. The OBS password and PFX are not application-encrypted at rest; users with access to the account can read them. Android credentials are in app-private storage and Android backups are disabled. The app’s WebView loads only bundled assets, blocks external navigation and frames, sanitizes dynamic markup, and permits only the required control endpoints through its native bridge.
 
-If you close the Windows console, the companion keeps running. Choose **Open DeskWing** in the tray menu (**Open Tablet Deck Studio** in earlier releases) to restore its authenticated session. It does not install a service. Startup is opt-in through Windows options and uses the current account Run entry. Automatic USB reconnection, APK updating, and APK reopening also default off; existing saved choices are retained on update.
+If you close the Windows console, the companion keeps running. Choose **Open DeskWing** in the tray menu to restore its authenticated session. It does not install a service. Startup is opt-in through Windows options and uses the current account Run entry. Automatic USB reconnection, APK updating, and APK reopening also default off; existing saved choices are retained on update.
 
 ## Verification and limits
 
-See [Verification results](docs/VERIFICATION.txt) for the final **1,173 checks**, build and security results, and [the hardware report](docs/LIVE-TEST.md) for physical USB/Wi-Fi, OBS, and Soundpad evidence. The [1.11](docs/UI-EXTENSION-1.11.md), [1.12](docs/UI-EXTENSION-1.12.md), and [1.13](docs/UI-EXTENSION-1.13.md) UI records distinguish rendered fixtures from actual native/hardware checks. The final PC build and published code-16 APK were installed and verified; the live Memes pad matched all 1,421 source entries while preserving its 76 manual buttons and output preference. Real Chrome metadata and a valid partial-warning response were read successfully; Spotify had no session, and the user skipped live playback testing. Fake-player tests therefore remain the evidence for media writes. The new live-Memes UI test uses 2,007 fixture entries without real audio. A controlled real-driver check created and removed a 1280 × 800 independent monitor with sharing off and left both physical monitors unchanged. Actual pixel capture/delivery, display-view latency, physical `FLAG_SECURE` appearance, and touch interaction remain unverified. Run a rehearsal before relying on it in a broadcast.
+The [1.13 verification record](docs/VERIFICATION.txt) contains **1,173 checks** and the historical code-16 deployment, media and Soundpad evidence. The [1.11](docs/UI-EXTENSION-1.11.md), [1.12](docs/UI-EXTENSION-1.12.md), and [1.13](docs/UI-EXTENSION-1.13.md) records distinguish fixtures from native/hardware checks. The later [1.14 display checkpoint](docs/EXTENDED-DISPLAY.md#114-hardware-checkpoint--2026-11-06) records actual video delivery and lifecycle observations. These earlier results do not validate the new 1.15 features or rebrand upgrade. Follow [TODO.md](TODO.md) for current regression, security, board-preservation, device and internal-testing evidence; retain separate limits for app-specific pen compatibility, physical iPad/Pencil, latency and sustained load.
 
 ## Build and contribute
 
 See [BUILDING.md](docs/BUILDING.md) for building the Windows companion and Android APK, signing-key handling, assembling a distribution, and running the isolated integration tests. Private release signing keys are deliberately excluded from this repository.
 
-The Windows source targets `net10.0-windows10.0.19041.0` and pins `WindowsSdkPackageVersion` to `10.0.19041.57` for media-session APIs. The SDK reference package is restored during the source build; it is not an extra end-user installation requirement. The development source identity is 1.14.0, with Android version code 17; the published 1.13.0 APK uses version code 16.
+The Windows source targets `net10.0-windows10.0.19041.0` and pins `WindowsSdkPackageVersion` to `10.0.19041.57` for media-session APIs. The SDK reference package is restored during the source build; it is not an extra end-user installation requirement. The development source identity is 1.15.0, with Android version code 18.
 
 ```text
 android/                 Manifest, resources, and Java HTTPS bridge
-companion/               C# ASP.NET Core companion
+companion/DeskWing.csproj C# ASP.NET Core companion
 companion/wwwroot/       Shared HTML, CSS, JavaScript, fonts, DOMPurify
 companion/ComputerCopilot.cs  Contextual shortcut settings and dispatch guards
-companion/ExtendedDisplay.cs  Optional installed-driver session and JPEG capture
+companion/ExtendedDisplay.cs  Optional installed-driver session and monitor ownership
+companion/DisplayStream.cs    Native H.264 streaming, quality and encoder status
+companion/DisplayInput.cs     Explicitly enabled input on the owned display
+companion/NotebookWorkspace.cs  Notebook/page/history storage
 companion/MediaSessions.cs  Selected Windows player metadata and transport
 companion/LiveSoundpad.cs  Runtime Soundpad pad entries without bulk saved buttons
 companion/Sounds/        Synthesized demo WAV files
 scripts/                 APK build and Windows USB/install helpers
-installer/               Per-user Windows setup executable source
+installer/DeskWing.Setup.csproj  Per-user Windows setup executable source
 tests/                   Mock OBS service and browser/API checks
 docs/                    Build guide, screenshot, and verification
 ```

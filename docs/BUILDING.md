@@ -1,4 +1,4 @@
-# Build and test
+# Build and test DeskWing
 
 Use a prebuilt release if you only want to use the app. These instructions are for Windows x64 development.
 
@@ -11,15 +11,15 @@ Use a prebuilt release if you only want to use the app. These instructions are f
 
 No Gradle or Maven client is required. The Android wrapper uses platform APIs and the pinned, vendored ZXing core 3.5.3 JAR for local QR decoding; the APK build checks its SHA-256. The bundled web interface stays local. The Windows build restores NAudio.Wasapi 2.2.1 for audio-session control and QRCoder 1.6.0 for local pairing PNG generation. License notices are included in the Windows package and APK assets.
 
-Native Second display prefers DXGI GPU duplication of the exact owned virtual-monitor output, including its cursor; persistent GDI capture is a 60 Hz-only fallback. Windows' built-in Media Foundation H.264 encoder remains software-based; no FFmpeg executable or codec package is downloaded. Android uses platform MediaCodec with a hardware H.264 decoder and checks the selected resolution/rate; iOS uses its platform sample-buffer video pipeline. These runtime capabilities are separate from successful compilation. The installed virtual display driver and explicit PC create/share workflow remain prerequisites; see [Extended display](EXTENDED-DISPLAY.md).
+Native Second display prefers DXGI GPU duplication of the exact owned virtual-monitor output, including its cursor; persistent GDI capture is a 60 Hz-only fallback. The 1.15 candidate tries compatible Windows Media Foundation hardware H.264 encoding, with software fallback when unavailable or incompatible; no FFmpeg executable or codec package is downloaded. Hardware encoding is not a guarantee of faster encoding or lower power use. Android uses platform MediaCodec with a hardware H.264 decoder and checks the selected resolution/rate; iOS uses its platform sample-buffer video pipeline. These runtime capabilities are separate from successful compilation. The installed virtual display driver and explicit PC create/share workflow remain prerequisites; see [Extended display](EXTENDED-DISPLAY.md).
 
 ## Clone and publish Windows
 
 ```powershell
 git clone https://github.com/tugcantopaloglu/deskwing.git
 Set-Location deskwing
-dotnet publish .\companion\TabletDeck.csproj -c Release -r win-x64 --self-contained true -o .\dist\Windows
-.\dist\Windows\TabletDeck-Companion.exe --self-test
+dotnet publish .\companion\DeskWing.csproj -c Release -r win-x64 --self-contained true -o .\dist\Windows
+.\dist\Windows\DeskWing-Companion.exe --self-test
 ```
 
 Keep the published `wwwroot`, `Sounds`, and `Licenses` folders beside the executable. Twenty-eight self-tests cover defaults, included sound assets, validation, key mapping, OBS authentication, confirmations, Soundpad pipe/XML parsing, actual library HTTP response serialization, app-mixer validation, atomic layout reorder, and Soundpad button import.
@@ -29,7 +29,7 @@ The Android build packs bundled assets with the JDK `jar` tool. Windows `aapt2 -
 An additional real Windows audio smoke test plays and stops a silent WAV, creates its own silent playback session, adjusts only that session's volume/mute, verifies those values, and restores them. It requires a Windows audio endpoint:
 
 ```powershell
-.\dist\Windows\TabletDeck-Companion.exe --audio-smoke-test
+.\dist\Windows\DeskWing-Companion.exe --audio-smoke-test
 ```
 
 Run the companion without `--self-test` to open the editor and tray. Use `--no-browser --no-tray` for server-only tests. Developer options are `--no-browser`, `--data-dir PATH`, `--http-port NUMBER`, and `--https-port NUMBER`. The shipping Android app uses HTTPS port 8743; alternate ports are for isolated development tests.
@@ -38,7 +38,7 @@ Version1.11 hosts the editor in a WinForms WebView2 window; the Evergreen Runtim
 
 `npm --prefix tests run test:desktop-rendered` starts an isolated service and headless Chromium, then an offscreen native WebView2 test. It covers the timer callback receiver failure, grouped navigation, unsaved navigation, update controls, resizable main/ink windows, their independent close/reopen lifecycle and host policies. It captures content at 1280×860 and 900×620 without contacting providers or modifying the live installation. Set TABLETDECK_COMPANION to the built/published executable and TABLETDECK_CHROME if Chrome is installed elsewhere. The CLI `--desktop-window-self-test --data-dir PATH` requires that runner's marked temporary fixture; it is not a normal launch mode.
 
-`--update-self-test --no-browser --no-tray` runs 26 mocked release/download/ADB cases. `test:update-ui` and `test:updates-api` cover preference/confirmation/permission guards without installing anything. After embedding the release ZIP in the installer, set TABLETDECK_SETUP and run `test:installer` then `test:installer-update`: the latter performs real replacement and forced rollback only inside the fixed, fresh Windows temporary fixture. It never launches a visible app or changes the actual installation. Production `--update-running` is an internal handoff protocol, not a normal installer option to invoke manually.
+`--update-self-test --no-browser --no-tray` runs mocked release/download/ADB cases. `test:update-ui` and `test:updates-api` cover preference/confirmation/permission guards without installing anything. After embedding the release ZIP in the installer, set TABLETDECK_SETUP and run `test:installer` then `test:installer-update`: the latter performs real replacement and forced rollback only inside the fixed, fresh Windows temporary fixture. It never launches a visible app or changes the actual installation. Production `--update-running` is an internal handoff protocol, not a normal installer option to invoke manually.
 
 ## Prepare the Android toolchain
 
@@ -86,9 +86,9 @@ $output = Join-Path (Get-Location) 'dist'
   -SigningKey 'C:\Private\tabletdeck.jks' -SigningPasswordFile 'C:\Private\password.txt'
 ```
 
-The script compiles resources and Java, converts classes to DEX, packages the bundled interface, aligns the APK, signs it, and verifies the result. Output: `dist/TabletDeck-Studio.apk`.
+The script compiles resources and Java, converts classes to DEX, packages the bundled interface, aligns the APK, signs it, and verifies the result. Output: `dist/DeskWing.apk`.
 
-DeskWing retains app identity `app.tabletdeck.studio`, version `1.14.0`, version code `17`, minimum SDK `26`, target SDK `36`. Increment version code for later releases. The build verifies every index script/stylesheet against the native UI_ASSETS allowlist, as well as APK paths and license assets. Desktop-only desktop.html/console.js/console.css are served on PC loopback, not loaded into the privileged Android view. Camera permission remains optional and QR-only.
+The current candidate is DeskWing `1.15.0`, version code `18`, minimum SDK `26`, target SDK `36`. Android retains the installation ID `app.tabletdeck.studio` so existing installations can update with their pairing and notes intact. Increment version code for later releases. The build verifies every index script/stylesheet against the native asset allowlist, including the checksum-pinned offline PDF assets, APK paths and license assets. Desktop-only desktop.html/console.js/console.css are served on PC loopback, not loaded into the privileged Android view. Camera permission remains optional and QR-only.
 
 Release builds require the original signing material; they never generate or replace a release key. Defaults remain `toolchain/signing/tabletdeck.jks` and `toolchain/signing/password.txt`, or supply the explicit paths above. Keep these private. `-ExpectedCertificateSha256` can enforce the expected signer. A replacement key cannot update an existing installation signed with the original key.
 
@@ -125,7 +125,7 @@ $env:JAVA_HOME = 'C:\Path\To\jdk-17'
 npm test --prefix .\tests
 ```
 
-`npm test` now runs `tests/run-all.cjs`. It checks prerequisites, publishes a fresh companion into a unique `.test-output/verification-*/Windows` directory, and runs an explicit suite manifest serially. It does not reuse the installed companion, start streaming apps, play audio, inject real shortcuts, install a driver, or operate a physical tablet. The companion self-test validates generated WAV content without an audio device; actual playback and audio-session volume/mute checks remain opt-in through `--audio-smoke-test`. Existing environment variable and executable names retain `TABLETDECK` for compatibility with earlier tools.
+`npm test` now runs `tests/run-all.cjs`. It checks prerequisites, publishes a fresh companion into a unique `.test-output/verification-*/Windows` directory, and runs an explicit suite manifest serially. It does not reuse the installed companion, start streaming apps, play audio, inject real shortcuts, install a driver, or operate a physical tablet. The companion self-test validates generated WAV content without an audio device; actual playback and audio-session volume/mute checks remain opt-in through `--audio-smoke-test`. Existing `TABLETDECK_*` environment keys remain compatible with earlier test tools; public executable names use DeskWing.
 
 The manifest includes companion self-tests; API, execution, profile, update, media, readiness, recovery and shared-ink tests; Java transport, QR, chat-policy, request-size and queued-control harnesses; controller fixtures; current rendered desktop/tablet/editor/macro/pen workflows; and offscreen native WebView2 lifecycle checks. Pen service tests use a fake platform and never inject Windows input. Preview tests use generated frames to check lease ownership, capture limits and independence from pen traffic. Shared-ink tests cover revisions, concurrent edits, persistence and request-size boundaries. The original integration runs against its own mock OBS in API-only mode; current rendered suites cover the separated desktop/tablet surfaces. The feature suite opens the actual PC editor and a fixture-only tablet document, exercising real isolated layout endpoints while mocking playback controls.
 
@@ -143,7 +143,7 @@ npm run test:android --prefix .\tests
 npm run test:ui --prefix .\tests
 
 # Reuse a known isolated build for a focused rerun.
-$env:TABLETDECK_COMPANION = 'F:\streamer-board\.test-output\verification-example\Windows\TabletDeck-Companion.exe'
+$env:TABLETDECK_COMPANION = 'C:\Projects\deskwing\.test-output\verification-example\Windows\DeskWing-Companion.exe'
 node .\tests\run-all.cjs --no-build --suite 'editor-workflow,macro-editor,pen-ui'
 ```
 
@@ -152,9 +152,9 @@ The `core` group includes API and controller tests plus mocked backend projects;
 Installer tests are an explicit opt-in because they need a packaged installer and perform actual replacement/rollback inside their guarded temporary fixture:
 
 ```powershell
-$env:TABLETDECK_SETUP = 'C:\Path\To\TabletDeck-Setup.exe'
+$env:TABLETDECK_SETUP = 'C:\Path\To\DeskWing-Setup.exe'
 # Only needed when testing an artifact with a different version from the checkout.
-$env:TABLETDECK_VERSION = '1.14.0'
+$env:TABLETDECK_VERSION = '1.15.0'
 npm run test:installers --prefix .\tests
 ```
 
@@ -171,7 +171,7 @@ Actions are pinned to commit IDs. CI uploads only the Windows summary, never run
 ```powershell
 npx snyk code test .
 npm audit --prefix .\tests
-dotnet list .\companion\TabletDeck.csproj package --vulnerable --include-transitive
+dotnet list .\companion\DeskWing.csproj package --vulnerable --include-transitive
 ```
 
 Snyk authentication may be required. `.dcignore` excludes generated builds and separately audited third-party code. The initial scan retains the informational `java/JavaScriptEnabled` note for the bundled Android interface. That does not justify loading arbitrary remote pages into its native bridge.
@@ -186,7 +186,7 @@ Keep tests on an explicit disposable `--data-dir` outside the real user data. De
 
 Android bundled UI → restricted Java bridge → pinned persistent TLS control (8744) or pinned HTTPS fallback/metadata (8743) → Windows companion → authenticated OBS v5 or a configured Windows action. PC panels receive authenticated state events.
 
-Native display video uses a separate persistent pinned HTTPS response on 8743, with an owner-bound stream lease and a native decoder outside the web view. It uses a separate connection from the fast pen/control protocol. The native host exposes capabilities/start/stop to its trusted bundled page; browser viewing remains an explicitly selected ≤4 fps JPEG compatibility path. Both display transports omit audio and input forwarding. The selected-target JPEG preview in Pen tablet is a separate feature from this independent-monitor stream.
+Native display video uses a separate persistent pinned HTTPS response on 8743, with an owner-bound stream lease and a native decoder outside the web view. It uses a separate connection from the fast pen/control protocol. The native host exposes capabilities/start/stop to its trusted bundled page; browser viewing remains an explicitly selected ≤4 fps JPEG compatibility path. Video carries no audio. The 1.15 native viewer adds separate, explicitly enabled Pen and single-finger Touch modes, bound to the owned display, active video lease and current geometry; viewing alone grants no Windows input permission. The selected-target JPEG preview in Pen tablet is a separate feature from this independent-monitor stream.
 
 USB adds ADB reverse tunnels for ports 8743 and 8744. The PC editor uses a separate authenticated loopback endpoint. Tablet action requests contain configured action IDs; PC targets are edited locally. Paired tablets can also reorder the exact existing button set, play library indices validated against Soundpad, and adjust enumerated audio sessions by opaque IDs. Soundpad button import remains local-admin only. Preserve these boundaries when adding features.
 
@@ -195,23 +195,25 @@ USB adds ADB reverse tunnels for ports 8743 and 8744. The PC editor uses a separ
 Assemble the complete release ZIP with SHA256SUMS.txt listing every file except itself, then embed it:
 
 ```powershell
-$payload = (Resolve-Path .\dist\DeskWing-1.14.0.zip).Path
-dotnet publish .\installer\TabletDeck.Setup.csproj -c Release -o .\dist\Setup "-p:PayloadArchive=$payload"
-.\dist\Setup\TabletDeck-Setup.exe --verify-payload
+$payload = (Resolve-Path .\dist\DeskWing-1.15.0.zip).Path
+dotnet publish .\installer\DeskWing.Setup.csproj -c Release -o .\dist\Setup "-p:PayloadArchive=$payload"
+.\dist\Setup\DeskWing-Setup.exe --verify-payload
 ```
 
-The installer uses a fixed per-user destination. `--test-mode --quiet` installs only to the fixed temporary `TabletDeckStudioSetupTests/TabletDeckStudio` folder, without shortcuts or registry changes. `--test-mode --uninstall` removes its managed test files. It refuses an existing unrecognized folder. Keep test mode away from any user-created folder with that name. Payload verification does not install or launch the app.
+Fresh installs use `%LOCALAPPDATA%\Programs\DeskWing`; an existing managed `%LOCALAPPDATA%\Programs\TabletDeckStudio` installation stays in place during an upgrade. Saved board/pairing data remains under `%LOCALAPPDATA%\TabletDeck`. `--test-mode --quiet` installs only to the fixed temporary `TabletDeckStudioSetupTests/TabletDeckStudio` folder, without shortcuts or registry changes. That internal fixture name and existing ownership markers remain compatible. `--test-mode --uninstall` removes its managed test files. It refuses an existing unrecognized folder. Keep test mode away from any user-created folder with that name. Payload verification does not install or launch the app.
+
+For upgrades from 1.14, the release publisher can build a narrowly scoped compatibility installer with `-p:LegacyUpdateCompatibility=true`. It retains the old updater's required installer filename/product metadata while carrying the new DeskWing payload and installation logic. Publish it only as the legacy update bridge alongside the primary `DeskWing-Setup.exe`; do not rename ordinary release binaries to imitate the old product. Existing APK updater clients can likewise require the legacy release asset alias. Preserve historical release files and checksums unchanged.
 
 ## Test without opening apps
 
 ```powershell
-.\dist\Windows\TabletDeck-Companion.exe --self-test
-.\dist\Windows\TabletDeck-Companion.exe --hardening-self-test
-.\dist\Windows\TabletDeck-Companion.exe --boards-self-test
-.\dist\Windows\TabletDeck-Companion.exe --studio-self-test --no-browser --no-tray
-.\dist\Windows\TabletDeck-Companion.exe --monitor-self-test --no-browser --no-tray
-.\dist\Windows\TabletDeck-Companion.exe --live-soundpad-self-test
-$env:TABLETDECK_COMPANION = (Resolve-Path .\dist\Windows\TabletDeck-Companion.exe).Path
+.\dist\Windows\DeskWing-Companion.exe --self-test
+.\dist\Windows\DeskWing-Companion.exe --hardening-self-test
+.\dist\Windows\DeskWing-Companion.exe --boards-self-test
+.\dist\Windows\DeskWing-Companion.exe --studio-self-test --no-browser --no-tray
+.\dist\Windows\DeskWing-Companion.exe --monitor-self-test --no-browser --no-tray
+.\dist\Windows\DeskWing-Companion.exe --live-soundpad-self-test
+$env:TABLETDECK_COMPANION = (Resolve-Path .\dist\Windows\DeskWing-Companion.exe).Path
 npm run test:headless --prefix .\tests
 npm run test:fast --prefix .\tests
 npm run test:execution --prefix .\tests

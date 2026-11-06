@@ -1,7 +1,7 @@
 // Launch only an isolated companion and the existing mock-OBS API suite. No browser or tray.
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawn}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),output=fs.mkdtempSync(path.join(os.tmpdir(),'tabletdeck-integration-')),data=path.join(output,'data');fs.mkdirSync(data);
-const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/TabletDeck-Companion.exe');
+const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/DeskWing-Companion.exe');
 const log=fs.openSync(path.join(output,'server.log'),'w');let server,session;
 (async()=>{
  server=spawn(executable,['--no-browser','--no-tray','--data-dir',data,'--http-port','18740','--https-port','18743'],{windowsHide:true,stdio:['ignore',log,log]});

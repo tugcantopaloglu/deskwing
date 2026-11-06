@@ -25,18 +25,23 @@ public final class BridgeRequestLimits {
         if (message == null) throw new IllegalArgumentException("The tablet request is empty.");
         int maximum = MAX_CONTROL_BYTES;
         boolean inkWrite = "/api/ink".equals(path) && "POST".equals(method);
+        boolean notebookWrite = NotebookRequestPolicy.requestLimit(method,path) == NotebookRequestPolicy.WRITE_BYTES;
+        String writeError = notebookWrite
+            ? "This notebook request exceeds its 4 MB limit. Reduce the page and try again."
+            : "This ink request exceeds the 4 MB drawing limit. Reduce the drawing and try again.";
         if (inkWrite) maximum = MAX_INK_ENVELOPE_BYTES;
+        else if (notebookWrite) maximum = NotebookRequestPolicy.WRITE_BYTES + 2048;
         else if ("/local/export-image".equals(path) && "POST".equals(method)) maximum = MAX_EXPORT_ENVELOPE_BYTES;
 
         if (message.length() > maximum || message.getBytes(StandardCharsets.UTF_8).length > maximum) {
-            throw new IllegalArgumentException(inkWrite
-                ? "This ink request exceeds the 4 MB drawing limit. Reduce the drawing and try again."
+            throw new IllegalArgumentException(inkWrite || notebookWrite
+                ? writeError
                 : maximum == MAX_CONTROL_BYTES
                     ? "This request exceeds the tablet control limit."
                     : "Export a PNG image smaller than 8 MB.");
         }
-        if (inkWrite && (bodyJson == null || bodyJson.length() > MAX_INK_BYTES || bodyJson.getBytes(StandardCharsets.UTF_8).length > MAX_INK_BYTES)) {
-            throw new IllegalArgumentException("This ink request exceeds the 4 MB drawing limit. Reduce the drawing and try again.");
+        if ((inkWrite || notebookWrite) && (bodyJson == null || bodyJson.length() > MAX_INK_BYTES || bodyJson.getBytes(StandardCharsets.UTF_8).length > MAX_INK_BYTES)) {
+            throw new IllegalArgumentException(writeError);
         }
     }
 }

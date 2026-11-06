@@ -66,8 +66,9 @@ async function fixture(route){
 async function pageFor(desktop,search=''){
  const context=await browser.newContext({viewport:{width:1280,height:800},hasTouch:!desktop});await context.route('**/*',fixture);
  if(!desktop)await context.addInitScript(()=>{
-  window.fixtureNativeRequests=[];window.DeckNative={dispatch(text){const request=JSON.parse(text);window.fixtureNativeRequests.push(request);
-   const response=request.path==='/native/connection'?Promise.resolve({paired:true,mode:'usb',host:'127.0.0.1'}):request.path==='/local/handwriting'?Promise.resolve({cancelled:true}):request.path==='/local/fullscreen'?Promise.resolve({enabled:request.body.enabled===true}):request.path.startsWith('/api/')?fetch(request.path,{method:request.method,headers:{'Content-Type':'application/json'},body:request.body===undefined?undefined:JSON.stringify(request.body)}).then(response=>response.json()):Promise.resolve({error:'Unexpected fixture native request'});
+  window.fixtureNativeRequests=[];window.fixturePairingId='11111111-1111-4111-8111-111111111111';window.fixtureRejectedWriting=0;window.DeckNative={dispatch(text){const request=JSON.parse(text);window.fixtureNativeRequests.push(request);
+   const writing=/^(?:\/api\/notebooks(?:\/|\?|$)|\/api\/ink(?:\?|$))/.test(request.path);
+   const response=request.path==='/native/connection'?Promise.resolve({paired:true,mode:'usb',host:'127.0.0.1',pairingId:window.fixturePairingId}):writing&&request.expectedPairingId!==window.fixturePairingId?(window.fixtureRejectedWriting++,Promise.resolve({error:'Writing pairing changed before fixture HTTP delivery.'})):request.path==='/local/handwriting'?Promise.resolve({cancelled:true}):request.path==='/local/fullscreen'?Promise.resolve({enabled:request.body.enabled===true}):request.path.startsWith('/api/')?fetch(request.path,{method:request.method,headers:{'Content-Type':'application/json'},body:request.body===undefined?undefined:JSON.stringify(request.body)}).then(response=>response.json()):Promise.resolve({error:'Unexpected fixture native request'});
    response.then(value=>window.nativeResult(request.id,value)).catch(error=>window.nativeResult(request.id,{error:error.message}));
   }};
  });
@@ -185,6 +186,7 @@ async function run(){
  check(!lease&&penPackets.filter(packet=>packet.operation==='cancel').length===stopsBefore+1,'changing workspace cancels the native pen session exactly once');
  await previewCleared(tablet,'Workspace change');const lateResponse=tablet.waitForResponse(response=>new URL(response.url()).pathname==='/api/pen/frame');holdFrame=false;pendingFrames.shift()();await lateResponse;await settle(tablet);await previewCleared(tablet,'Late frame after workspace change');
  check(await tablet.locator('#pen-notes').inputValue()==='Reviewed on the PC. Keep the next sketch simple.','returning from Pen tablet preserves shared scratchpad notes');
+ check(await tablet.evaluate(()=>fixtureRejectedWriting===0&&fixtureNativeRequests.some(request=>request.path==='/api/ink')&&fixtureNativeRequests.filter(request=>/^\/api\/ink(?:\?|$)/.test(request.path)).every(request=>request.expectedPairingId===fixturePairingId)),'native scratchpad sync retains its captured pairing identity instead of bypassing the guard');
  check(unexpected.length===0,'all requests stay within known fixture routes: '+unexpected.join(', '));check(errors.length===0,'shared ink and Pen tablet have no browser JavaScript errors: '+errors.join('; '));
  fs.writeFileSync(path.join(output,'ink-rendered-results.json'),JSON.stringify({checks,failures,errors,unexpected,captures,inkRevision,penPackets,frameRequests,maxFrameInflight,syntheticPreview:true,fixtureOnly:true,physicalPenTested:false,osInputInjected:false,nativeHandwritingTested:false},null,2));
  assert.equal(failures.length,0,failures.join('\n'));console.log(checks+' ink checks passed; captures in '+output);

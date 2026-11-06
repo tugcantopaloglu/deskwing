@@ -10,9 +10,9 @@ public final class PairingPayload {
     public final int port,controlPort;
     private PairingPayload(Map<String,String> data){host=data.get("host");mode=data.get("mode");certificate=data.get("certificate");code=data.get("code");port=Integer.parseInt(data.get("port"));controlPort=Integer.parseInt(data.get("controlPort"));}
     public static PairingPayload parse(String text) throws Exception {
-        if(text==null||text.length()>512)throw new Exception("This is not a Tablet Deck pairing code.");
+        if(text==null||text.length()>512)throw new Exception("This is not a DeskWing pairing code.");
         URI uri=new URI(text);
-        if(!"tabletdeck".equals(uri.getScheme())||!"pair".equals(uri.getHost())||uri.getRawUserInfo()!=null||uri.getPort()!=-1||uri.getRawFragment()!=null||uri.getRawPath()==null||!uri.getRawPath().isEmpty()||uri.getRawQuery()==null)throw new Exception("This is not a Tablet Deck pairing code.");
+        if(!"tabletdeck".equals(uri.getScheme())||!"pair".equals(uri.getHost())||uri.getRawUserInfo()!=null||uri.getPort()!=-1||uri.getRawFragment()!=null||uri.getRawPath()==null||!uri.getRawPath().isEmpty()||uri.getRawQuery()==null)throw new Exception("This is not a DeskWing pairing code.");
         Map<String,String> data=new HashMap<>();
         for(String part:uri.getRawQuery().split("&",-1)){String[] pair=part.split("=",-1);if(pair.length!=2||data.put(pair[0],pair[1])!=null)throw new Exception("Invalid pairing fields.");}
         if(data.size()!=7||!"1".equals(data.get("v"))||!data.containsKey("host")||!data.containsKey("mode")||!data.containsKey("port")||!data.containsKey("controlPort")||!data.containsKey("certificate")||!data.containsKey("code"))throw new Exception("Unsupported pairing code.");

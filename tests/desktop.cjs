@@ -1,7 +1,7 @@
 // Isolated PC setup API and controller checks. No browser, registry writes, real OBS, or audio.
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),vm=require('node:vm'),acorn=require('acorn'),crypto=require('node:crypto'),{spawn}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),output=path.join(process.env.TABLETDECK_TEST_OUTPUT||os.tmpdir(),'tabletdeck-desktop-tests');fs.mkdirSync(output,{recursive:true});
-const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/TabletDeck-Companion.exe');
+const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/DeskWing-Companion.exe');
 let server,passed=0;const check=(value,label)=>{assert.ok(value,label);passed++;console.log('PASS '+label);},sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function apiTests(){
  const data=fs.mkdtempSync(path.join(output,'data-')),log=fs.openSync(path.join(output,'server.log'),'w');
@@ -11,6 +11,11 @@ async function apiTests(){
  const settings={port:4455,micInput:'Mic/Aux',desktopInput:'Desktop Audio',passwordMode:'replace',password:crypto.randomBytes(32).toString('hex')};
  check((await request('/api/admin/obs-settings',settings,false)).status===403,'OBS setup requires local admin authentication');
  const pin=(await request('/api/admin/pairing',{})).data,pair=(await request('/api/pair',{code:pin.code,name:'Setup fixture'},false)).data;
+ const boardBefore=crypto.createHash('sha256').update(fs.readFileSync(path.join(data,'config.json'))).digest('hex');
+ const tabletBoard=await request('/api/board',undefined,false,{Authorization:'Bearer '+pair.token});
+ check(tabletBoard.status===200&&Object.keys(tabletBoard.data.workspace).sort().join(',')==='computerName,connectionCode,version'&&/^[A-F0-9]{4}(?:-[A-F0-9]{4}){2}$/.test(tabletBoard.data.workspace.connectionCode),'paired tablet receives a public PC code and version without private paths or credentials');
+ check(tabletBoard.data.pages.every(page=>Object.hasOwn(page,'liveSoundpadOutput')&&page.liveSoundpadOutput===null),'manual pages do not advertise a Soundpad destination');
+ check(crypto.createHash('sha256').update(fs.readFileSync(path.join(data,'config.json'))).digest('hex')===boardBefore,'workspace status reads preserve the existing board bytes');
  check((await request('/api/admin/ink/window',{},false)).status===403,'opening an ink window requires local admin authentication');
  check((await request('/api/admin/ink/window',{},false,{Authorization:'Bearer '+pair.token})).status===403,'paired tablets cannot open native PC ink windows');
  check((await request('/api/admin/ink/window',{},true,{Origin:'https://untrusted.invalid'})).status===403,'cross-origin ink window requests are refused');

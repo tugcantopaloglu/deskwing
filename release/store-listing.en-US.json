@@ -1,0 +1,21 @@
+{
+  "status": "review-draft-not-submitted",
+  "candidateVersion": "1.15.0",
+  "developer": "Tuğcan Topaloğlu",
+  "supportEmail": "tugcan@tugcan.dev",
+  "title": "DeskWing",
+  "appleSubtitle": "Controls, notes and pen input",
+  "googleShortDescription": "Tablet controls, pen input, notes and a second display for your Windows PC.",
+  "appleKeywords": "tablet,streaming,controls,pen,notes,writing,display,shortcuts,obs,soundpad,windows",
+  "description": "Make your tablet an extension of your Windows PC.\n\nDeskWing brings streaming controls, app shortcuts, shared writing and an extra desktop into one tablet workspace.\n\nSTREAM AND CONTROL\nBuild your own pages for OBS scenes, audio, Soundpad, applications, hotkeys and macros. Use large tablet buttons while your PC handles configuration and connected applications.\n\nWRITE AND ORGANIZE\nSketch with a compatible pen, use your system keyboard's handwriting input, and keep notes beside your PC work. The workspace-expansion candidate adds named notebook documents and pages, local PDF annotation, document recovery/history and user-selected export. Shared content travels to the PC you pair with.\n\nDRAW INTO WINDOWS APPS\nUse an explicitly enabled pen-input session for supported Windows applications. The interactive-display candidate combines native video with pen or touch input on DeskWing's owned extra monitor. App, brush and hardware compatibility determine the available pressure and tilt behavior.\n\nEXTEND YOUR DESKTOP\nView a separately created Windows desktop through native silent H.264 video. Choose 60 Hz or match the tablet's reported current refresh rate. Actual video delivery depends on the PC, resolution, encoder, connection, tablet decoder and power state.\n\nWHAT YOU NEED\nA compatible Windows PC with the matching DeskWing Windows companion is required. Use a local Wi-Fi/network connection, or the supported Android USB setup. Independent-display viewing requires a compatible virtual-display driver already installed on the PC and explicit sharing. No driver is bundled. Handwriting requires a compatible pen and system keyboard or Scribble configuration.\n\nPRIVACY AND SUPPORT\nCore controls connect directly to your paired PC without a DeskWing cloud account. Optional provider views and release checks contact their respective services. Review the in-app privacy information and public policy for shared document storage, input, capture and export details.\n\nDeveloper: Tuğcan Topaloğlu\nSupport: tugcan@tugcan.dev",
+  "expectedPrivacyUrl": "https://tugcantopaloglu.github.io/deskwing/privacy.html",
+  "expectedSupportUrl": "https://tugcantopaloglu.github.io/deskwing/support.html",
+  "releaseGates": [
+    "Verify every described expansion feature in the exact signed candidate before copying this draft into either store.",
+    "Publish and fetch the privacy/support URLs successfully before submission.",
+    "Provide a matching Windows companion download and accurate setup/review instructions.",
+    "Capture release screenshots and the required physical Apple-device hardware demonstration.",
+    "Complete owner-controlled signing, app records, countries/pricing, privacy, age-rating and encryption decisions.",
+    "Run internal platform testing and physical-device rehearsal; no store approval is claimed."
+  ]
+}

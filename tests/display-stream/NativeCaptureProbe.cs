@@ -73,6 +73,8 @@ internal static class NativeCaptureProbe
     private sealed class TimedProducer(IDisplayVideoProducer inner,List<double> times):IDisplayVideoProducer
     {
         public string EncoderName=>inner.EncoderName;public bool HardwareAccelerated=>inner.HardwareAccelerated;
+        public string? EncoderFallback=>inner.EncoderFallback;
+        public bool TrySetBitrate(int bitrate)=>inner.TrySetBitrate(bitrate);
         public EncodedVideoFrame? Next(long timestamp100ns,CancellationToken cancellation){var timer=Stopwatch.StartNew();var result=inner.Next(timestamp100ns,cancellation);times.Add(timer.Elapsed.TotalMilliseconds);return result;}
         public void Dispose()=>inner.Dispose();
     }

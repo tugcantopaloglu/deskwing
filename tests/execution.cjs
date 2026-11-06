@@ -1,7 +1,7 @@
 // Isolated API and UI-logic regression checks. No browser, real OBS, or audio.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),https=require('node:https'),vm=require('node:vm'),acorn=require('acorn'),{spawn}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),output=path.join(process.env.TABLETDECK_TEST_OUTPUT||path.join(root,'.test-output'),'execution');fs.mkdirSync(output,{recursive:true});
-const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/TabletDeck-Companion.exe');
+const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/DeskWing-Companion.exe');
 let server,passed=0;const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),check=(value,label)=>{assert.ok(value,label);passed++;console.log('PASS '+label);};
 async function run(){
  const data=fs.mkdtempSync(path.join(output,'data-')),log=fs.openSync(path.join(output,'server.log'),'w');

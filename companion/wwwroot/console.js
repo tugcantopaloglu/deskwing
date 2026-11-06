@@ -37,6 +37,7 @@ async function stopConsoleCompanion(){
 document.addEventListener('DOMContentLoaded',async()=>{
   if(!desktopConsole)return;
   const routes={'console-home':null,'console-editor':showEditor,'console-connections':showPairing,'console-obs':showObsSetup,'soundpad-button':showSoundpadLibrary,'console-profiles':showProfiles,'console-backups':showBackups,'console-mixer':showMixerSettings,'console-automation':showAutoProfiles,'console-packs':showBoardPacks,'monitor-toggle':()=>setMonitorOpen(true),'apps-button':showAppMixer,'studio-tools':showStudioTools,'console-options':showDesktopSettings,'console-readiness':showReadiness};
+  routes['console-privacy']=()=>{if(typeof showPrivacySupport==='function')return showPrivacySupport();};
   for(const [id,action] of Object.entries(routes)){const button=$('#'+id);if(button)button.onclick=()=>consoleNavigate(id,action);}
   $('#console-computer').onclick=async()=>{if(await setComputerMode('computer'))await showComputerSettings();};
   $('#connection').onclick=()=>consoleNavigate('console-obs',showObsSetup);$('#console-connect-first').onclick=()=>consoleNavigate('console-connections',showPairing);$('#console-edit-first').onclick=()=>consoleNavigate('console-editor',showEditor);$('#console-refresh').onclick=async()=>{await refresh(true);await refreshConsoleConnections();};

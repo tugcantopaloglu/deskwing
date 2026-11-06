@@ -32,6 +32,7 @@ public static class ExtendedDisplayTests
             var created=await display.StartAsync(new(1280,800,true,true));
             Check(created.Active&&created.IndependentDesktop&&created.SharedWithTablet&&created.Width==1280,"own independent monitor created");
             Check(fake.AddInput is {Length:56}&&BitConverter.ToInt32(fake.AddInput,8)==60,"fixed protocol structure and 60Hz refresh");
+            Check(System.Text.Encoding.ASCII.GetString(fake.AddInput!,28,14).TrimEnd('\0')=="DeskWing","new virtual monitor uses the DeskWing display name");
             Check(created.RefreshRate==60,"status reports the active source refresh rate");
             var driverChecks=fake.DriverChecks;
             var videoTarget=display.CaptureVideoTarget();display.ValidateVideoTarget(videoTarget);
@@ -173,7 +174,7 @@ public static class ExtendedDisplayTests
         {
             var result=new List<ExtendedDisplay.Native.DesktopPath>{new(1,1,"1:0",@"\\.\DISPLAY1","Physical 1",@"\\?\PCI#GPU#0000#{adapter}",0,0,1920,1080,false),new(1,2,"1:1",@"\\.\DISPLAY2","Physical 2",@"\\?\PCI#GPU#0000#{adapter}",1920,0,1920,1080,false)};
             if(ForeignMonitor)result.Add(new(7,7,"7:0",@"\\.\DISPLAY7","Foreign virtual",Adapter,3840,0,1280,800,false));
-            if(created)result.Add(new(9,9,Clone?"1:0":"9:0",@"\\.\DISPLAY9","TabletDeck",Adapter,Overlap?0:3840+XOffset,0,1280,800,Clone,ActualRefreshRate??BitConverter.ToInt32(AddInput!,8)));
+            if(created)result.Add(new(9,9,Clone?"1:0":"9:0",@"\\.\DISPLAY9","DeskWing",Adapter,Overlap?0:3840+XOffset,0,1280,800,Clone,ActualRefreshRate??BitConverter.ToInt32(AddInput!,8)));
             return result.ToArray();
         }
         public byte[] Ioctl(SafeFileHandle handle,uint code,byte[]? input,int outputSize)

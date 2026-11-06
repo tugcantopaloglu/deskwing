@@ -1,7 +1,7 @@
 // Native-pen HTTP boundaries only. The fixture never enables or starts real pen injection.
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),net=require('node:net'),https=require('node:https'),crypto=require('node:crypto'),{spawn,spawnSync}=require('node:child_process');
 const root=path.resolve(__dirname,'..'),fixture=fs.mkdtempSync(path.join(os.tmpdir(),'tabletdeck-pen-api-'));
-const executable=process.env.TABLETDECK_COMPANION||path.join(root,'build/backend-review/bin/TabletDeck-Companion.exe');
+const executable=process.env.TABLETDECK_COMPANION||path.join(root,'build/backend-review/bin/DeskWing-Companion.exe');
 let child,session,passed=0;const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function check(condition,label){assert.ok(condition,label);passed++;console.log('PASS '+label);}
 async function port(){const server=net.createServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const value=server.address().port;await new Promise(resolve=>server.close(resolve));return value;}
@@ -28,6 +28,18 @@ async function run(){
   const pin=(await api('/api/admin/pairing',{})).data;
   const pair=await api('/api/pair',{code:pin.code,name:'Isolated pen fixture'},{'X-Deck-Admin':''});assert.equal(pair.status,200);
   const tablet={'X-Deck-Admin':'',Authorization:'Bearer '+pair.data.token};
+  const displayInputPath='/api/computer/display/input',displayInputAdmin='/api/admin/computer/display/input';
+  check((await api(displayInputPath,undefined,{'X-Deck-Admin':''})).status===401,'Second display input status requires authentication');
+  const displayInput=(await api(displayInputPath,undefined,tablet)).data;
+  check(displayInput.enabled===false&&displayInput.active===false&&typeof displayInput.supported==='boolean','Second display input has a separate disabled default');
+  check(!JSON.stringify(displayInput).includes(pair.data.token)&&!('lease'in displayInput),'display input status exposes no device credential or lease token');
+  check((await api(displayInputAdmin,undefined,tablet)).status===403&&(await api(displayInputAdmin,{enabled:true,targetIdentity:'invented'},tablet)).status===403,'paired tablets cannot grant their own display input permission');
+  const displayBegin={operation:'begin',videoLease:'A'.repeat(48),session:crypto.randomUUID(),mode:'pen'};
+  check((await api(displayInputPath,displayBegin,tablet)).status===409,'display input begin is refused before PC permission and a matching attached video lease');
+  check((await api(displayInputPath,{operation:'cancel',videoLease:'A'.repeat(48),lease:'B'.repeat(48)},tablet)).status===200,'exact lease cleanup remains safe when display input is disabled');
+  check((await api(displayInputPath,displayBegin,{...tablet,'Content-Type':'text/plain'})).status===415,'display input rejects a non-JSON content type');
+  check((await api(displayInputPath,{...displayBegin,oversized:'x'.repeat(17*1024)},tablet)).status===413,'display input rejects an oversized packet before decoding it');
+  check((await api(displayInputPath,displayBegin,{...tablet,Origin:'https://untrusted.invalid'})).status===403,'display input rejects a foreign browser origin before granting input');
   const status=(await api('/api/pen',undefined,tablet)).data;
   check(status.enabled===false&&status.active===false&&typeof status.supported==='boolean','PC pen is disabled and inactive by default');
   check(!JSON.stringify(status).includes(pair.data.token)&&!('lease'in status),'status exposes no device credential or active lease token');

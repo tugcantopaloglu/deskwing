@@ -16,13 +16,16 @@ const suites=[
   ...['fast','studio','monitor'].map(name=>({name,group:'android',script:name+'.cjs',java:true})),
   ...['studio-ui','monitor-ui','update-ui','tablet-workflows','workspace-modes','readiness-ui','readiness-api','pen-tablet-ui','ink-window-ui'].map(name=>({name,group:'core',script:name+'.cjs'})),
   {name:'android-control-policy',group:'android',java:true,javaClass:'ControlRequestPolicyHarness',javaSources:['android/src/app/tabletdeck/ControlRequestPolicy.java','tests/java/ControlRequestPolicyHarness.java']},
-  {name:'android-bridge-limits',group:'android',java:true,javaClass:'BridgeRequestLimitsHarness',javaSources:['android/src/app/tabletdeck/BridgeRequestLimits.java','tests/java/BridgeRequestLimitsHarness.java']},
+  {name:'android-bridge-limits',group:'android',java:true,javaClass:'BridgeRequestLimitsHarness',javaSources:['android/src/app/tabletdeck/BridgeRequestLimits.java','android/src/app/tabletdeck/NotebookRequestPolicy.java','tests/java/BridgeRequestLimitsHarness.java']},
   {name:'android-pen-leases',group:'android',java:true,javaClass:'PenLeaseTrackerHarness',javaSources:['android/src/app/tabletdeck/PenLeaseTracker.java','tests/java/PenLeaseTrackerHarness.java']},
   {name:'android-fullscreen-policy',group:'android',java:true,javaClass:'FullscreenPolicyHarness',javaSources:['android/src/app/tabletdeck/FullscreenPolicy.java','tests/java/FullscreenPolicyHarness.java']},
   {name:'android-display-protocol',group:'android',java:true,javaClass:'app.tabletdeck.DisplayVideoProtocolHarness',javaSources:['android/src/app/tabletdeck/DisplayVideoProtocol.java','android/src/app/tabletdeck/DisplayReadDeadline.java','tests/java/DisplayVideoProtocolHarness.java']},
   {name:'android-bridge-tickets',group:'android',java:true,javaClass:'app.tabletdeck.BridgeRequestTicketsHarness',javaSources:['android/src/app/tabletdeck/BridgeRequestTickets.java','tests/java/BridgeRequestTicketsHarness.java']},
   {name:'android-frame-metrics',group:'android',java:true,javaClass:'app.tabletdeck.RenderedFrameMetricsHarness',javaSources:['android/src/app/tabletdeck/RenderedFrameMetrics.java','tests/java/RenderedFrameMetricsHarness.java']},
   {name:'android-display-lifecycle',group:'android',java:true,javaClass:'app.tabletdeck.DisplayLifecycleHarness',javaSources:['android/src/app/tabletdeck/NetworkCloseQueue.java','android/src/app/tabletdeck/DisplayReadDeadline.java','android/src/app/tabletdeck/DisplayDecoderStartup.java','tests/java/DisplayLifecycleHarness.java']},
+  {name:'android-display-input',group:'android',java:true,javaClass:'app.tabletdeck.DisplayInputPolicyHarness',javaSources:['android/src/app/tabletdeck/DisplayInputPolicy.java','tests/java/DisplayInputPolicyHarness.java']},
+  {name:'android-notebook-policy',group:'android',java:true,javaClass:'app.tabletdeck.NotebookRequestPolicyHarness',javaSources:['android/src/app/tabletdeck/NotebookRequestPolicy.java','android/src/app/tabletdeck/BridgeRequestLimits.java','tests/java/NotebookRequestPolicyHarness.java']},
+  {name:'android-notebook-transfer',group:'android',java:true,javaClass:'app.tabletdeck.NotebookPdfTransferHarness',javaSources:['android/src/app/tabletdeck/NotebookPdfTransfer.java','android/src/app/tabletdeck/NotebookRasterPolicy.java','tests/java/NotebookPdfTransferHarness.java']},
   {name:'copilot-backend',group:'core',project:'tests/copilot-backend/CopilotBackendTests.csproj'},
   {name:'media-sessions',group:'core',project:'tests/media-sessions/MediaSessionTests.csproj'},
   {name:'readiness-backend',group:'core',project:'tests/readiness-backend/ReadinessBackendTests.csproj'},
@@ -30,6 +33,18 @@ const suites=[
   {name:'display-stream-backend',group:'core',project:'tests/display-stream/DisplayStreamTests.csproj'},
   {name:'display-encoder',group:'core',project:'tests/display-encoder/DisplayEncoderTests.csproj'},
   {name:'pen-preview-backend',group:'core',project:'tests/pen-preview/PenPreviewTests.csproj'},
+  {name:'display-input-backend',group:'core',project:'tests/display-input/DisplayInputTests.csproj'},
+  {name:'workspace-identity-backend',group:'core',project:'tests/workspace-identity/WorkspaceIdentityTests.csproj'},
+  {name:'workspace-status-ui',group:'ui',script:'workspace-status-ui.cjs',browser:true},
+  {name:'workspace-context',group:'core',script:'workspace-context.cjs'},
+  {name:'notebook-backend',group:'core',project:'tests/notebook-backend/NotebookBackendTests.csproj'},
+  {name:'notebook-api',group:'core',project:'tests/notebook-api/NotebookApiTests.csproj'},
+  {name:'notebook-pdf',group:'ui',script:'notebook-pdf.cjs',browser:true},
+  {name:'notebook-ui',group:'ui',script:'notebook-ui.cjs',browser:true},
+  {name:'notebook-local-store',group:'ui',script:'notebook-local-store.cjs',browser:true},
+  {name:'notebook-recovery',group:'ui',script:'notebook-recovery.cjs',browser:true},
+  {name:'beta-ios-policy',group:'core',pythonScript:'beta-ios-policy.py'},
+  {name:'beta-android-policy',group:'core',powershellScript:'beta-android-policy.ps1'},
   {name:'shortcut-migration',group:'core',project:'tests/shortcut-migration/ShortcutMigrationTests.csproj'},
   {name:'integration-api',group:'core',integration:true},
   ...['layout','copilot-ui','soundpad-sync-ui','media-touchbar-ui','live-soundpad-board','live-sync','desktop-rendered','editor-workflow','macro-editor','pen-ui','workspace-rendered','ink-rendered'].map(name=>({name,group:'ui',script:name+'.cjs',browser:true,timeout:name==='desktop-rendered'?240000:180000})),
@@ -86,6 +101,9 @@ async function main(){
   const sdk=version('dotnet',['--version'],'.NET SDK',60000);if(Number(sdk.split('.')[0])<10)throw new Error('.NET SDK 10 or newer is required; selected '+sdk+'.');
   for(const packageName of ['acorn','playwright','ws','dompurify']){try{require.resolve(packageName);}catch{throw new Error('Missing test dependency '+packageName+'. Run npm ci --prefix tests.');}}
   for(const suite of selected){if(suite.script)requireFile(path.join(__dirname,suite.script),'Required suite');if(suite.project)requireFile(path.join(root,suite.project),'Required backend fixture');for(const source of suite.javaSources||[])requireFile(path.join(root,source),'Required Java fixture source');}
+  for(const suite of selected){if(suite.pythonScript)requireFile(path.join(__dirname,suite.pythonScript),'Required Python fixture');if(suite.powershellScript)requireFile(path.join(__dirname,suite.powershellScript),'Required PowerShell fixture');}
+  if(selected.some(suite=>suite.pythonScript))version('python',['--version'],'Python');
+  if(selected.some(suite=>suite.powershellScript))version('pwsh',['-NoProfile','-Command','$PSVersionTable.PSVersion.ToString()'],'PowerShell');
   const env={...process.env,TABLETDECK_HEADLESS:'0',TABLETDECK_CAPTURE_ONLY:''};
   if(selected.some(suite=>suite.java)){
     env.JAVA_HOME=javaHome();const javac=requireFile(path.join(env.JAVA_HOME,'bin/javac.exe'),'JDK compiler');requireFile(path.join(env.JAVA_HOME,'bin/java.exe'),'Java runtime');
@@ -94,7 +112,7 @@ async function main(){
   }
   if(selected.some(suite=>suite.browser))env.TABLETDECK_CHROME=chromePath();
   if(selected.some(suite=>suite.group==='installer'))requireFile(env.TABLETDECK_SETUP||'','TABLETDECK_SETUP (required only for the explicit installer group)');
-  const sourceVersion=fs.readFileSync(path.join(root,'companion/TabletDeck.csproj'),'utf8').match(/<Version>([^<]+)<\/Version>/)?.[1];env.TABLETDECK_VERSION=env.TABLETDECK_VERSION||sourceVersion;
+  const sourceVersion=fs.readFileSync(path.join(root,'companion/DeskWing.csproj'),'utf8').match(/<Version>([^<]+)<\/Version>/)?.[1];env.TABLETDECK_VERSION=env.TABLETDECK_VERSION||sourceVersion;
 
   const outputRoot=path.join(root,'.test-output');fs.mkdirSync(outputRoot,{recursive:true});
   const output=fs.mkdtempSync(path.join(outputRoot,'verification-')),logs=path.join(output,'logs');fs.mkdirSync(logs);
@@ -105,7 +123,7 @@ async function main(){
   if(settings.noBuild){
     companion=requireFile(env.TABLETDECK_COMPANION||'','TABLETDECK_COMPANION (--no-build)');
     if(!path.resolve(companion).includes(path.sep+'.test-output'+path.sep))throw new Error('--no-build requires an isolated executable beneath a .test-output directory, not the installed/running companion.');
-  }else companion=path.join(output,'Windows','TabletDeck-Companion.exe');
+  }else companion=path.join(output,'Windows','DeskWing-Companion.exe');
   env.TABLETDECK_COMPANION=companion;
   const report={startedAt:new Date().toISOString(),group:settings.group,selected:selected.map(suite=>suite.name),sdk,node:process.versions.node,sourceVersion,build:settings.noBuild?'explicit existing isolated executable':'fresh isolated publish',hardwareTested:false,installerIncluded:selected.some(suite=>suite.group==='installer'),steps:[],complete:false};
   const summary=path.join(output,'summary.json');
@@ -161,7 +179,7 @@ async function main(){
   }
   try{
     console.log('Verification output: '+output);console.log('Private fixture directory: '+env.TABLETDECK_TEST_OUTPUT);
-    if(!settings.noBuild)await run('publish','dotnet',['publish',path.join(root,'companion/TabletDeck.csproj'),'-c','Release','-r','win-x64','--self-contained','true','--artifacts-path',path.join(output,'build'),'-o',path.dirname(companion)],{timeout:600000});
+    if(!settings.noBuild)await run('publish','dotnet',['publish',path.join(root,'companion/DeskWing.csproj'),'-c','Release','-r','win-x64','--self-contained','true','--artifacts-path',path.join(output,'build'),'-o',path.dirname(companion)],{timeout:600000});
     requireFile(companion,'Published companion');
     const failures=[];
     for(const suite of selected){try{
@@ -173,6 +191,8 @@ async function main(){
         await run(suite.name,path.join(env.JAVA_HOME,'bin/java.exe'),['-cp',classes,suite.javaClass]);
       }
       else if(suite.project)await run(suite.name,'dotnet',['run','--project',path.join(root,suite.project),'-c','Release','--artifacts-path',path.join(output,'backend-build')],{timeout:300000});
+      else if(suite.pythonScript)await run(suite.name,'python',[path.join(__dirname,suite.pythonScript)],{timeout:suite.timeout||180000});
+      else if(suite.powershellScript)await run(suite.name,'pwsh',['-NoProfile','-NonInteractive','-File',path.join(__dirname,suite.powershellScript)],{timeout:suite.timeout||180000});
       else await run(suite.name,process.execPath,[path.join(__dirname,suite.script)],{timeout:suite.timeout||180000});
     }catch(error){failures.push({suite:suite.name,error:error.message});if(settings.failFast||interrupted)throw error;console.error('Continuing after '+suite.name+' failed: '+error.message);}}
     report.failures=failures;

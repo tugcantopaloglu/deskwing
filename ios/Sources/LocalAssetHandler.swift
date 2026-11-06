@@ -22,9 +22,9 @@ final class LocalAssetHandler: NSObject, WKURLSchemeHandler {
             fail(urlSchemeTask); return
         }
         let ext = url.pathExtension.lowercased()
-        let mime = ["html":"text/html", "js":"application/javascript", "css":"text/css", "ttf":"font/ttf",
+        let mime = ["html":"text/html", "js":"application/javascript", "mjs":"text/javascript", "css":"text/css", "ttf":"font/ttf",
                     "woff2":"font/woff2", "svg":"image/svg+xml", "png":"image/png", "json":"application/json"][ext] ?? "application/octet-stream"
-        let headers = ["Content-Type": mime + (["html","js","css","json","svg"].contains(ext) ? "; charset=utf-8" : ""),
+        let headers = ["Content-Type": mime + (["html","js","mjs","css","json","svg"].contains(ext) ? "; charset=utf-8" : ""),
             "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
             "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"]
         if let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers) {

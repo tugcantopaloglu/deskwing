@@ -7,6 +7,7 @@ configuration, signing material, runtime data, or desktop-only HTML.
 from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 import json
+import hashlib
 import re
 import shutil
 
@@ -53,6 +54,24 @@ class Assets(HTMLParser):
 def main():
     parser = Assets()
     parser.feed((SOURCE / "index.html").read_text(encoding="utf-8"))
+    vendor = json.loads((IOS.parent / "scripts" / "notebook-pdf-vendor.json").read_text(encoding="utf-8-sig"))
+    vendor_entries = vendor.get("assets")
+    if not isinstance(vendor_entries, list) or not 1 <= len(vendor_entries) <= 512:
+        raise ValueError("Invalid notebook PDF asset count")
+    total_vendor_bytes = 0
+    vendor_names = set()
+    for entry in vendor_entries:
+        name = safe_asset(entry.get("path", ""))
+        if not name.startswith(("vendor/pdfjs/", "vendor/pdf-lib/")) or name.casefold() in vendor_names:
+            raise ValueError("Unexpected or duplicate notebook PDF asset")
+        data = (SOURCE / name).read_bytes()
+        if len(data) != entry.get("bytes") or hashlib.sha256(data).hexdigest() != entry.get("sha256"):
+            raise ValueError("Notebook PDF asset checksum or size mismatch")
+        total_vendor_bytes += len(data)
+        if total_vendor_bytes > 64 * 1024 * 1024:
+            raise ValueError("Notebook PDF assets exceed bundle budget")
+        vendor_names.add(name.casefold())
+        parser.names.add(name)
     pending = list(parser.names)
     names = set(parser.names)
     while pending:

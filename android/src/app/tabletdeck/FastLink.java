@@ -45,14 +45,14 @@ public final class FastLink implements AutoCloseable {
     // A TLS close can perform network I/O (including a close_notify write). Never run it on the
     // Activity thread. The transport waits for its exact old close before creating another socket,
     // so this worker has at most one closing socket and one handoff, never a reset backlog.
-    private final ThreadPoolExecutor cleanup=new ThreadPoolExecutor(1,1,0L,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<Runnable>(1),r->{Thread t=new Thread(r,"TabletDeck TLS cleanup");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+    private final ThreadPoolExecutor cleanup=new ThreadPoolExecutor(1,1,0L,TimeUnit.MILLISECONDS,new ArrayBlockingQueue<Runnable>(1),r->{Thread t=new Thread(r,"DeskWing TLS cleanup");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
     private static final class Connection {
         final SSLSocket socket;final AtomicBoolean closeScheduled=new AtomicBoolean();final CountDownLatch closed=new CountDownLatch(1);
         final Settings settings;long generation;boolean admitted;
         volatile boolean invalidated;
         Connection(SSLSocket socket,Settings settings){this.socket=socket;this.settings=settings;}
     }
-    private final ScheduledExecutorService heartbeat=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"TabletDeck link heartbeat");t.setDaemon(true);return t;});
+    private final ScheduledExecutorService heartbeat=Executors.newSingleThreadScheduledExecutor(r->{Thread t=new Thread(r,"DeskWing link heartbeat");t.setDaemon(true);return t;});
     private volatile long pingAt;
     private volatile double roundTrip=-1;
     private final Object statsGate=new Object();
@@ -62,7 +62,7 @@ public final class FastLink implements AutoCloseable {
     private void event(String kind){synchronized(statsGate){events.addLast("{\"at\":"+System.currentTimeMillis()+",\"kind\":\""+kind+"\"}");while(events.size()>16)events.removeFirst();}}
     public void clearStatistics(){synchronized(statsGate){samples.clear();events.clear();connects=disconnects=timeouts=0;roundTrip=-1;pingAt=0;}}
     public String statistics(){synchronized(statsGate){return "{\"samples\":"+samples.toString()+",\"events\":"+events.toString()+",\"connects\":"+connects+",\"disconnects\":"+disconnects+",\"timeouts\":"+timeouts+"}";}}
-    public FastLink(Listener listener){this.listener=listener;worker=new Thread(this::run,"TabletDeck fast TLS");worker.setDaemon(true);}
+    public FastLink(Listener listener){this.listener=listener;worker=new Thread(this::run,"DeskWing fast TLS");worker.setDaemon(true);}
     public void start(){if(!started.compareAndSet(false,true)||!running)throw new IllegalStateException("The fast link has already started or closed.");worker.start();heartbeat.scheduleAtFixedRate(()->{try{synchronized(writeGate){if(ready){if(pingAt!=0){if(System.nanoTime()-pingAt>12000000000L){synchronized(statsGate){timeouts++;}reset();}return;}pingAt=System.nanoTime();write("{\"id\":0,\"path\":\"/api/ping\",\"body\":{}}");}}}catch(IOException ignored){reset();}},2,8,TimeUnit.SECONDS);}
     public boolean connected(){return ready;}
     // A queued callback must check this again when it reaches the UI. Natural disconnect keeps

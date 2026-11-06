@@ -45,6 +45,35 @@ function soundpadBoardEmpty(page){
   if(saved&&!selection.buttons.length&&selection.missing)return {title:'Saved sounds are unavailable',message:'These files are missing or have duplicate identities in Soundpad. Choose All or review the library on the PC.'};
   return {title:'No matching sounds',message:'Clear the search and category, or choose All to see the complete library.'};
 }
+function soundpadBoardRoute(page){return ({speakers:'Speakers',mic:'Microphone only',both:'Speakers and microphone'})[page?.liveSoundpadOutput]||'Output unavailable';}
+function soundpadBoardTestChoices(page){
+  const size=typeof boardCapacity==='function'?boardCapacity():12,start=(typeof slice==='number'?slice:0)*size;
+  return soundpadBoardMatches(page).buttons.slice(start,start+size).filter(action=>action.kind==='soundpadPlay'&&action.configured!==false&&typeof action.id==='string'&&action.id.startsWith('live-soundpad:'+page.id+':'));
+}
+async function testSoundpadBoardOutput(page){
+  if(typeof preview!=='undefined'&&preview||busy||executionStatus?.active)return;
+  const choices=soundpadBoardTestChoices(page),profile=activeProfileId,route=page.liveSoundpadOutput;
+  if(!choices.length||!['speakers','mic','both'].includes(route)){notice('The sound output or available sounds could not be checked. Refresh this page first.',true);return;}
+  openPanel('Test Soundpad output',`<section class="soundpad-output-test"><p><strong>${esc(page.name)} · ${esc(soundpadBoardRoute(page))}</strong></p><p>Choose one of the sounds visible on this pad, then press Play selected sound. This uses the saved page output and does not change your board.</p>${route==='mic'?'<p>Microphone-only playback may be silent on your speakers. Listen through your receiving call or recording.</p>':route==='both'?'<p>This plays through both speakers and microphone. People in a call or stream may hear it.</p>':''}<label>Sound<select id="soundpad-output-choice"><option value="">Choose a sound</option>${choices.map((action,index)=>`<option value="${index}">${esc(action.label)}</option>`).join('')}</select></label><div class="row"><button id="soundpad-output-play" class="primary" disabled>Play selected sound</button></div><p id="soundpad-output-result" role="status"></p></section>`);
+  const generation=panelGeneration,owns=()=>panel.open&&panelGeneration===generation;let testing=false;
+  const select=$('#soundpad-output-choice'),button=$('#soundpad-output-play');
+  select.onchange=()=>{button.disabled=testing||select.value==='';};
+  button.onclick=async()=>{
+    if(testing||!owns()||busy||executionStatus?.active||select.value==='')return;
+    const action=choices[Number(select.value)];if(!action)return;
+    let ownsBusy=false;testing=true;button.disabled=true;select.disabled=true;$('#soundpad-output-result').textContent='Checking the current board and output…';
+    try{
+      const current=await api('/api/board',undefined,10000);if(!owns())return;
+      const currentPage=current.pages.find(item=>item.id===page.id);
+      if(current.profileId!==profile||!currentPage?.liveSoundpad||currentPage.liveSoundpadOutput!==route||!currentPage.buttons.some(item=>item.id===action.id&&item.configured!==false))throw new Error('The board, sound, or output changed. Close this test and refresh the pad before trying again.');
+      if(busy||executionStatus?.active)throw new Error('Finish the current action before testing a sound.');
+      busy=true;ownsBusy=true;$('#soundpad-output-result').textContent='Playing '+action.label+'…';
+      await api('/api/action',{id:action.id,confirmed:false});
+      if(owns())$('#soundpad-output-result').textContent='Soundpad accepted “'+action.label+'” · '+soundpadBoardRoute(page)+'. If you cannot hear it, check that output in Soundpad and the receiving app.';
+    }catch(error){if(owns())$('#soundpad-output-result').textContent=error.message;}
+    finally{if(ownsBusy)busy=false;testing=false;if(owns()){button.disabled=select.value==='';select.disabled=false;}}
+  };
+}
 function soundpadBoardButtons(page){
   let toolbar=document.getElementById('soundpad-board-toolbar');
   if(!page.liveSoundpad){if(toolbar)toolbar.hidden=true;return page.buttons;}
@@ -56,12 +85,19 @@ function soundpadBoardButtons(page){
     const category=document.createElement('select');category.id='soundpad-board-category';category.setAttribute('aria-label','Soundpad category');
     const clear=document.createElement('button');clear.id='soundpad-board-clear';clear.className='quiet';clear.textContent='Clear';clear.onclick=()=>{soundpadBoardFilter.query='';soundpadBoardFilter.category='';search.value='';category.value='';slice=0;renderBoard();search.focus({preventScroll:true});};
     const count=document.createElement('span');count.id='soundpad-board-count';count.className='help';count.setAttribute('role','status');
-    toolbar.append(views,search,category,clear,count);document.getElementById('keys').before(toolbar);
+    const routing=document.createElement('div');routing.className='soundpad-board-routing';
+    const route=document.createElement('span');route.id='soundpad-board-route';route.className='help';
+    const test=document.createElement('button');test.type='button';test.id='soundpad-board-test';test.className='quiet';test.textContent='Test output';
+    routing.append(route,test);toolbar.append(views,search,category,clear,count,routing);document.getElementById('keys').before(toolbar);
     search.oninput=()=>{soundpadBoardFilter.query=search.value;slice=0;renderBoard();};category.onchange=()=>{soundpadBoardFilter.category=category.value;slice=0;renderBoard();};
   }
   toolbar.hidden=false;
   const search=document.getElementById('soundpad-board-search'),category=document.getElementById('soundpad-board-category');
   if(soundpadBoardFilter.pageId!==page.id){soundpadBoardFilter={pageId:page.id,query:'',category:'',view:'all'};search.value='';soundpadBoardCategories='';}
+  const route=document.getElementById('soundpad-board-route'),test=document.getElementById('soundpad-board-test');
+  route.textContent='Output · '+soundpadBoardRoute(page);route.title=page.liveSoundpadOutput==='mic'?'Sent to the microphone input; your speakers may be silent.':'Saved output for this page. Change it in the PC board editor.';
+  test.disabled=!['speakers','mic','both'].includes(page.liveSoundpadOutput)||!soundpadBoardTestChoices(page).length;
+  test.onclick=()=>testSoundpadBoardOutput(page);
   for(const view of ['all','favourites','recent'])document.getElementById('soundpad-board-'+view).setAttribute('aria-pressed',String(soundpadBoardFilter.view===view));
   const categories=[...new Set(page.buttons.flatMap(a=>a.categories||[]))].sort((a,b)=>a.localeCompare(b)),signature=JSON.stringify(categories);
   if(signature!==soundpadBoardCategories){soundpadBoardCategories=signature;category.replaceChildren(new Option('All categories',''),...categories.map(name=>new Option(name,name)));}

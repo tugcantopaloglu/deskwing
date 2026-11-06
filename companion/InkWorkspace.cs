@@ -23,6 +23,9 @@ internal sealed class InkWorkspace
     private readonly string path;
     private string workspaceId="",revision="",recoveryWarning="";
     private byte[] documentBytes=[];
+    // Notebook history observers receive the previous immutable snapshot before disk commit.
+    // They must not re-enter this workspace; a failed preservation leaves current ink unchanged.
+    internal event Action<InkSnapshot>? BeforeSave;
 
     public InkWorkspace(string directory)
     {
@@ -73,9 +76,22 @@ internal sealed class InkWorkspace
             var nextRevision=Hash(validated);
             if(nextRevision!=revision) {
                 // Commit disk first. A failed write must leave the current in-memory revision unchanged.
+                BeforeSave?.Invoke(SnapshotLocked());
                 Write(validated);documentBytes=validated;revision=nextRevision;
             }
             return SnapshotLocked();
+        }
+    }
+
+    // Used for explicit history maintenance that must share the page's compare-and-swap
+    // boundary. The action may touch separate history storage, but must not re-enter ink.
+    internal void WithCheckedRevision(string? expectedRevision,Action action)
+    {
+        if(expectedRevision is not {Length:64}||!expectedRevision.All(Uri.IsHexDigit))throw Invalid("Reload the PC scratchpad before changing its history.");
+        ArgumentNullException.ThrowIfNull(action);
+        lock(gate) {
+            if(!string.Equals(expectedRevision,revision,StringComparison.Ordinal))throw new InkConflictException(SnapshotLocked());
+            action();
         }
     }
 

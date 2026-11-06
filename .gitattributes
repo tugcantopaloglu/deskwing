@@ -13,3 +13,6 @@
 *.ttf binary
 *.wav binary
 companion/wwwroot/fonts/OFL.txt -whitespace
+companion/wwwroot/vendor/pdfjs/** -text
+companion/wwwroot/vendor/pdf-lib/** -text
+companion/Licenses/PDF*.txt -text

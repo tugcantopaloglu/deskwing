@@ -12,7 +12,7 @@ const {spawn,spawnSync}=require('node:child_process');
 
 const root=path.resolve(__dirname,'..');
 const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'deskwing-display-stream-api-'));
-const executable=process.env.TABLETDECK_COMPANION||path.join(root,'build/backend-review/bin/TabletDeck-Companion.exe');
+const executable=process.env.TABLETDECK_COMPANION||path.join(root,'build/backend-review/bin/DeskWing-Companion.exe');
 const unownedLease=crypto.randomBytes(24).toString('hex').toUpperCase();
 const endpoints=[
   ['/api/computer/display/stream/start',{refreshRate:60},409],

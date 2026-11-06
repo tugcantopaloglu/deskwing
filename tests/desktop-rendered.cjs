@@ -1,6 +1,6 @@
 // Real Chromium and native WebView2 regression checks against isolated data; no visible browser, provider, audio or studio actions.
 const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),assert=require('node:assert/strict'),{spawn}=require('node:child_process'),{chromium}=require('playwright');
-const root=path.resolve(__dirname,'..'),output=fs.mkdtempSync(path.join(os.tmpdir(),'tabletdeck-window-')),data=path.join(output,'data'),exe=process.env.TABLETDECK_COMPANION||path.join(root,'.test-output/build-1.11/TabletDeck-Companion.exe');fs.mkdirSync(data);fs.writeFileSync(path.join(data,'.desktop-window-test'),'isolated-ui-fixture');
+const root=path.resolve(__dirname,'..'),output=fs.mkdtempSync(path.join(os.tmpdir(),'tabletdeck-window-')),data=path.join(output,'data'),exe=process.env.TABLETDECK_COMPANION||path.join(root,'.test-output/build-1.11/DeskWing-Companion.exe');fs.mkdirSync(data);fs.writeFileSync(path.join(data,'.desktop-window-test'),'isolated-ui-fixture');
 const testOutput=path.resolve(process.env.TABLETDECK_TEST_OUTPUT||path.join(root,'.test-output'));fs.mkdirSync(testOutput,{recursive:true});
 let server,browser,session,passed=0;const sleep=ms=>new Promise(r=>setTimeout(r,ms)),check=(v,label)=>{assert.ok(v,label);passed++;console.log('PASS '+label);};
 async function clickSidebar(page,id){

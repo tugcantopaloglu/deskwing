@@ -41,7 +41,7 @@
   }
   function contentKey(value) { return JSON.stringify({strokes:value.strokes,notes:value.notes}); }
   function isEmpty(value) { return value.strokes.length === 0 && value.notes.length === 0; }
-  function fitPaper(availableWidth, availableHeight) { const fittedWidth=Math.max(0,Math.min(availableWidth,availableHeight*WIDTH/HEIGHT));return {width:fittedWidth,height:fittedWidth*HEIGHT/WIDTH}; }
+  function fitPaper(availableWidth, availableHeight, paperWidth=WIDTH, paperHeight=HEIGHT) { const fittedWidth=Math.max(0,Math.min(availableWidth,availableHeight*paperWidth/paperHeight));return {width:fittedWidth,height:fittedWidth*paperHeight/paperWidth}; }
   function byteLength(value) { return typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(value).length : unescape(encodeURIComponent(value)).length; }
   window.DeskPenCore = Object.freeze({normalizeDocument,createDocument,makePoint,mayDraw,strokeWidth,createHistory,contentKey,isEmpty,fitPaper,constants:Object.freeze({MAX_STROKES,MAX_POINTS,MAX_NOTE,MAX_BYTES})});
 
@@ -53,6 +53,32 @@
   let syncPhase='local', syncMessage='', syncRevision=null, syncWorkspaceId=null, syncBaseKey=null, syncConflict=null, syncMetadata=null, lastRemote=null, forceReview=false;
   let currentStroke = null, activePointer = null, activePointerType = '', tool = 'pen', color = colors[0], width = 3, framePending = false, handwritingPending = false;
   let penNearbyUntil = 0, palmSuppressedUntil = 0, focusTarget = null, handwriteFieldButton = null;
+  let notebookPage=null, switchingPage=false, backgroundImage=null, pageWidth=WIDTH, pageHeight=HEIGHT, pageGeneration=0;
+  let notebookLocal=null;
+  let legacyConnectionContext=null;
+  function notebookWritable(){return !notebookPage||!!notebookLocal&&window.DeskNotebookStore?.atomicPageWrites===true&&!notebookLocal.readOnly;}
+  let zoom=1, panX=0, panY=0, panMode=false, panPointer=null;
+  function pageStorageKeys(page) {const suffix=page?`deskwing.notebooks.page.v1:${page.libraryId}:${page.notebookId}:${page.pageId}`:null;return suffix?{document:suffix,sync:suffix+':sync',recovery:suffix+':recovery'}:{document:STORAGE,sync:SYNC_STORAGE,recovery:RECOVERY_STORAGE};}
+  function storageKeys() {return pageStorageKeys(notebookPage);}
+  function readStored(key) {if(notebookLocal){const field=key===notebookLocal.prefix?'document':key.slice(notebookLocal.prefix.length+1);const value=notebookLocal.draft[field];return value==null?null:JSON.stringify(value);}return localStorage.getItem(key);}
+  function writeStored(key,text) {
+    if(notebookPage&&!notebookLocal)throw new Error('Notebook backup storage is unavailable. Reopen DeskWing before editing; your original scratchpad is kept.');
+    if(!notebookLocal){localStorage.setItem(key,text);return null;}
+    if(window.DeskNotebookStore.atomicPageWrites!==true||notebookLocal.readOnly)throw new Error(notebookLocal.storageWarning||'This browser cannot safely commit notebook backups. You can read and export saved pages; use a browser with IndexedDB to edit them.');
+    const target=notebookLocal,field=key===target.prefix?'document':key.slice(target.prefix.length+1),value=JSON.parse(text);
+    target.draft[field]=value;target.nextPatch={...target.nextPatch,[field]:value};
+    if(field==='document')target.nextPatch.background=notebookPage?.background||null;
+    if(!target.writer){
+      let done,failed;target.writer=new Promise((resolve,reject)=>{done=resolve;failed=reject;});
+      const pending=target.writer;pending.catch(()=>{});
+      void(async()=>{try{while(target.nextPatch){const patch=target.nextPatch;target.nextPatch=null;const saved=await window.DeskNotebookStore.putPage(target.prefix,patch,target.localRevision);target.localRevision=saved.localRevision;}target.writer=null;done();}catch(error){target.writer=null;failed(error);}})();
+      return pending;
+    }
+    return target.writer;
+  }
+  function inkEndpoint() {return notebookPage?`/api/notebooks/${notebookPage.notebookId}/pages/${notebookPage.pageId}`:'/api/ink';}
+  async function captureInkContext(){if(typeof captureWorkspaceContext==='function')return await captureWorkspaceContext();if(isNative())throw new Error('Reopen DeskWing to update its private ink connection.');return 'same-origin';}
+  function inkRequest(path,body,timeout,connectionContext){const expected=connectionContext||(notebookPage?notebookPage.connectionContext:legacyConnectionContext);if(!expected)throw new Error('Verify the connected PC before sharing this page.');if(notebookPage?.bound===false)throw new Error('Open the notebook library to verify the connected PC before sharing this local page.');if(typeof apiWithWorkspaceContext==='function')return apiWithWorkspaceContext(path,body,expected,timeout);if(isNative())throw new Error('Reopen DeskWing to update its private ink connection.');return api(path,body,timeout);}
   const penPointers = new Set(), rejectedTouches = new Set();
   const now = () => Date.now();
   const isNative = () => typeof native !== 'undefined' && native === true && typeof nativeRequest === 'function';
@@ -65,11 +91,11 @@
   function load() {
     if (loaded) return; loaded = true;
     try {
-      const raw = localStorage.getItem(STORAGE);
+      const raw = readStored(storageKeys().document);
       if (raw) { if (byteLength(raw) > MAX_BYTES) throw new Error('The saved scratchpad exceeds the storage limit.'); doc = normalizeDocument(JSON.parse(raw)); }
     } catch (error) { loadError = 'The saved scratchpad could not be opened. It has been kept unchanged. Start a new scratchpad to replace it.'; }
     history = createHistory(doc.strokes); committedPoints = countPoints();
-    try {const raw=localStorage.getItem(SYNC_STORAGE);if(raw&&raw.length<1000){const meta=JSON.parse(raw);if(typeof meta.workspaceId==='string'&&typeof meta.revision==='string'&&typeof meta.hash==='string')syncMetadata=meta;}}catch{}
+    try {const raw=readStored(storageKeys().sync);if(raw&&raw.length<1000){const meta=JSON.parse(raw);if(typeof meta.workspaceId==='string'&&typeof meta.revision==='string'&&typeof meta.hash==='string')syncMetadata=meta;}}catch{}
   }
   function persist() {
     clearTimeout(saveTimer); saveTimer = null;
@@ -78,8 +104,12 @@
     try {
       const serialized = JSON.stringify(doc);
       if (byteLength(serialized) > MAX_BYTES) throw new Error('The scratchpad is full.');
-      localStorage.setItem(STORAGE,serialized); saveError = '';
-      if (stateLine && !handwritingPending) { stateLine.textContent = 'Saved on this device · local backup kept'; stateLine.classList.remove('pen-error'); }
+      const key=storageKeys().document,writing=writeStored(key,serialized);saveError='';
+      if(writing){
+        if(stateLine)stateLine.textContent='Saving page on this device…';
+        writing.then(()=>{if(storageKeys().document===key){if(JSON.stringify(doc)===serialized&&stateLine&&!handwritingPending){saveError='';stateLine.textContent='Saved on this device · local backup kept';stateLine.classList.remove('pen-error');}queueSync(450);}}).catch(()=>{if(storageKeys().document===key){saveError='Could not commit this page’s local backup. Another window may have changed it, or storage is full. Keep it open and export your drawing and notes before leaving.';if(stateLine){stateLine.textContent=saveError;stateLine.classList.add('pen-error');}}});
+      }
+      if (!writing && stateLine && !handwritingPending) { stateLine.textContent = 'Saved on this device · local backup kept'; stateLine.classList.remove('pen-error'); }
       queueSync(450);
       return true;
     } catch (error) {
@@ -89,7 +119,7 @@
     }
   }
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(persist,350); if (stateLine) stateLine.textContent = 'Saving on this device…'; }
-  function canSync() {return active&&!suspended&&!document.hidden&&!loadError&&typeof api==='function';}
+  function canSync() {return active&&!suspended&&!document.hidden&&!loadError&&!switchingPage&&(!notebookPage||notebookPage.bound!==false&&!saveError&&!notebookLocal?.writer&&notebookWritable())&&typeof api==='function';}
   async function confirmInkChoice(title,copy) {
     if(choicePending)return false;choicePending=true;clearTimeout(syncPollTimer);syncPollTimer=null;renderSyncState();
     try{return typeof confirmAction!=='function'||await confirmAction(title,copy);}
@@ -101,11 +131,11 @@
     const digest=await window.crypto.subtle.digest('SHA-256',new TextEncoder().encode(contentKey(value)));
     return [...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
   }
-  function validateSnapshot(snapshot) {
+  function validateSnapshot(snapshot,connectionContext) {
     if(!snapshot||typeof snapshot.workspaceId!=='string'||snapshot.workspaceId.length<1||snapshot.workspaceId.length>100||typeof snapshot.revision!=='string'||snapshot.revision.length<1||snapshot.revision.length>100)throw new Error('The PC returned an invalid ink version.');
     const document=normalizeDocument(snapshot.document);
     if(byteLength(JSON.stringify(document))>MAX_BYTES)throw new Error('The PC scratchpad exceeds the supported size.');
-    return {workspaceId:snapshot.workspaceId,revision:snapshot.revision,document,recoveryWarning:typeof snapshot.recoveryWarning==='string'?snapshot.recoveryWarning.slice(0,500):''};
+    return {workspaceId:snapshot.workspaceId,revision:snapshot.revision,document,recoveryWarning:typeof snapshot.recoveryWarning==='string'?snapshot.recoveryWarning.slice(0,500):'',connectionContext};
   }
   function setSyncState(phase,message='') {syncPhase=phase;syncMessage=message;renderSyncState();}
   function renderSyncState() {
@@ -113,8 +143,8 @@
     const labels={local:'Local scratchpad',checking:'Checking PC copy…',synced:'Shared with your PC',pending:'Sharing changes…',offline:'Offline · local copy kept',conflict:'Two versions need your choice'};
     syncLine.textContent=labels[syncPhase]||labels.local;
     syncDetails.textContent=syncMessage||(syncPhase==='synced'?'Drawings and notes appear in Ink & notes on both devices.':syncPhase==='local'?'Connect to the companion to share drawings and notes.':'');
-    syncRetryButton.disabled=syncPending||choicePending||!!loadError;syncRetryButton.textContent=syncPhase==='offline'?'Retry sync':'Sync now';
-    let recovery=false;try{recovery=!!localStorage.getItem(RECOVERY_STORAGE);}catch{}syncRestoreButton.hidden=!recovery;
+    syncRetryButton.disabled=syncPending||choicePending||!!loadError||!!notebookPage&&(!notebookWritable()||notebookPage.bound===false);syncRetryButton.textContent=syncPhase==='offline'?'Retry sync':'Sync now';
+    let recovery=false;try{recovery=!!readStored(storageKeys().recovery);}catch{}syncRestoreButton.hidden=!recovery;
     syncConflictBox.hidden=!syncConflict;
     const detail=syncConflictBox.querySelector?.('[data-pen-conflict-detail]');
     if(detail&&syncConflict)detail.textContent=`This device: ${doc.strokes.length} strokes, ${doc.notes.length} note characters. PC: ${syncConflict.document.strokes.length} strokes, ${syncConflict.document.notes.length} note characters. Nothing has been replaced.`;
@@ -124,11 +154,11 @@
   async function rememberSync(snapshot,content) {
     syncWorkspaceId=snapshot.workspaceId;syncRevision=snapshot.revision;syncBaseKey=contentKey(content);lastRemote=snapshot;
     const hash=await documentHash(content);
-    if(hash&&syncWorkspaceId===snapshot.workspaceId&&syncRevision===snapshot.revision){syncMetadata={workspaceId:snapshot.workspaceId,revision:snapshot.revision,hash};try{localStorage.setItem(SYNC_STORAGE,JSON.stringify(syncMetadata));}catch{}}
+    if(hash&&syncWorkspaceId===snapshot.workspaceId&&syncRevision===snapshot.revision){syncMetadata={workspaceId:snapshot.workspaceId,revision:snapshot.revision,hash,connectionContext:snapshot.connectionContext||null};try{await writeStored(storageKeys().sync,JSON.stringify(syncMetadata));}catch{}}
   }
   function currentForSync(epoch,key) {return canSync()&&syncEpoch===epoch&&!currentStroke&&!handwritingPending&&!choicePending&&contentKey(doc)===key;}
-  function preserveRecovery(value) {
-    try{const text=JSON.stringify(value);if(byteLength(text)>MAX_BYTES)throw new Error('Scratchpad is too large.');localStorage.setItem(RECOVERY_STORAGE,text);return true;}
+  async function preserveRecovery(value) {
+    try{const text=JSON.stringify(value);if(byteLength(text)>MAX_BYTES)throw new Error('Scratchpad is too large.');await writeStored(storageKeys().recovery,text);return true;}
     catch{tell('There is not enough local storage to keep both copies. Export your drawing and copy your notes before replacing anything.',true);return false;}
   }
   function applyDocument(value) {
@@ -147,7 +177,9 @@
     const outgoing=normalizeDocument(doc);outgoing.updatedAt=new Date().toISOString();const sentKey=contentKey(outgoing);
     if(byteLength(JSON.stringify(outgoing))>MAX_BYTES)throw new Error('The scratchpad is too large to share. Export it and start a new page.');
     setSyncState('pending');
-    const saved=validateSnapshot(await api('/api/ink',{expectedRevision:snapshot.revision,document:outgoing},15000));
+    if(!snapshot.connectionContext||snapshot.connectionContext!==(notebookPage?notebookPage.connectionContext:legacyConnectionContext))throw new Error('The PC connection changed. Recheck both copies before sharing.');
+    const saved=validateSnapshot(await inkRequest(inkEndpoint(),{expectedRevision:snapshot.revision,document:outgoing},15000,snapshot.connectionContext),snapshot.connectionContext);
+    if(syncEpoch!==epoch)return;
     if(saved.workspaceId!==snapshot.workspaceId)throw new Error('The PC ink workspace changed. Recheck both copies before sharing.');
     // A new stroke may have arrived during the request. Record its baseline without replacing it.
     await rememberSync(saved,outgoing);
@@ -161,17 +193,22 @@
     if(currentStroke||handwritingPending){queueSync();return;}
     const epoch=syncEpoch;syncPending=true;renderSyncState();
     try {
+      const connectionContext=notebookPage?notebookPage.connectionContext:legacyConnectionContext||await captureInkContext();
+      if(!canSync()||syncEpoch!==epoch)return;
+      if(!notebookPage)legacyConnectionContext=connectionContext;
       const known=lastRemote&&/^[0-9a-f]{64}$/i.test(lastRemote.revision)?lastRemote:null;
-      const response=await api('/api/ink'+(known?'?revision='+encodeURIComponent(known.revision):''),undefined,12000);
+      const response=await inkRequest(inkEndpoint()+(known?'?revision='+encodeURIComponent(known.revision):''),undefined,12000,connectionContext);
       let snapshot;
       if(response?.unchanged===true){
         if(!known||response.workspaceId!==known.workspaceId||response.revision!==known.revision)throw new Error('The PC returned an unexpected ink version. Sync again.');
-        snapshot={...known,recoveryWarning:typeof response.recoveryWarning==='string'?response.recoveryWarning.slice(0,500):''};
-      }else snapshot=validateSnapshot(response);
+        snapshot={...known,connectionContext,recoveryWarning:typeof response.recoveryWarning==='string'?response.recoveryWarning.slice(0,500):''};
+      }else snapshot=validateSnapshot(response,connectionContext);
       if(!canSync()||syncEpoch!==epoch||currentStroke||handwritingPending||choicePending)return;
       const localKey=contentKey(doc),remoteKey=contentKey(snapshot.document);lastRemote=snapshot;
       if(localKey===remoteKey){syncConflict=null;forceReview=false;await rememberSync(snapshot,doc);if(currentForSync(epoch,localKey))setSyncState('synced',snapshot.recoveryWarning);return;}
       if(forceReview||syncConflict){conflictWith(snapshot);return;}
+      const priorWorkspace=syncWorkspaceId||syncMetadata?.workspaceId;
+      if(priorWorkspace&&priorWorkspace!==snapshot.workspaceId&&!isEmpty(doc)){conflictWith(snapshot);return;}
       if(syncWorkspaceId===snapshot.workspaceId&&syncBaseKey!==null){
         if(localKey===syncBaseKey){await adoptRemote(snapshot,epoch,localKey);return;}
         if(snapshot.revision===syncRevision||remoteKey===syncBaseKey){await pushDocument(snapshot,epoch);return;}
@@ -184,25 +221,25 @@
         conflictWith(snapshot);return;
       }
       if(isEmpty(doc)){await adoptRemote(snapshot,epoch,localKey);return;}
-      if(isEmpty(snapshot.document)){await pushDocument(snapshot,epoch);return;}
+      if(isEmpty(snapshot.document)){conflictWith(snapshot);return;}
       conflictWith(snapshot);
     } catch(error) {if(canSync()&&syncEpoch===epoch)setSyncState('offline',(error.message||'The companion could not be reached.')+' Your drawing and notes are still on this device.');}
     finally{syncPending=false;renderSyncState();queueSync(syncPhase==='offline'?4000:1200);}
   }
   async function chooseRemote() {
     if(!syncConflict||syncPending||currentStroke||handwritingPending)return;
-    const snapshot=syncConflict;
+    const snapshot=syncConflict,intentEpoch=syncEpoch;
     if(!await confirmInkChoice('Use the PC version?','Your current drawing and notes will be kept as a local recovery copy. The PC version will open here.'))return;
-    if(!canSync()||syncConflict?.workspaceId!==snapshot.workspaceId||syncConflict?.revision!==snapshot.revision||currentStroke||handwritingPending)return;
-    if(!preserveRecovery(doc))return;
+    if(!canSync()||syncEpoch!==intentEpoch||syncConflict?.workspaceId!==snapshot.workspaceId||syncConflict?.revision!==snapshot.revision||currentStroke||handwritingPending)return;
+    if(!await preserveRecovery(doc))return;
     const key=contentKey(doc),epoch=syncEpoch;await adoptRemote(snapshot,epoch,key);renderSyncState();
   }
   async function chooseLocal() {
     if(!syncConflict||syncPending||currentStroke||handwritingPending)return;
-    const snapshot=syncConflict;
+    const snapshot=syncConflict,intentEpoch=syncEpoch;
     if(!await confirmInkChoice('Use this version on the PC?','This replaces the PC drawing and notes with the version shown here. The previous PC version will be kept as a local recovery copy.'))return;
-    if(!canSync()||syncConflict?.workspaceId!==snapshot.workspaceId||syncConflict?.revision!==snapshot.revision||currentStroke||handwritingPending)return;
-    if(!preserveRecovery(snapshot.document))return;
+    if(!canSync()||syncEpoch!==intentEpoch||syncConflict?.workspaceId!==snapshot.workspaceId||syncConflict?.revision!==snapshot.revision||currentStroke||handwritingPending)return;
+    if(!await preserveRecovery(snapshot.document))return;
     syncPending=true;renderSyncState();const epoch=syncEpoch;
     try{await pushDocument(snapshot,epoch);}
     catch(error){setSyncState('conflict',(error.message||'The PC version changed.')+' Nothing was overwritten. Sync again to review the newest PC copy.');}
@@ -210,18 +247,21 @@
   }
   async function restoreRecovery() {
     if(syncPending||currentStroke||handwritingPending)return;
-    let saved;try{const raw=localStorage.getItem(RECOVERY_STORAGE);if(!raw||byteLength(raw)>MAX_BYTES)throw new Error('Invalid saved copy.');saved=normalizeDocument(JSON.parse(raw));}catch{tell('The local recovery copy could not be read.',true);return;}
+    const intentEpoch=syncEpoch;
+    let saved;try{const raw=readStored(storageKeys().recovery);if(!raw||byteLength(raw)>MAX_BYTES)throw new Error('Invalid saved copy.');saved=normalizeDocument(JSON.parse(raw));}catch{tell('The local recovery copy could not be read.',true);return;}
     if(!await confirmInkChoice('Open the local recovery copy?','Your current local view will take its place in recovery. You will choose explicitly before replacing the PC version.'))return;
-    if(currentStroke||handwritingPending)return;if(!preserveRecovery(doc))return;
+    if(syncEpoch!==intentEpoch||currentStroke||handwritingPending)return;if(!await preserveRecovery(doc))return;
     forceReview=true;applyDocument(saved);syncConflict=lastRemote;setSyncState('conflict','Recovery copy opened. Choose explicitly before sharing it to the PC.');queueSync(0);
   }
   function controls() {
     if (!canvas) return;
-    const blocked = !!currentStroke || !!loadError;
+    const localReadOnly=!!notebookLocal&&(window.DeskNotebookStore?.atomicPageWrites!==true||notebookLocal.readOnly);
+    const blocked = !!currentStroke || !!loadError || switchingPage||localReadOnly;
+    if(noteField)noteField.readOnly=localReadOnly||switchingPage;
     undoButton.disabled = blocked || !history.canUndo; redoButton.disabled = blocked || !history.canRedo;
     clearButton.disabled = blocked || doc.strokes.length === 0;
     penButton.setAttribute('aria-pressed',String(tool === 'pen')); eraserButton.setAttribute('aria-pressed',String(tool === 'eraser'));
-    emptyHint.hidden = doc.strokes.length > 0 || !!currentStroke || !!loadError;
+    emptyHint.hidden = doc.strokes.length > 0 || !!currentStroke || !!loadError || !!notebookPage?.background;
     canvas.setAttribute('aria-label',`Drawing canvas. ${doc.strokes.length} strokes. ${doc.penOnly ? 'Fingers are ignored; use a pen or mouse.' : 'Pen, mouse, or one finger can draw.'}`);
     renderSyncState();
   }
@@ -250,11 +290,12 @@
   function resize() {
     if (!canvas || !active) return;
     if(paperNode&&drawingSection){
-      if(fullscreen||document.body.classList.contains('ink-window-mode')){const available=drawingSection.getBoundingClientRect(),fit=fitPaper(available.width,available.height);paperNode.style.width=fit.width+'px';paperNode.style.height=fit.height+'px';}
+      if(fullscreen||document.body.classList.contains('ink-window-mode')){const available=drawingSection.getBoundingClientRect(),fit=fitPaper(available.width,available.height,pageWidth,pageHeight);paperNode.style.width=fit.width+'px';paperNode.style.height=fit.height+'px';}
+      else if(notebookPage?.background){const available=drawingSection.getBoundingClientRect(),fit=fitPaper(available.width,Math.max(180,(window.innerHeight||800)*0.7),pageWidth,pageHeight);paperNode.style.width=fit.width+'px';paperNode.style.height=fit.height+'px';}
       else{paperNode.style.width='';paperNode.style.height='';}
     }
     const rect = canvas.getBoundingClientRect(), ratio = Math.min(window.devicePixelRatio || 1,2);
-    const nextWidth = Math.max(1,Math.min(3200,Math.round(rect.width*ratio))), nextHeight = Math.max(1,Math.round(nextWidth*HEIGHT/WIDTH));
+    const nextWidth = Math.max(1,Math.floor(Math.min(3200,3200*pageWidth/pageHeight,Math.sqrt(8000000*pageWidth/pageHeight),rect.width*ratio))), nextHeight = Math.max(1,Math.min(3200,Math.round(nextWidth*pageHeight/pageWidth)));
     if (canvas.width !== nextWidth || canvas.height !== nextHeight) { if(currentStroke)cancelStroke();canvas.width = nextWidth; canvas.height = nextHeight; }
     scheduleDraw();
   }
@@ -300,6 +341,7 @@
   function cancelStroke() {
     const pointerId = activePointer; currentStroke = null; activePointer = null; activePointerType = '';
     if (pointerId !== null) releasePointer(pointerId);
+    if(panPointer){releasePointer(panPointer.id);panPointer=null;}
     controls(); scheduleDraw();
   }
   function addSample(event) {
@@ -309,7 +351,9 @@
     if (!last || Math.hypot((point[0]-last[0])*WIDTH,(point[1]-last[1])*HEIGHT) >= 0.25 || Math.abs(point[2]-last[2]) > 0.04) currentStroke.points.push(point);
   }
   function beginStroke(event) {
-    if (!active || suspended || loadError || document.hidden || (event.button !== 0 && !(event.pointerType === 'pen' && [2,5].includes(event.button)))) return;
+    if (!active || suspended || loadError || switchingPage || document.hidden || (event.button !== 0 && !(event.pointerType === 'pen' && [2,5].includes(event.button)))) return;
+    if(panMode){if(panPointer||activePointer!==null)return;panPointer={id:event.pointerId,x:event.clientX,y:event.clientY,panX,panY};try{canvas.setPointerCapture(event.pointerId);}catch{}event.preventDefault();return;}
+    if(notebookLocal&&(window.DeskNotebookStore?.atomicPageWrites!==true||notebookLocal.readOnly)){event.preventDefault();return;}
     if (!mayDraw(event.pointerType,doc.penOnly,nearby())) { event.preventDefault(); return; }
     if (activePointer !== null) { if (event.pointerType === 'pen' && activePointerType === 'touch') cancelStroke(); else return; }
     if (doc.strokes.length >= MAX_STROKES || committedPoints >= MAX_POINTS) { tell('This page is full. Export it, then clear the drawing to keep sketching.',true); event.preventDefault(); return; }
@@ -320,6 +364,7 @@
     event.preventDefault(); addSample(event); controls(); scheduleDraw();
   }
   function moveStroke(event) {
+    if(panPointer?.id===event.pointerId){event.preventDefault();setView({zoom,panX:panPointer.panX+event.clientX-panPointer.x,panY:panPointer.panY+event.clientY-panPointer.y,panMode});return;}
     if (activePointer !== event.pointerId || !currentStroke) return;
     event.preventDefault();
     const samples = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [];
@@ -327,6 +372,7 @@
     scheduleDraw();
   }
   function finishStroke(event) {
+    if(panPointer?.id===event.pointerId){event.preventDefault();releasePointer(event.pointerId);panPointer=null;return;}
     if (activePointer !== event.pointerId || !currentStroke) return;
     event.preventDefault(); addSample(event);
     const stroke = currentStroke, pointerId = activePointer; currentStroke = null; activePointer = null; activePointerType = '';
@@ -348,12 +394,14 @@
     loadError = ''; doc = createDocument(); history = createHistory(doc.strokes); committedPoints=0; host.replaceChildren(); mount(); persist(); resize();
   }
   function buildExport() {
-    const ink = document.createElement('canvas'); ink.width = WIDTH; ink.height = HEIGHT;
+    const ink = document.createElement('canvas'); ink.width = pageWidth; ink.height = pageHeight;
     const inkContext = ink.getContext('2d'); if (!inkContext) throw new Error('Canvas export is unavailable.');
-    for (const stroke of doc.strokes) drawStroke(inkContext,stroke,WIDTH,HEIGHT);
-    const exported = document.createElement('canvas'); exported.width = WIDTH; exported.height = HEIGHT;
+    for (const stroke of doc.strokes) drawStroke(inkContext,stroke,pageWidth,pageHeight);
+    const exported = document.createElement('canvas'); exported.width = pageWidth; exported.height = pageHeight;
     const exportContext = exported.getContext('2d'); if (!exportContext) throw new Error('Canvas export is unavailable.');
-    exportContext.fillStyle = '#f6f3e9'; exportContext.fillRect(0,0,WIDTH,HEIGHT); exportContext.drawImage(ink,0,0);
+    exportContext.fillStyle = '#f6f3e9'; exportContext.fillRect(0,0,pageWidth,pageHeight);
+    if(notebookPage?.background){if(backgroundImage?.deskwingFailed)throw new Error('The page background could not be rendered. Your ink and notes remain saved; reconnect or re-import the original PDF into a new notebook.');if(!backgroundImage?.complete||!backgroundImage.naturalWidth)throw new Error('Wait for the PDF page background before exporting.');exportContext.drawImage(backgroundImage,0,0,pageWidth,pageHeight);}
+    exportContext.drawImage(ink,0,0);
     return exported.toDataURL('image/png');
   }
   function download(data, name) {
@@ -378,6 +426,98 @@
       else { noteField.focus(); noteField.select(); tell('Notes selected. Use your keyboard’s Copy command.'); }
     } catch { noteField.focus(); noteField.select(); tell('Notes selected. Use your keyboard’s Copy command.'); }
   }
+  function setView(value={}) {
+    if(currentStroke)cancelStroke();
+    const priorZoom=zoom;
+    zoom=clamp(finite(value.zoom)?value.zoom:zoom,1,4);
+    const bounds=paperNode?.getBoundingClientRect?.(),baseWidth=(bounds?.width||pageWidth)/priorZoom,baseHeight=(bounds?.height||pageHeight)/priorZoom;
+    panX=clamp(finite(value.panX)?value.panX:panX,-baseWidth*(zoom-1)/2,baseWidth*(zoom-1)/2);
+    panY=clamp(finite(value.panY)?value.panY:panY,-baseHeight*(zoom-1)/2,baseHeight*(zoom-1)/2);
+    if(typeof value.panMode==='boolean')panMode=value.panMode;
+    if(zoom===1){panX=0;panY=0;}
+    if(paperNode){paperNode.style.transform=`translate(${panX}px,${panY}px) scale(${zoom})`;paperNode.style.transformOrigin='center center';}
+    drawingSection?.classList.toggle('pen-viewport',zoom>1||panMode);
+    if(canvas)canvas.style.cursor=panMode?'grab':'crosshair';
+    resize();return {zoom,panX,panY,panMode};
+  }
+  async function flushBeforePageSwitch() {
+    if(currentStroke||panPointer||handwritingPending||choicePending||switchingPage)throw new Error('Finish the current stroke or text entry before changing pages.');
+    if(loadError)throw new Error('The local scratchpad needs recovery before changing pages.');
+    if(notebookLocal?.readOnly&&!saveError&&!saveTimer&&!notebookLocal.writer)return true;
+    if(!persist())throw new Error(saveError||'Keep this page open until its local backup is saved.');
+    if(notebookLocal?.writer)await notebookLocal.writer;
+    const deadline=Date.now()+16000;
+    while(syncPending&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,30));
+    if(syncPending)throw new Error('This page is still saving. Try again shortly.');
+    if(canSync()){await syncShared();if(syncConflict||!['synced','local'].includes(syncPhase))throw new Error('Resolve this page’s sharing status before changing pages. Its local backup is kept.');}
+    if(notebookLocal?.writer)await notebookLocal.writer;
+    if(currentStroke||panPointer||handwritingPending||choicePending)throw new Error('Finish editing this page before changing pages.');
+    if(saveTimer)throw new Error('This page has newer notes waiting to save. Try again shortly.');
+    return true;
+  }
+  function resetSyncContext() {
+    syncEpoch++;clearTimeout(syncPollTimer);syncPollTimer=null;syncMetadata=null;syncRevision=null;syncWorkspaceId=null;syncBaseKey=null;syncConflict=null;lastRemote=null;forceReview=false;syncPhase='local';syncMessage='';
+  }
+  function validatePageBackground(value) {
+    if(value){
+      if(value.kind!=='png'||typeof value.image!=='string'||value.image.length>1500000||!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(value.image)||!Number.isInteger(value.width)||!Number.isInteger(value.height)||value.width<1||value.height<1||value.width>2048||value.height>2048||value.width*value.height>4000000)throw new Error('The notebook page background is invalid.');
+    }
+  }
+  function applyPageBackground(value) {
+    validatePageBackground(value);backgroundImage=null;pageWidth=WIDTH;pageHeight=HEIGHT;
+    if(value){
+      pageWidth=value.width;pageHeight=value.height;
+      const current=notebookPage,image=new Image();backgroundImage=image;image.onload=()=>{if(notebookPage===current&&backgroundImage===image)scheduleDraw();};image.onerror=()=>{if(notebookPage===current&&backgroundImage===image){image.deskwingFailed=true;tell('The page background could not be rendered. Your ink is kept; reconnect or export the available notes before editing this page.',true);}};image.src=value.image;
+    }
+    if(paperNode){paperNode.style.aspectRatio=pageWidth+' / '+pageHeight;paperNode.style.backgroundImage=value?'url("'+value.image+'")':'';paperNode.style.backgroundSize='100% 100%';}
+  }
+  async function openNotebookPage(snapshot,selection) {
+    if(!selection||![selection.libraryId,selection.notebookId,selection.pageId].every(id=>typeof id==='string'&&/^[a-f0-9]{32}$/i.test(id)))throw new Error('Choose a valid notebook page.');
+    const remote=validateSnapshot(snapshot,selection.connectionContext),background=snapshot.background||null;
+    validatePageBackground(background);await flushBeforePageSwitch();
+    const generation=pageGeneration;switchingPage=true;controls();
+    try {
+      const local=await loadNotebookLocal(selection);
+      if(!active||suspended||document.hidden||pageGeneration!==generation)throw new Error('The workspace or connection changed before this page could open.');
+      resetSyncContext();pageGeneration++;notebookPage={...selection,background,bound:true};notebookLocal=local;loaded=false;loadError='';saveError='';doc=createDocument();load();
+      if(loadError)throw new Error('This page’s local backup could not be opened. It is kept unchanged.');
+      applyPageBackground(background);setView({zoom:1,panX:0,panY:0,panMode:false});
+      const localKey=contentKey(doc),remoteKey=contentKey(remote.document);
+      if(!notebookWritable()){if(!local?.draft.document){doc=normalizeDocument(remote.document);history=createHistory(doc.strokes);committedPoints=countPoints();}lastRemote=remote;setSyncState('local',local?.storageWarning||'This page is read-only because durable offline storage is unavailable. Export current page or PNG to keep a copy.');}
+      else if(isEmpty(doc)||localKey===remoteKey){applyDocument(remote.document);await rememberSync(remote,doc);setSyncState('synced',remote.recoveryWarning);}
+      else {lastRemote=remote;setSyncState('checking');}
+      if(noteField)noteField.value=doc.notes;cachedStrokes=null;controls();resize();
+      if(notebookLocal?.writer)await notebookLocal.writer;
+      return {notebookId:selection.notebookId,pageId:selection.pageId};
+    } finally {switchingPage=false;controls();queueSync(0);}
+  }
+  async function openLegacyScratchpad() {
+    await flushBeforePageSwitch();switchingPage=true;
+    try{resetSyncContext();pageGeneration++;notebookPage=null;notebookLocal=null;loaded=false;loadError='';saveError='';doc=createDocument();load();applyPageBackground(null);setView({zoom:1,panX:0,panY:0,panMode:false});if(noteField)noteField.value=doc.notes;cachedStrokes=null;controls();resize();}
+    finally{switchingPage=false;controls();queueSync(0);}
+  }
+  async function loadNotebookLocal(selection){
+    const prefix=pageStorageKeys(selection).document;
+    if(!window.DeskNotebookStore)throw new Error('Notebook backup storage did not load. Reopen DeskWing before opening notebook pages. Your original scratchpad is kept.');
+    await window.DeskNotebookStore.ready();const value=await window.DeskNotebookStore.getPage(prefix);
+    if(value.document)normalizeDocument(value.document);if(value.recovery)normalizeDocument(value.recovery);validatePageBackground(value.background);
+    return {prefix,localRevision:value.localRevision,readOnly:value.readOnly===true,storageWarning:value.storageWarning||'',draft:{document:value.document,sync:value.sync,recovery:value.recovery,background:value.background},writer:null,nextPatch:null};
+  }
+  async function openCachedNotebookPage(selection,options={}){
+    if(!selection||![selection.libraryId,selection.notebookId,selection.pageId].every(id=>typeof id==='string'&&/^[a-f0-9]{32}$/i.test(id)))throw new Error('The saved notebook selection is invalid.');
+    if(options.expectedGeneration===undefined)await flushBeforePageSwitch();
+    const generation=pageGeneration;switchingPage=true;controls();
+    try{
+      const source=options.recoveryBundle,local=source?{prefix:pageStorageKeys(selection).document,localRevision:source.localRevision||0,readOnly:true,storageWarning:'Reviewed local recovery copy. Read and export it; save it as a new page to continue editing.',draft:{document:source.document,sync:source.sync||null,recovery:source.recovery||null,background:source.background||null},writer:null,nextPatch:null}:await loadNotebookLocal(selection);
+      if(!local?.draft.document)throw new Error('No complete offline copy of this page is saved. Connect to its PC and open it first.');normalizeDocument(local.draft.document);validatePageBackground(local.draft.background);
+      if(!active||suspended||document.hidden||pageGeneration!==generation||options.guard&&!options.guard())return false;
+      if(options.expectedGeneration!==undefined&&(pageGeneration!==options.expectedGeneration||contentKey(doc)!==options.expectedContent||currentStroke||handwritingPending))return false;
+      resetSyncContext();pageGeneration++;notebookPage={...selection,background:local.draft.background,bound:false};notebookLocal=local;loaded=false;loadError='';saveError='';doc=createDocument();load();applyPageBackground(local.draft.background);setView({zoom:1,panX:0,panY:0,panMode:false});if(noteField)noteField.value=doc.notes;cachedStrokes=null;setSyncState('local','Offline copy kept. Open the notebook library to verify its PC before sharing changes.');controls();resize();return true;}
+    finally{switchingPage=false;controls();}
+  }
+  function bindNotebook(libraryId,connectionContext){if(notebookPage?.libraryId!==libraryId||!notebookWritable())return false;notebookPage={...notebookPage,bound:true,connectionContext};queueSync(0);return true;}
+  function unbindNotebook(){syncEpoch++;pageGeneration++;clearTimeout(syncPollTimer);syncPollTimer=null;legacyConnectionContext=null;if(notebookPage)notebookPage={...notebookPage,bound:false};setSyncState('local','Connection changed. Your local page is kept; verify the PC before sharing.');}
+  function notebookState() {return {page:notebookPage?{...notebookPage}:null,document:normalizeDocument(doc),revision:syncRevision,phase:syncPhase,generation:pageGeneration,storageMode:window.DeskNotebookStore?.mode||'limited-local-storage',localReadOnly:!!notebookLocal&&(window.DeskNotebookStore?.atomicPageWrites!==true||notebookLocal.readOnly),editing:!!(currentStroke||handwritingPending),zoom,panX,panY,panMode,busy:!!(currentStroke||handwritingPending||syncPending||switchingPage),width:pageWidth,height:pageHeight};}
   function writable(target) { return !!target && target.isConnected && !target.disabled && !target.readOnly && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' && ['text','search','url','email','tel'].includes(target.type)) && !target.closest('[hidden]'); }
   async function requestHandwriting(target = focusTarget || noteField) {
     if (handwritingPending || !writable(target)) return false;
@@ -435,12 +575,13 @@
     canvas.addEventListener('pointerdown',()=>{if(fullscreenTools)setFullscreenTools(false);});
     canvas.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();event.shiftKey?redo():undo();}else if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='y'){event.preventDefault();redo();}});
     if (typeof ResizeObserver !== 'undefined') { resizeObserver?.disconnect();resizeObserver=new ResizeObserver(resize);resizeObserver.observe(canvas); }
+    window.DeskNotebookUi?.mount(host);
     controls();
   }
   function setActive(value) {
     const next = value === true || value === 'pen';
     if (next) { load(); active=true; suspended=false; mount(); host.hidden=false; document.body.classList.add('pen-mode'); resize();if(typeof api==='function')setSyncState('checking');queueSync(0); }
-    else { syncEpoch++;clearTimeout(syncPollTimer);syncPollTimer=null;cancelStroke();active=false;setFullscreen(false);persist();if(host)host.hidden=true;document.body.classList.remove('pen-mode'); }
+    else { if(active){pageGeneration++;window.DeskNotebookUi?.suspend();}syncEpoch++;clearTimeout(syncPollTimer);syncPollTimer=null;cancelStroke();active=false;setFullscreen(false);persist();if(host)host.hidden=true;document.body.classList.remove('pen-mode'); }
     return true;
   }
   function suspend() { suspended=true;syncEpoch++;clearTimeout(syncPollTimer);syncPollTimer=null;cancelStroke();setFullscreen(false);persist();penPointers.clear();rejectedTouches.clear();penNearbyUntil=0; }
@@ -478,7 +619,7 @@
       document.addEventListener('pointerdown',event=>{if(focusTarget&&event.target!==handwriteFieldButton&&!event.target.closest('input,textarea')){focusTarget=null;handwriteFieldButton.hidden=true;}},{passive:true});
     }
   }
-  window.DeskPen=Object.freeze({setActive,isActive:()=>active,suspend,resume,requestHandwriting,setFullscreen,isFullscreen:()=>fullscreen,setFullscreenTools,hasFullscreenTools:()=>fullscreenTools,resize,syncNow:syncShared,chooseRemote,chooseLocal,restoreRecovery});
+  window.DeskPen=Object.freeze({setActive,isActive:()=>active,suspend,resume,requestHandwriting,setFullscreen,isFullscreen:()=>fullscreen,setFullscreenTools,hasFullscreenTools:()=>fullscreenTools,resize,syncNow:syncShared,chooseRemote,chooseLocal,restoreRecovery,notebooks:Object.freeze({state:notebookState,open:openNotebookPage,openCached:openCachedNotebookPage,openScratchpad:openLegacyScratchpad,bind:bindNotebook,unbind:unbindNotebook,flush:flushBeforePageSwitch,setView,exportRaster:buildExport})});
   window.setPenMode=async value=>setActive(value);
   document.addEventListener('DOMContentLoaded',initialize,{once:true});
 })();

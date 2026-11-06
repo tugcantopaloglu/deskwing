@@ -35,6 +35,7 @@ public sealed class DesktopPreferences
         if(value is null||value.UsbSerial is null||value.UsbSerial.Length>128||value.UsbSerial.Any(c=>!char.IsAsciiLetterOrDigit(c)&&c is not ('.' or '_' or ':' or '-')))throw new ArgumentException("Enter the tablet serial shown by ADB, using letters, numbers, dots, underscores, colons or hyphens.");
     }
     private const string RunKey=@"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string StartupName="DeskWing",LegacyStartupName="TabletDeckStudio";
     internal static string StartupCommand(string executable)
     {
         if(!Path.IsPathFullyQualified(executable)||executable.Contains('"'))throw new ArgumentException("Invalid companion executable path.");
@@ -44,12 +45,19 @@ public sealed class DesktopPreferences
     }
     public static bool StartsWithWindows()
     {
-        using var key=Registry.CurrentUser.OpenSubKey(RunKey);return key?.GetValue("TabletDeckStudio") as string==StartupCommand(Environment.ProcessPath!);
+        using var key=Registry.CurrentUser.OpenSubKey(RunKey);return StartupOwned(key?.GetValue(StartupName) as string,Environment.ProcessPath!)||StartupOwned(key?.GetValue(LegacyStartupName) as string,Environment.ProcessPath!);
+    }
+    internal static bool StartupOwned(string? command,string executable)
+    {
+        if(command==StartupCommand(executable))return true;
+        return Path.GetFileName(executable)=="DeskWing-Companion.exe"&&command==StartupCommand(Path.Combine(Path.GetDirectoryName(executable)!,"TabletDeck-Companion.exe"));
     }
     public static void SetStartup(bool enabled)
     {
         using var key=Registry.CurrentUser.CreateSubKey(RunKey);
-        if(enabled)key.SetValue("TabletDeckStudio",StartupCommand(Environment.ProcessPath!),RegistryValueKind.String);
-        else key.DeleteValue("TabletDeckStudio",false);
+        var executable=Environment.ProcessPath!;var currentValue=key.GetValue(StartupName);var current=currentValue as string;
+        if(enabled){if(currentValue is not null&&!StartupOwned(current,executable))throw new IOException("An unrelated startup entry already uses the DeskWing name. Review Windows startup settings first.");key.SetValue(StartupName,StartupCommand(executable),RegistryValueKind.String);}
+        else if(StartupOwned(current,executable))key.DeleteValue(StartupName,false);
+        if(StartupOwned(key.GetValue(LegacyStartupName) as string,executable))key.DeleteValue(LegacyStartupName,false);
     }
 }

@@ -1,0 +1,178 @@
+name: Prepare iOS beta
+
+on:
+  push:
+    branches:
+      - codex/workspace-expansion
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Validate without secrets, or export a signed IPA without uploading
+        type: choice
+        options: [unsigned-validation, signed-archive]
+        default: unsigned-validation
+        required: true
+      build_number:
+        description: Positive build number, greater than any previously uploaded build
+        type: string
+        default: '18'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-ios-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-request:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Keep signing on the reviewed main branch
+        shell: bash
+        env:
+          BETA_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          python3 scripts/beta-ios.py request --event "$GITHUB_EVENT_NAME" --ref "$GITHUB_REF" --mode "$BETA_MODE"
+  validate:
+    needs: validate-request
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/codex/workspace-expansion') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'unsigned-validation')
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Prepare the unsigned project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          python3 scripts/beta-ios.py icon
+          python3 tests/beta-ios-policy.py
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+          python3 ios/sync-assets.py
+          (cd ios && xcodegen generate)
+      - name: Build a generic unsigned iOS archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/DeskWing.xcodeproj -scheme DeskWing -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/DeskWing-unsigned.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/DeskWingDerivedData" CODE_SIGNING_ALLOWED=NO archive
+          echo 'Unsigned archive validation passed. This job creates no installable IPA and uploads nothing.' >> "$GITHUB_STEP_SUMMARY"
+
+  signed-archive:
+    needs: validate-request
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'signed-archive' && github.ref == 'refs/heads/main'
+    environment: ios-beta
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+      IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+      BETA_BUILD_NUMBER: ${{ inputs.build_number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Validate signing inputs and prepare the project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          python3 scripts/beta-ios.py inputs --team "$IOS_TEAM_ID" --bundle "$IOS_BUNDLE_ID" --build "$BETA_BUILD_NUMBER"
+          python3 scripts/beta-ios.py icon
+          python3 tests/beta-ios-policy.py
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+          python3 ios/sync-assets.py
+          (cd ios && xcodegen generate)
+          mkdir -p "$RUNNER_TEMP/deskwing-ios-signing"
+          chmod 700 "$RUNNER_TEMP/deskwing-ios-signing"
+      - name: Install temporary signing material
+        shell: bash
+        env:
+          IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          IOS_APP_STORE_PROFILE_BASE64: ${{ secrets.IOS_APP_STORE_PROFILE_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          signing="$RUNNER_TEMP/deskwing-ios-signing"
+          keychain="$signing/signing.keychain-db"
+          python3 scripts/beta-ios.py decode --directory "$signing"
+          unset IOS_DISTRIBUTION_P12_BASE64 IOS_APP_STORE_PROFILE_BASE64
+          keychain_password=$(openssl rand -hex 32)
+          echo "::add-mask::$keychain_password"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$signing/distribution.p12" -P "$IOS_DISTRIBUTION_P12_PASSWORD" -t cert -f pkcs12 -k "$keychain" -T /usr/bin/codesign -T /usr/bin/security
+          unset IOS_DISTRIBUTION_P12_PASSWORD
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain"
+          security cms -D -i "$signing/distribution.mobileprovision" -o "$signing/profile.plist"
+          python3 scripts/beta-ios.py profile --profile "$signing/profile.plist" --options "$signing/ExportOptions.plist" \
+            --keychain "$keychain" --team "$IOS_TEAM_ID" --bundle "$IOS_BUNDLE_ID" --build "$BETA_BUILD_NUMBER"
+      - name: Install the validated provisioning profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          signing="$RUNNER_TEMP/deskwing-ios-signing"
+          DESKWING_PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :provisioningProfiles:$IOS_BUNDLE_ID" "$signing/ExportOptions.plist")
+          [[ "$DESKWING_PROFILE_UUID" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]
+          profiles="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$profiles"
+          cp "$RUNNER_TEMP/deskwing-ios-signing/distribution.mobileprovision" "$profiles/$DESKWING_PROFILE_UUID.mobileprovision"
+      - name: Archive and export an IPA without uploading
+        shell: bash
+        run: |
+          set -euo pipefail
+          signing="$RUNNER_TEMP/deskwing-ios-signing"
+          DESKWING_PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :provisioningProfiles:$IOS_BUNDLE_ID" "$signing/ExportOptions.plist")
+          DESKWING_SIGNING_IDENTITY=$(/usr/libexec/PlistBuddy -c 'Print :signingCertificate' "$signing/ExportOptions.plist")
+          [[ "$DESKWING_PROFILE_UUID" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ && "$DESKWING_SIGNING_IDENTITY" =~ ^[0-9A-Fa-f]{40}$ ]]
+          xcodebuild -project ios/DeskWing.xcodeproj -scheme DeskWing -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/DeskWing.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/DeskWingDerivedData" \
+            CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM="$IOS_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
+            CURRENT_PROJECT_VERSION="$BETA_BUILD_NUMBER" CODE_SIGN_IDENTITY="$DESKWING_SIGNING_IDENTITY" \
+            PROVISIONING_PROFILE_SPECIFIER="$DESKWING_PROFILE_UUID" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $signing/signing.keychain-db" archive
+          codesign --verify --deep --strict "$RUNNER_TEMP/DeskWing.xcarchive/Products/Applications/DeskWing.app"
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/DeskWing.xcarchive" \
+            -exportOptionsPlist "$signing/ExportOptions.plist" -exportPath "$RUNNER_TEMP/DeskWingExport"
+          python3 scripts/beta-ios.py stage --export "$RUNNER_TEMP/DeskWingExport" --artifacts "$RUNNER_TEMP/DeskWingBeta" \
+            --team "$IOS_TEAM_ID" --bundle "$IOS_BUNDLE_ID" --build "$BETA_BUILD_NUMBER"
+          echo 'Signed IPA exported for owner review. Nothing was uploaded to TestFlight or the App Store.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain the IPA and checksum manifest only
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: DeskWing-iOS-beta-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/DeskWingBeta/DeskWing.ipa
+            ${{ runner.temp }}/DeskWingBeta/beta-manifest.json
+            ${{ runner.temp }}/DeskWingBeta/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove temporary signing material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          signing="$RUNNER_TEMP/deskwing-ios-signing"
+          DESKWING_PROFILE_UUID=''
+          if [[ -f "$signing/ExportOptions.plist" ]]; then
+            DESKWING_PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :provisioningProfiles:$IOS_BUNDLE_ID" "$signing/ExportOptions.plist" 2>/dev/null || true)
+          fi
+          if [[ -f "$signing/signing.keychain-db" ]]; then security delete-keychain "$signing/signing.keychain-db" || true; fi
+          if [[ "${DESKWING_PROFILE_UUID:-}" =~ ^[0-9A-Fa-f-]{36}$ ]]; then
+            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$DESKWING_PROFILE_UUID.mobileprovision"
+          fi
+          if [[ "$signing" == "$RUNNER_TEMP/deskwing-ios-signing" ]]; then rm -rf "$signing"; fi

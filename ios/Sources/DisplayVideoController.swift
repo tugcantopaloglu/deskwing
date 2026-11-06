@@ -180,6 +180,10 @@ final class DisplayVideoController: UIViewController {
     private let close: (String) -> Void
     private let displayLayer = AVSampleBufferDisplayLayer()
     private let status = UILabel()
+    private let inputModes=UISegmentedControl(items:DisplayNativeInputMode.allCases.map(\.title))
+    private let inputStatus=UILabel()
+    private var inputController: DisplayInputController?
+    private var inputSurface: DisplayInputSurface?
     private let builder: DisplaySampleBuilder
     private var displayLink: CADisplayLink?
     private var ended = false
@@ -200,9 +204,23 @@ final class DisplayVideoController: UIViewController {
     required init?(coder: NSCoder) { return nil }
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
+    func configureInput(pc: PairedPC, videoLease: String) {
+        guard !isViewLoaded, inputController == nil else { return }
+        inputController=DisplayInputController(pc:pc,videoLease:videoLease,format:format) { [weak self] mode,message in
+            guard let self, !self.ended else { return }
+            self.inputSurface?.mode=mode
+            self.inputModes.selectedSegmentIndex=DisplayNativeInputMode.allCases.firstIndex(of:mode) ?? 0
+            self.inputStatus.text=message
+        }
+    }
     override func viewDidLoad() {
         super.viewDidLoad(); view.backgroundColor = .black
         displayLayer.videoGravity = .resizeAspect; displayLayer.preventsCapture = true; view.layer.addSublayer(displayLayer)
+        if inputController != nil {
+            let surface=DisplayInputSurface(imageSize:CGSize(width:CGFloat(format.width),height:CGFloat(format.height))); surface.translatesAutoresizingMaskIntoConstraints=false
+            surface.send={ [weak self] sample in self?.inputController?.offer(sample) }; inputSurface=surface; view.addSubview(surface)
+            NSLayoutConstraint.activate([surface.leadingAnchor.constraint(equalTo:view.leadingAnchor),surface.trailingAnchor.constraint(equalTo:view.trailingAnchor),surface.topAnchor.constraint(equalTo:view.topAnchor),surface.bottomAnchor.constraint(equalTo:view.bottomAnchor)])
+        }
         let exit = UIButton(type: .system); exit.setTitle("Exit display", for: .normal)
         exit.backgroundColor = UIColor(white: 0.12, alpha: 0.95); exit.tintColor = .white; exit.layer.cornerRadius = 12
         exit.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold); exit.translatesAutoresizingMaskIntoConstraints = false
@@ -219,6 +237,27 @@ final class DisplayVideoController: UIViewController {
             status.topAnchor.constraint(equalTo: exit.bottomAnchor, constant: 8),
             status.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12)
         ])
+        if inputController != nil {
+            inputModes.selectedSegmentIndex=0; inputModes.isEnabled=false; inputModes.translatesAutoresizingMaskIntoConstraints=false
+            inputModes.backgroundColor=UIColor(white:0.10,alpha:0.95); inputModes.selectedSegmentTintColor=UIColor(white:0.38,alpha:1)
+            inputModes.setTitleTextAttributes([.foregroundColor:UIColor.white],for:.normal)
+            inputModes.accessibilityLabel="Shared display input mode"
+            inputModes.accessibilityHint="View sends no input. Pen accepts Apple Pencil and ignores fingers. Touch uses one finger as a Windows pen. PC input permission is required."
+            inputModes.addTarget(self,action:#selector(inputModeChanged),for:.valueChanged)
+            inputStatus.text="Viewing only · PC input is off"; inputStatus.numberOfLines=2
+            inputStatus.font = .systemFont(ofSize:12); inputStatus.textColor = .white
+            inputStatus.backgroundColor=UIColor(white:0.08,alpha:0.9); inputStatus.translatesAutoresizingMaskIntoConstraints=false
+            view.addSubview(inputModes); view.addSubview(inputStatus)
+            NSLayoutConstraint.activate([
+                inputModes.leadingAnchor.constraint(equalTo:view.safeAreaLayoutGuide.leadingAnchor,constant:12),
+                inputModes.topAnchor.constraint(equalTo:status.bottomAnchor,constant:8),
+                inputModes.widthAnchor.constraint(lessThanOrEqualToConstant:260), inputModes.heightAnchor.constraint(greaterThanOrEqualToConstant:44),
+                inputModes.trailingAnchor.constraint(lessThanOrEqualTo:view.safeAreaLayoutGuide.trailingAnchor,constant:-12),
+                inputStatus.leadingAnchor.constraint(equalTo:inputModes.leadingAnchor),
+                inputStatus.topAnchor.constraint(equalTo:inputModes.bottomAnchor,constant:4),
+                inputStatus.trailingAnchor.constraint(lessThanOrEqualTo:view.safeAreaLayoutGuide.trailingAnchor,constant:-12)
+            ])
+        }
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
         let target = Float(format.refreshRate)
         link.preferredFrameRateRange = CAFrameRateRange(minimum: target, maximum: target, preferred: target)
@@ -226,6 +265,10 @@ final class DisplayVideoController: UIViewController {
     }
     override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); displayLayer.frame = view.bounds }
     @objc private func exitPressed() { close("closed") }
+    @objc private func inputModeChanged() {
+        guard !ended, inputModes.isEnabled, DisplayNativeInputMode.allCases.indices.contains(inputModes.selectedSegmentIndex) else { return }
+        inputController?.choose(DisplayNativeInputMode.allCases[inputModes.selectedSegmentIndex])
+    }
     @objc private func tick(_ link: CADisplayLink) {
         guard !ended else { return }
         keyframeDeadline.begin(at: link.timestamp)
@@ -254,6 +297,10 @@ final class DisplayVideoController: UIViewController {
             if displayLayer.status == .failed { throw DeskError.message("The tablet could not decode this video. Start the display again.") }
             try keyframeDeadline.check(at: link.timestamp)
         } catch { close(error.localizedDescription); return }
+        let visible: Bool
+        if #available(iOS 17.4, *) { visible=displayLayer.isReadyForDisplay }
+        else { visible=displayLayer.status == .rendering }
+        inputModes.isEnabled=keyframeDeadline.receivedKeyframe && !keyframeDeadline.recovering && visible
         if reportedAt == 0 { reportedAt = link.timestamp }
         let elapsed = link.timestamp - reportedAt
         if elapsed >= 1 {
@@ -271,10 +318,12 @@ final class DisplayVideoController: UIViewController {
     private func beginRecovery(at now: CFTimeInterval) {
         // Preserve the last image during this bounded same-session recovery. A flush still
         // requires a fresh IDR; stop/revocation removes the retained image immediately below.
+        inputController?.choose(.view); inputModes.isEnabled=false
         displayLayer.flush(); builder.reset(); keyframeDeadline.wait(at: now)
     }
     func stop() {
         guard !ended else { return }; ended = true; inbox.stop(); displayLink?.invalidate(); displayLink = nil
+        inputSurface?.cancelContact(); inputController?.stop(); inputController=nil
         displayLayer.flushAndRemoveImage(); builder.reset()
     }
     deinit { displayLink?.invalidate() }

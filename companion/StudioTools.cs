@@ -46,7 +46,7 @@ public static class StudioTools
         if(!await pickerGate.WaitAsync(0))throw new InvalidOperationException("A file chooser is already open. Finish it before choosing another file.");
         try{
             var result=new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var thread=new Thread(()=>{try{using var dialog=new Forms.OpenFileDialog{Title=kind=="app"?"Choose a Windows app":"Choose a sound",Filter=kind=="app"?"Windows apps (*.exe;*.lnk)|*.exe;*.lnk":"Audio files (*.wav;*.mp3;*.wma)|*.wav;*.mp3;*.wma",CheckFileExists=true,Multiselect=false,RestoreDirectory=true};result.TrySetResult(dialog.ShowDialog()==Forms.DialogResult.OK?dialog.FileName:null);}catch(Exception ex){result.TrySetException(ex);}}){IsBackground=true,Name="Tablet Deck file chooser"};
+            var thread=new Thread(()=>{try{using var dialog=new Forms.OpenFileDialog{Title=kind=="app"?"Choose a Windows app":"Choose a sound",Filter=kind=="app"?"Windows apps (*.exe;*.lnk)|*.exe;*.lnk":"Audio files (*.wav;*.mp3;*.wma)|*.wav;*.mp3;*.wma",CheckFileExists=true,Multiselect=false,RestoreDirectory=true};result.TrySetResult(dialog.ShowDialog()==Forms.DialogResult.OK?dialog.FileName:null);}catch(Exception ex){result.TrySetException(ex);}}){IsBackground=true,Name="DeskWing file chooser"};
             thread.SetApartmentState(ApartmentState.STA);thread.Start();return await result.Task;
         }finally{pickerGate.Release();}
     }

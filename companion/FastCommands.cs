@@ -13,10 +13,11 @@ internal sealed class FastCommands(DataStore store,DeckEngine engine,HoldKeys ho
     private int keyboardActions;
     private int activeControls;
     private WindowsPen? pen;
-    private bool PenActive=>pen?.Active==true;
+    private DisplayInput? displayInput;
+    private bool PenActive=>pen?.Active==true||displayInput?.Active==true;
     public bool Maintenance{get{lock(configurationGate)return maintenance;}}
     public bool CanUpdateTablet{get{lock(configurationGate)return !maintenance&&activeControls==0&&engine.Execution.Status.Active is null&&!holds.Active&&!PenActive&&!profileLocks.Any(p=>p.Key!="admin"&&p.Value>DateTimeOffset.UtcNow);}}
-    public void BeginMaintenance(){lock(configurationGate){if(activeControls>0||engine.Execution.Status.Active is not null||holds.Active||PenActive)throw new InvalidOperationException("Finish the running action, release held keys, and stop Pen tablet before installing.");pen?.CancelAll("The companion is restarting for an update.");maintenance=true;}}
+    public void BeginMaintenance(){lock(configurationGate){if(activeControls>0||engine.Execution.Status.Active is not null||holds.Active||PenActive)throw new InvalidOperationException("Finish the running action, release held keys, and stop tablet input before installing.");pen?.CancelAll("The companion is restarting for an update.");maintenance=true;}}
     public void EndMaintenance(){lock(configurationGate){if(!shuttingDown)maintenance=false;}}
     public void BeginShutdown()
     {
@@ -25,7 +26,7 @@ internal sealed class FastCommands(DataStore store,DeckEngine engine,HoldKeys ho
             // while the HTTP host waits for its graceful shutdown period.
             shuttingDown=true;maintenance=true;
             try{var active=engine.Execution.Status.Active;if(active is not null)engine.Execution.Cancel(active.Id);}
-            finally{try{pen?.Configure(new(false));}finally{holds.ReleaseAll();}}
+            finally{try{try{pen?.Configure(new(false));}finally{displayInput?.Shutdown();}}finally{holds.ReleaseAll();}}
         }
     }
     public void ProfileLock(string principal,bool active){lock(configurationGate){foreach(var key in profileLocks.Where(p=>p.Value<DateTimeOffset.UtcNow).Select(p=>p.Key).ToArray())profileLocks.Remove(key);if(active)profileLocks[principal]=DateTimeOffset.UtcNow.AddSeconds(12);else profileLocks.Remove(principal);}}
@@ -35,11 +36,27 @@ internal sealed class FastCommands(DataStore store,DeckEngine engine,HoldKeys ho
     internal sealed record HoldLease(string Lease,int ExpiresIn=3);
     public void Release(string principal,string lease)=>holds.Release(principal,lease);
     public void ConfigurePen(WindowsPen service){lock(configurationGate){if(pen is not null)throw new InvalidOperationException("The pen service is already configured.");pen=service;}}
+    public void ConfigureDisplayInput(DisplayInput service){lock(configurationGate){if(displayInput is not null)throw new InvalidOperationException("Display input is already configured.");displayInput=service;}}
     public void ReleasePen(string principal,string lease)=>pen?.Release(principal,lease);
     public void RevokePen(string principal)=>pen?.ReleaseOwner(principal);
     public PenStatus ConfigurePenSettings(PenSettings settings)
     {
         lock(configurationGate){if(settings.Enabled)RequireAvailable();return (pen??throw new InvalidOperationException("PC pen input is unavailable.")).Configure(settings);}
+    }
+    public DisplayInputStatus ConfigureDisplayInputSettings(DisplayInputSettings settings)
+    {
+        lock(configurationGate){if(settings.Enabled)RequireAvailable();return (displayInput??throw new InvalidOperationException("Second display input is unavailable.")).Configure(settings);}
+    }
+    public object ExecuteDisplayInput(DisplayInputRequest request,string principal)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock(configurationGate){
+            var service=displayInput??throw new InvalidOperationException("Second display input is unavailable.");
+            if(request.Operation is "end" or "cancel")return service.Execute(request,principal);
+            RequireAvailable();
+            if(request.Operation=="begin"&&(engine.Execution.Status.Active is not null||keyboardActions>0||holds.Active||pen?.Active==true))throw new InvalidOperationException("Finish the current action, release held keys and stop Pen tablet before starting Second display input.");
+            return service.Execute(request,principal);
+        }
     }
     public object Pen(PenRequest request,string principal)
     {
@@ -49,7 +66,7 @@ internal sealed class FastCommands(DataStore store,DeckEngine engine,HoldKeys ho
             // Releasing a pointer must remain possible during shutdown/update recovery.
             if(request.Operation is "end" or "cancel")return service.Execute(request,principal);
             RequireAvailable();
-            if(request.Operation=="begin"&&(engine.Execution.Status.Active is not null||keyboardActions>0||holds.Active))throw new InvalidOperationException("Finish the current action and release held keys before starting Pen tablet.");
+            if(request.Operation=="begin"&&(engine.Execution.Status.Active is not null||keyboardActions>0||holds.Active||displayInput?.Active==true))throw new InvalidOperationException("Finish the current action, release held keys and stop Second display input before starting Pen tablet.");
             return service.Execute(request,principal);
         }
     }
@@ -59,7 +76,7 @@ internal sealed class FastCommands(DataStore store,DeckEngine engine,HoldKeys ho
     {
         RequireAvailable();
         var keyboard=UsesKeyboard(action);
-        if(PenActive&&action.Kind is "hotkey" or "holdHotkey" or "macro" or "app" or "url")throw new InvalidOperationException("Stop Pen tablet before running keyboard shortcuts, macros, or opening Windows apps.");
+        if(PenActive&&action.Kind is "hotkey" or "holdHotkey" or "macro" or "app" or "url")throw new InvalidOperationException("Stop tablet input before running keyboard shortcuts, macros, or opening Windows apps.");
         if(keyboard&&holds.Active)throw new InvalidOperationException("Release held keys before using a keyboard shortcut or a macro that contains one.");
         if(engine.Execution.Status.Active is not null)throw new InvalidOperationException("An action is still running. Wait for it to finish or cancel it.");
         if(keyboard)keyboardActions++;

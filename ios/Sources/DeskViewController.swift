@@ -22,6 +22,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
     private var currentPenLease: String?
     private weak var handwriting: PenInputController?
     private weak var provider: SFSafariViewController?
+    private var notebookDocuments: NotebookPdfImporter?
     private var startupWarning: String?
     private var fullscreenEnabled = false
     private var insetWebConstraints: [NSLayoutConstraint] = []
@@ -56,6 +57,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
             configuration.userContentController.addUserScript(WKUserScript(source: adapter, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         }
         web = WKWebView(frame: .zero, configuration: configuration); web.navigationDelegate = self; web.uiDelegate = self
+        notebookDocuments = NotebookPdfImporter(host: self, scope: { [weak self] in self?.generation ?? -1 }, foreground: { [weak self] in self?.foreground == true })
         web.isOpaque = false; web.backgroundColor = view.backgroundColor; web.scrollView.backgroundColor = view.backgroundColor
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.allowsLinkPreview = false; web.translatesAutoresizingMaskIntoConstraints = false
@@ -88,8 +90,11 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         guard !requests.contains(id) else { return }
         guard requests.count < 32 else { sendDirect(id, ["error":"Too many pending requests. Wait for the PC, then try again."]); return }
         guard let ticket = requests.begin(id) else { return }
+        let notebookScope: NotebookPCRequestScope
+        do { notebookScope = try NotebookPCRequestScope(path: path, expectedPairingID: request["expectedPairingId"], currentPairingID: pc?.pairingID) }
+        catch { fail(id, ticket: ticket, error.localizedDescription); return }
         let body = request["body"] as? [String: Any] ?? [:]
-        guard method == "GET" || method == "POST", bytes.count <= HostPolicy.maximumBridgeBytes(path) else {
+        guard method == "GET" || method == "POST", bytes.count <= HostPolicy.maximumBridgeBytes(path, method: method) else {
             fail(id, ticket: ticket, "This request is invalid or too large."); return
         }
         if path.hasPrefix("/native/") || path.hasPrefix("/local/") {
@@ -106,8 +111,14 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         }
         let epoch = generation
         do {
-            try client.send(path: path, method: method, body: body) { [weak self] result in
+            _ = try notebookScope.perform(currentPairingID: pc?.pairingID) {
+            try client.send(path: path, method: method, body: body, beforeCommit: { [weak self] in
+                guard let self else { throw DeskError.message("The notebook host closed before sending.") }
+                try notebookScope.requireCurrent(self.pc?.pairingID)
+            }) { [weak self] result in
                 guard let self else { return }
+                do { try notebookScope.requireCurrent(self.pc?.pairingID) }
+                catch { self.fail(id, ticket: ticket, error.localizedDescription); return }
                 guard epoch == self.generation || HostPolicy.allowedInBackground(path, body: body) else {
                     // A begin response can arrive after suspension. Release that exact old-PC lease instead of retaining it.
                     if case .success(let response) = result, let lease = response["lease"] as? String,
@@ -132,6 +143,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
                     self.complete(id, ticket: ticket, response)
                 case .failure(let error): self.fail(id, ticket: ticket, error.localizedDescription)
                 }
+            }
             }
         } catch { fail(id, ticket: ticket, error.localizedDescription) }
     }
@@ -186,16 +198,26 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
             return
         }
         guard foreground else { fail(id, ticket: ticket, "Open DeskWing before using this tool."); return }
+        if NotebookPdfImporter.allowed(path) {
+            stopNativeDisplay(reason: "Display stopped when notebook files opened.")
+            stopPenFrames(); setFullscreen(false, reason: "tool")
+            guard let notebookDocuments else { fail(id, ticket: ticket, "Notebook files are unavailable. Reopen DeskWing and try again."); return }
+            notebookDocuments.request(path: path, body: body) { [weak self] result in self?.complete(id, ticket: ticket, result) }
+            return
+        }
         do {
             switch path {
             case "/local/display/capabilities": try displayCapabilities(id, ticket: ticket, body: body)
             case "/local/display/start": try startNativeDisplay(id, ticket: ticket, body: body)
             case "/native/pair": try pair(id, ticket: ticket, body: body)
             case "/native/forget":
-                try PairingStore.forget(); retireClient(); pc = nil; complete(id, ticket: ticket, connection())
+                try PairingStore.forget(); retireClient(); pc = nil; connectionChanged(reason: "forget"); complete(id, ticket: ticket, connection())
             case "/native/transport":
                 guard body["mode"] as? String == "wifi" else { throw DeskError.message("iOS connects to your PC over Wi-Fi/LAN. Android's USB tunnel is not supported on iOS.") }
                 guard let current = pc, body["host"] as? String == current.host else { throw DeskError.message("Pair again to verify a different PC address.") }
+                var saved = current; saved.pairingID = UUID().uuidString
+                try PairingStore.save(saved); retireClient(); pc = saved; client = makeClient(saved)
+                connectionChanged(reason: "transport")
                 complete(id, ticket: ticket, connection())
             case "/native/scan": throw DeskError.message("Use manual pairing on iOS: enter the PC address, certificate code, and PIN.")
             case "/local/handwriting": try showHandwriting(id, ticket: ticket, body: body)
@@ -234,6 +256,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
                     }
                     let saved = PairedPC(host: host, port: port, controlPort: controlPort, fingerprint: fingerprint, token: token, pairingID: UUID().uuidString)
                     try PairingStore.save(saved); self.retireClient(); self.pc = saved; self.client = self.makeClient(saved)
+                    self.connectionChanged(reason: "pairing")
                     self.complete(id, ticket: ticket, self.connection())
                 } catch { self.fail(id, ticket: ticket, error.localizedDescription) }
             }
@@ -243,8 +266,15 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         stopNativeDisplay(reason: "The paired PC changed. Start the display again after connecting.")
         setFullscreen(false, reason: "disconnect")
         generation += 1; releaseInputLeases()
+        notebookDocuments?.reset(reason: "The PC connection changed while the notebook tool was open.")
         let old = client; old?.cancelPending(keepingReleases: true); client = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { old?.invalidate() }
+    }
+    private func connectionChanged(reason: String) {
+        guard HostPolicy.trustedPage(web?.url),
+              let data = try? JSONSerialization.data(withJSONObject: ["reason":reason, "generation":String(generation)]),
+              let json = String(data: data, encoding: .utf8) else { return }
+        web.evaluateJavaScript("window.dispatchEvent(new CustomEvent('deskwing-connection-changed',{detail:\(json)}));", completionHandler: nil)
     }
     private func releaseInputLeases() {
         stopPenFrames()
@@ -258,6 +288,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         setFullscreen(false, reason: "background")
         UIApplication.shared.isIdleTimerDisabled = false
         foreground = false; generation += 1; pairingClient?.invalidate(); pairingClient = nil
+        notebookDocuments?.pause()
         releaseInputLeases(); client?.cancelPending(keepingReleases: true); handwriting?.cancel()
         web?.evaluateJavaScript("if(typeof releaseDeckHold==='function')releaseDeckHold();if(window.penTabletSuspend)window.penTabletSuspend();if(window.monitorSuspend)window.monitorSuspend();if(window.penSuspend)window.penSuspend();if(window.deckStreamClosed)window.deckStreamClosed();", completionHandler: nil)
     }
@@ -330,7 +361,8 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         }
     }
     private func startNativeDisplay(_ id: Int, ticket: UUID, body: [String: Any]) throws {
-        guard Set(body.keys) == ["refreshMode", "session"], let pc, presentedViewController == nil,
+        let quality=try DisplayQualityOptions.parse(body)
+        guard let pc, presentedViewController == nil,
               nativeDisplay == nil, pendingDisplayID == nil else { throw DeskError.message("Close the open display or tool and connect to the PC before starting.") }
         let session = try DisplayVideoPolicy.session(body["session"])
         guard !usedDisplayIDs.contains(session) else { throw DeskError.message("Use a fresh display session after stopping.") }
@@ -351,7 +383,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
             do {
                 let rate = try DisplayVideoPolicy.refresh(body["refreshMode"], maximum: maximum, current: measured)
                 self.releaseInputLeases(); self.setFullscreen(false, reason: "tool")
-                let display = NativeDisplaySession(id: session, pc: pc, refresh: rate, measuredRefresh: measured) { [weak self] endedID, reason in
+                let display = NativeDisplaySession(id: session, pc: pc, refresh: rate, measuredRefresh: measured, qualityPreset:quality.preset, adaptiveQuality:quality.adaptive) { [weak self] endedID, reason in
                     guard let self else { return }
                     if self.nativeDisplay?.id == endedID { self.nativeDisplay = nil; self.displayIntent += 1 }
                     self.displayEnded(endedID, reason: reason)
@@ -428,6 +460,7 @@ final class DeskViewController: UIViewController, WKNavigationDelegate, WKUIDele
         stopNativeDisplay(reason: "Display stopped when the page changed.")
         setFullscreen(false, reason: reason)
         generation += 1; requests.reset(); handwriting?.cancel(); provider?.dismiss(animated: false)
+        notebookDocuments?.reset(reason: "The notebook tool closed when its page changed.")
         pairingClient?.invalidate(); pairingClient = nil
         releaseInputLeases(); client?.cancelPending(keepingReleases: true)
     }

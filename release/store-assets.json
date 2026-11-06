@@ -1,0 +1,21 @@
+{
+  "artwork": "Original DeskWing project artwork; platform masking is applied by the operating system.",
+  "sourceSha256": "3615913cfc0265cdeab765cabd739af9db95923349962f1a4acb86cc1a9976a3",
+  "source": "assets/app-icon.svg",
+  "files": [
+    {
+      "sha256": "78198f9a9ccfb2c16b9b5fb5cd89fd9bfe90853156661b4639fadccba12cb02d",
+      "width": 1024,
+      "path": "store-assets/deskwing-app-store-1024.png",
+      "alpha": false,
+      "height": 1024
+    },
+    {
+      "sha256": "c1a5e379cbf74aeebbb38a2810d918e14cbfb028b6f034564896187ce3d4acaf",
+      "width": 512,
+      "path": "store-assets/deskwing-play-512.png",
+      "alpha": false,
+      "height": 512
+    }
+  ]
+}

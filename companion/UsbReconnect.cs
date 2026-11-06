@@ -30,7 +30,7 @@ public sealed class UsbReconnect(DesktopPreferences preferences,int port,int con
         var tunnels=await Run(adb,["-s",selected,"reverse","--list"]);
         foreach(var target in new[]{port,controlPort})if(!tunnels.Split('\n').Any(line=>line.Split((char[]?)null,StringSplitOptions.RemoveEmptyEntries) is var parts&&parts.Length>=3&&parts[^2]=="tcp:"+target&&parts[^1]=="tcp:"+target))await Run(adb,["-s",selected,"reverse","tcp:"+target,"tcp:"+target]);
         if(checkedSerial!=selected||(DateTime.UtcNow-checkedAt).TotalSeconds>30){installed=(await Run(adb,["-s",selected,"shell","pm","path","app.tabletdeck.studio"])).Contains("package:",StringComparison.Ordinal);checkedSerial=selected;checkedAt=DateTime.UtcNow;}
-        Volatile.Write(ref status,"USB tunnels ready. "+(installed?"Tablet Deck is installed; open it on the tablet and select USB.":"Tablet Deck is not installed; run Install-APK.cmd from the Windows package.")+" Tunnels checked every 5 seconds; app detection every 30 seconds.");
+        Volatile.Write(ref status,"USB tunnels ready. "+(installed?"DeskWing is installed; open it on the tablet and select USB.":"DeskWing is not installed; run Install-APK.cmd from the Windows package.")+" Tunnels checked every 5 seconds; app detection every 30 seconds.");
     }
     private async Task<string> Run(string executable,string[] arguments)
     {

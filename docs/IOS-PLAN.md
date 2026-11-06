@@ -1,12 +1,12 @@
 # DeskWing iOS/iPadOS implementation and release plan
 
-Prepared **5 November 2026**. This describes the secure native host required to reuse DeskWing's tablet interface. Source preparation is not proof of a successful Apple build, signing, device compatibility or App Store approval. Implementation in `ios/`, if present, must be checked against this plan and the [store release gates](STORE-RELEASE.md).
+Updated **6 November 2026**. The native host in `ios/` reuses DeskWing's bundled tablet interface. The verified `ab55af0` baseline passed 39 iOS simulator tests; the 1.15 workspace candidate needs its own hosted build and test result. Source preparation is not proof of signing, physical-device compatibility, TestFlight availability or App Store approval. Follow the [store release gates](STORE-RELEASE.md) and [beta build guide](BETA-RELEASE.md).
 
 ## Scope and honest capability boundary
 
-The first iPad release should provide local Wi-Fi pairing, the existing board/media/app controls, pen notes and drawing, native handwriting entry, and optional preview/display viewing. The Windows companion remains required for PC features. The scratchpad should remain useful offline.
+The iPad candidate provides local Wi-Fi pairing, board/media/app controls, pen notes and drawing, native handwriting entry, and optional preview/display viewing. The 1.15 source adds notebooks/pages, local PDF import and flattened export, recovery/history, and native Pen or single-finger Touch on an explicitly enabled owned Windows display. The Windows companion remains required for PC features. Offline notebook copies remain subject to durable-storage availability and recovery safeguards; physical iPad verification is still required.
 
-The Android ADB reverse-tunnel/USB workflow does not transfer to iOS. Do not show “USB connection” as available without a separately implemented and tested transport. Optional extended Windows display creation remains a PC-side driver/topology operation; the iPad host receives its frames. The current JPEG transport is not full-motion video, audio streaming, or pen/mouse input forwarding to the desktop.
+The Android ADB reverse-tunnel/USB workflow does not transfer to iOS. Do not show “USB connection” as available without a separately implemented and tested transport. Optional extended Windows display creation remains a PC-side driver/topology operation. The native iPad viewer receives silent H.264 video; its Pen and Touch modes require separate PC permission and the active display/video lease. Touch supports one-finger pen-style taps/drags, without multi-touch gestures. The explicit JPEG compatibility preview remains a slower viewing path.
 
 ## Recommended architecture
 
@@ -19,7 +19,7 @@ The following is engineering design based on the existing product and Apple APIs
 | Bridge adapter | Preserve the current `DeckNative.dispatch`/`nativeResult` contract where feasible, but validate every message's frame, origin, route, method, payload type and byte size in Swift. Only the bundled main frame can issue commands. [WKFrameInfo](https://developer.apple.com/documentation/webkit/wkframeinfo) |
 | Companion client | A native HTTPS client with certificate-code verification/pinning, bounded requests and no automatic command replay; add the persistent TLS/state channel only with equivalent validation and lifecycle tests |
 | Credential store | Keychain for device credential and certificate pin; device-only accessibility appropriate to foreground use; ordinary preferences for non-secret settings |
-| Pen notes | Shared scratchpad for initial behavior; native text view for Scribble, and optionally PencilKit for a later native drawing experience |
+| Pen notes | Shared scratchpad and notebook pages with retained PC context, durable local recovery and revision checks; native text view for Scribble; native display input is a separate, explicitly enabled surface |
 | External provider viewing | An entirely separate bridge-free web view or system browser. No remote navigation in the privileged web view and no provider access to companion credentials |
 | Lifecycle coordinator | Cancel queued writes and previews, release owned holds, invalidate operation/context tokens and disconnect when inactive; recover current state on return without replaying actions |
 
@@ -63,10 +63,10 @@ Audit native calls and dependencies for required-reason APIs, such as applicable
 
 ## Review preparation
 
-Create a stable bundle ID before uploading; the Android package name and Windows installation paths need not change with the visible DeskWing branding. Apple app-record fields have different mutability rules, so settle bundle ID and SKU deliberately. [App information](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information)
+Source uses the stable iOS bundle ID `app.deskwing.tablet`; confirm its reservation in the owner's Apple account before uploading. DeskWing's public branding and downloads use the new name while the existing Android installation ID and saved-data identifiers remain compatible. Apple app-record fields have different mutability rules, so settle bundle ID and SKU deliberately. [App information](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information)
 
 Store copy and review notes must distinguish native utility, remote control, preview and a true extended desktop. Explain the user-owned Windows PC and local-LAN requirement. Apple's remote-desktop rule 4.2.7 has conditions for clients mirroring particular software/services; it is not a blanket ban on second-monitor apps. The app must still provide substantive utility, accurate metadata and testable functionality. [App Review Guidelines](https://developer.apple.com/app-store/review/guidelines/)
 
 Supply clear companion installation/pairing instructions, any required test resources and a camera-recorded physical-iPad demonstration for hardware-dependent behavior. An offline labelled demo can aid evaluation but must not hide a failing connection or stand in for actual hardware tests. [Complete review information](https://developer.apple.com/help/app-review/before-submitting-for-review/complete-review/)
 
-Open prerequisites are Mac build access, signing team/account role, a physical iPad/Apple Pencil test path, final privacy/support URLs and accurate export/privacy declarations. They remain gates until verified; generated Swift files alone do not close them.
+Hosted macOS build access is available through GitHub Actions; no local Mac is available yet. Open prerequisites are signing team/account role and credentials, a physical iPad/Apple Pencil test path, verified live privacy/support URLs and accurate export/privacy declarations. They remain gates until verified; generated Swift files alone do not close them.

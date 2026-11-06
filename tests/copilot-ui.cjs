@@ -32,6 +32,7 @@ async function nativeDisplayChecks(page,check){
  const rate=page.locator('#computer-display-rate'),start=()=>page.getByRole('button',{name:'Start second display',exact:true});
  await rate.waitFor();await page.waitForFunction(()=>document.querySelector('#computer-display-rate option[value="match"]')?.textContent.includes('120'));
  check(await rate.inputValue()==='60','native video defaults to a 60 Hz target');
+ check(await page.locator('#computer-display-quality').inputValue()==='balanced'&&await page.locator('#computer-display-adaptive').isChecked(),'native video starts with balanced adaptive quality without changing refresh');
  const matchLabel=await rate.locator('option[value="match"]').innerText();check(matchLabel.includes('120')&&!matchLabel.includes('165'),'Match tablet uses its current 120 Hz refresh rather than its 165 Hz maximum');
  check(await page.evaluate(()=>!nativeRequests.some(request=>request.path==='/local/display/start')&&!requests.some(request=>request.route==='/api/computer/display/frame')),'display status and capability reads start neither native video nor JPEG capture');
  await rate.selectOption('match');await page.evaluate(async()=>{nativeDisplayCapabilities={...nativeDisplayCapabilities,currentRefreshRate:30};await refreshComputerDisplay();});await page.waitForFunction(()=>document.querySelector('#computer-display-rate option[value="match"]')?.textContent==='Match tablet (30 Hz)');
@@ -54,9 +55,11 @@ async function nativeDisplayChecks(page,check){
  await rate.selectOption('60');check(await start().isEnabled(),'returning to 60 Hz enables a compatible 60 Hz source');
  await page.evaluate(async()=>{display={...display,refreshRate:59.94};await refreshComputerDisplay();});check(await start().isEnabled(),'a standard 59.94 Hz source is accepted for the 60 Hz setting');
  await page.evaluate(async()=>{display={...display,refreshRate:120};await refreshComputerDisplay();});await page.setViewportSize({width:1280,height:800});
+ await page.locator('#computer-display-quality').selectOption('battery-saver');await page.locator('#computer-display-adaptive').uncheck();
  await start().click();await page.waitForFunction(()=>nativeRequests.some(request=>request.path==='/local/display/start')&&!computerDisplayNativeStarting);
  const first=await page.evaluate(()=>nativeRequests.find(request=>request.path==='/local/display/start').body);
  check(first.refreshMode==='60'&&typeof first.session==='string'&&first.session.length>20,'explicit Start sends the selected 60 Hz target and a session identity');
+ check(first.qualityPreset==='battery-saver'&&first.adaptiveQuality===false,'explicit Start passes picture/power choices independently of the selected refresh');
  check(await page.evaluate(()=>computerDisplayWanted&&!requests.some(request=>request.route==='/api/computer/display/frame')),'native video keeps the high-refresh path separate from JPEG polling');
  await page.evaluate(session=>document.dispatchEvent(new CustomEvent('deskwing-display',{detail:{active:false,session,reason:'exit'}})),first.session);
  await page.waitForFunction(()=>!computerDisplayWanted);const countBeforeResume=await page.evaluate(()=>nativeRequests.filter(request=>request.path==='/local/display/start').length);
@@ -86,6 +89,24 @@ async function nativeDisplayChecks(page,check){
  check(await page.evaluate(()=>requests.filter(request=>request.route==='/api/computer/display/frame').length)===1,'compatibility capture starts only after its separate explicit action');
  await page.getByRole('button',{name:'Back to controls',exact:true}).click();await page.evaluate(()=>completeFrame({width:960,height:600,image:document.createElement('canvas').toDataURL('image/jpeg')}));
  await page.waitForFunction(()=>!computerDisplayPending);check(await page.locator('#computer-display-image').count()===0&&!await page.locator('body').evaluate(node=>node.classList.contains('computer-screen-mode')),'late compatibility frame cannot reopen a stopped view');
+ await displayInputPermissionChecks(page,check);
+}
+async function displayInputPermissionChecks(page,check){
+ await page.evaluate(async()=>{
+  window.originalDisplayApi=api;window.inputFixture={supported:true,enabled:false,active:false,targetIdentity:'fixture-monitor:1',sourceName:display.sourceName,error:null};
+  api=async(route,body)=>{if(route==='/api/computer/display/input')return structuredClone(inputFixture);if(route==='/api/admin/computer/display/input'){requests.push({route,body});inputFixture.enabled=body.enabled;return structuredClone(inputFixture);}return originalDisplayApi(route,body);};
+  desktopConsole=true;computerDisplaySignature='';await refreshComputerDisplay();
+ });
+ const allow=page.locator('#computer-display-input-enabled');await allow.waitFor();
+ check(!await allow.isChecked()&&await allow.isEnabled(),'extra-display input remains off until a separate PC choice');
+ await page.evaluate(()=>confirmResult=false);await allow.click();check(!await allow.isChecked()&&!await page.evaluate(()=>requests.some(r=>r.route==='/api/admin/computer/display/input')),'declining input consent leaves viewing available without granting input');
+ await page.evaluate(()=>confirmResult=true);await allow.check();await page.waitForFunction(()=>inputFixture.enabled);
+ check(await page.evaluate(()=>requests.some(r=>r.route==='/api/admin/computer/display/input'&&r.body.enabled&&r.body.targetIdentity==='fixture-monitor:1')),'input consent authorizes exactly the displayed monitor identity');
+ await allow.uncheck();await page.waitForFunction(()=>!inputFixture.enabled);check(await page.evaluate(()=>requests.some(r=>r.route==='/api/admin/computer/display/input'&&!r.body.enabled)),'PC can revoke input independently of video sharing');
+ await page.evaluate(()=>{window.oldConfirm=confirmAction;confirmAction=async()=>{inputFixture.targetIdentity='fixture-monitor:2';computerDisplayInputStatus={...inputFixture};return true;};});
+ const writesBefore=await page.evaluate(()=>requests.filter(r=>r.route==='/api/admin/computer/display/input').length);await allow.click();check(await page.evaluate(()=>requests.filter(r=>r.route==='/api/admin/computer/display/input').length)===writesBefore,'a replaced monitor cannot inherit a pending consent confirmation');
+ check(!await allow.isChecked(),'a rejected stale confirmation does not leave a false enabled input indicator');
+ await page.evaluate(()=>{confirmAction=oldConfirm;api=originalDisplayApi;desktopConsole=false;computerDisplayInputStatus=null;computerDisplaySignature='';renderComputerDisplay();});
 }
 async function sharedDocumentChecks(browser,base,check){
  const config={obsPort:4455,obsPassword:'',micInput:'Mic',desktopInput:'Desktop',pages:[{id:'main',name:'Main',icon:'home',buttons:[{id:'manual',label:'Fixture scene',kind:'scene',icon:'image',color:'violet',target:'Fixture scene',configured:true}]}]};

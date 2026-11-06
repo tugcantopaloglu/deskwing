@@ -48,6 +48,12 @@ public static class HardeningTests
         try{UsbReconnect.SelectDevice("one\tdevice\ntwo\tdevice","");throw new Exception("Ambiguous USB accepted");}catch(IOException){Check(true,"multiple USB tablets require selection");}
         Reject(()=>DesktopPreferences.Validate(new(true,"bad\";cmd",false)),"USB serial argument injection rejected");
         Check(DesktopPreferences.StartupCommand(@"C:\Program Files\TabletDeck\deck.exe")=="\"C:\\Program Files\\TabletDeck\\deck.exe\" --tray --no-browser","startup executable path is quoted and starts quietly");
+        var brandedExecutable=@"C:\DeskWing\Windows\DeskWing-Companion.exe";
+        Check(DesktopPreferences.StartupOwned(DesktopPreferences.StartupCommand(brandedExecutable),brandedExecutable),"current DeskWing startup opt-in is recognized");
+        Check(DesktopPreferences.StartupOwned(DesktopPreferences.StartupCommand(@"C:\DeskWing\Windows\TabletDeck-Companion.exe"),brandedExecutable),"owned legacy startup opt-in survives the executable rename");
+        Check(!DesktopPreferences.StartupOwned(DesktopPreferences.StartupCommand(@"C:\Another\TabletDeck-Companion.exe"),brandedExecutable),"legacy startup filename in another folder does not grant ownership");
+        Check(!DesktopPreferences.StartupOwned(DesktopPreferences.StartupCommand(brandedExecutable)+" --extra",brandedExecutable),"startup ownership requires the exact expected command");
+        Check(!DesktopPreferences.StartupOwned(DesktopPreferences.StartupCommand(@"C:\DeskWing\Windows\TabletDeck-Companion.exe"),@"C:\DeskWing\Windows\Other.exe"),"unrelated current executable cannot claim legacy startup");
         Check(ReleaseUpdates.Parse("{\"tag_name\":\"v2.0.0\",\"draft\":false,\"prerelease\":false}","1.3.0").Available,"stable update comparison");
         Check(!ReleaseUpdates.Parse("{\"tag_name\":\"v1.2.0\",\"draft\":false,\"prerelease\":false}","1.3.0").Available,"older release is not offered as update");
         using(var updates=new ReleaseUpdates(new HttpClient(new FakeReleaseHandler()),"1.3.0")){var result=await updates.Check(true);Check(result.Available&&result.Url=="https://github.com/tugcantopaloglu/deskwing/releases/tag/v2.0.0","update HTTP fixture uses fixed official repository and trusted release URL");}

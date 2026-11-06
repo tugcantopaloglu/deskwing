@@ -72,6 +72,6 @@ internal static class DesktopWindowTests
                 }catch(Exception ex){completion.TrySetException(ex);}finally{window.Shutdown();Forms.Application.ExitThread();}
             };
             Forms.Application.Run(window);
-        }){IsBackground=true,Name="Tablet Deck desktop fixture"};thread.SetApartmentState(ApartmentState.STA);thread.Start();return completion.Task;
+        }){IsBackground=true,Name="DeskWing desktop fixture"};thread.SetApartmentState(ApartmentState.STA);thread.Start();return completion.Task;
     }
 }

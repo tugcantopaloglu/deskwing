@@ -1,6 +1,6 @@
 // A private companion + mock OBS. No real app, audio, broadcast or tablet controls run.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os'),{spawn}=require('node:child_process'),{WebSocketServer}=require('ws');
-const root=path.resolve(__dirname,'..'),exe=process.env.TABLETDECK_COMPANION||path.join(root,'.test-output/readiness-integration-build/Release/net10.0-windows10.0.19041.0/win-x64/TabletDeck-Companion.exe');
+const root=path.resolve(__dirname,'..'),exe=process.env.TABLETDECK_COMPANION||path.join(root,'.test-output/readiness-integration-build/Release/net10.0-windows10.0.19041.0/win-x64/DeskWing-Companion.exe');
 const output=fs.mkdtempSync(path.join(os.tmpdir(),'deskwing-readiness-api-')),data=path.join(output,'data'),http='http://127.0.0.1:19640';fs.mkdirSync(data);
 let server,mock,session,passed=0,log;const calls=[],check=(value,label)=>{assert.ok(value,label);passed++;console.log('PASS '+label);},sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function request(route,body,token){const r=await fetch(http+route,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{'X-Deck-Admin':session.token})},body:body===undefined?undefined:JSON.stringify(body)});const text=await r.text();return{status:r.status,data:text?JSON.parse(text):{}};}

@@ -4,13 +4,13 @@ Version 1.3.0 introduced the following controls. Version 1.4 adds the [low-laten
 
 ## Install or update Windows
 
-Download **TabletDeck-Setup.exe** from the project's [releases](https://github.com/tugcantopaloglu/deskwing/releases/latest). Run it, review the displayed destination, then type `INSTALL`. The console installer verifies the embedded package's paths and SHA-256 checksums before copying files. It installs for the current account, without administrator access, to:
+Download **DeskWing-Setup.exe** from the project's [releases](https://github.com/tugcantopaloglu/deskwing/releases/latest). Run it, review the displayed destination, then type `INSTALL`. The console installer verifies the embedded package's paths and SHA-256 checksums before copying files. A fresh install uses the current account, without administrator access, at:
 
 ```text
-%LOCALAPPDATA%\Programs\TabletDeckStudio
+%LOCALAPPDATA%\Programs\DeskWing
 ```
 
-It creates a Start menu shortcut. It does not launch the companion or tablet app, enable startup, install drivers, change the firewall, or install the APK automatically. Open the shortcut yourself when ready; Android installation still uses the APK or Install-APK.cmd.
+An existing managed `%LOCALAPPDATA%\Programs\TabletDeckStudio` installation is updated at its original location. The Start menu shortcut uses **DeskWing**. The installer does not launch the companion or tablet app, enable startup, install drivers, change the firewall, or install the APK automatically. Open the shortcut yourself when ready; Android installation still uses the APK or Install-APK.cmd.
 
 For updates, exit the existing companion through its tray menu first. The installer refuses to replace an unmanaged folder or files that are in use. A previous managed installation is retained in a timestamped sibling folder for recovery. If an update fails before the folder swap completes, the previous installation is restored. Remove retained backup folders yourself after confirming the update works. Application data remains separately under `%LOCALAPPDATA%\TabletDeck`.
 
@@ -19,7 +19,7 @@ The complete ZIP remains available for portable use. The installer and companion
 To uninstall the managed program files, run the downloaded setup executable from a terminal:
 
 ```powershell
-.\TabletDeck-Setup.exe --uninstall
+.\DeskWing-Setup.exe --uninstall
 ```
 
 It removes only files recorded by the installer, its matching Start menu shortcut, and its matching startup entry. Untracked files and your board/pairing data are retained. Close the companion first. Uninstalling a portable ZIP means removing the extracted folder yourself; the managed uninstaller refuses an unrecognized folder.
@@ -33,7 +33,7 @@ Open **Edit → Desktop settings** to enable **Start with Windows**, **Reconnect
 For command-line/server tests that must not open a browser or tray UI:
 
 ```powershell
-.\TabletDeck-Companion.exe --no-browser --no-tray
+.\DeskWing-Companion.exe --no-browser --no-tray
 ```
 
 `--tray --no-browser` starts the tray without opening the PC editor. The app does not install a Windows service.

@@ -31,7 +31,7 @@ internal static class StudioRoutes
             return Results.Ok(new{image=PairingQr.Image(payload),payload,code,expiresIn=300});
         });
         app.MapPost("/api/admin/packs/manifest",(PackManifestRequest req)=>packs.Manifest(req.ProfileId));
-        app.MapPost("/api/admin/packs/export",(PackExportRequest req)=>Results.File(packs.Export(req.ProfileId,req.SoundIds),"application/zip","TabletDeck-Board.deckpack"));
+        app.MapPost("/api/admin/packs/export",(PackExportRequest req)=>Results.File(packs.Export(req.ProfileId,req.SoundIds),"application/zip","DeskWing-Board.deckpack"));
         app.MapPost("/api/admin/packs/preview",async (HttpContext ctx)=>{
             var size=ctx.Features.Get<IHttpMaxRequestBodySizeFeature>();if(size is not null&&!size.IsReadOnly)size.MaxRequestBodySize=BoardPacks.MaxBytes;
             using var output=new MemoryStream();var buffer=new byte[81920];while(true){var count=await ctx.Request.Body.ReadAsync(buffer,ctx.RequestAborted);if(count==0)break;if(output.Length+count>BoardPacks.MaxBytes)throw new ArgumentException("Keep the pack below 64 MB.");await output.WriteAsync(buffer.AsMemory(0,count),ctx.RequestAborted);}return Results.Ok(packs.Preview(output.ToArray()));

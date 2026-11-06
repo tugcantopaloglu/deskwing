@@ -343,11 +343,33 @@ async function syncChecks() {
     const meta = JSON.parse(ui.data.get('deskwing.pen.sync.v1'));
     assert.equal(meta.workspaceId, server.snapshot().workspaceId); assert.equal(meta.revision, 'r1'); assert.match(meta.hash, /^[a-f0-9]{64}$/);
   });
-  await asyncCheck('existing local ink migrates into an empty PC with a revision check', async () => {
+  await asyncCheck('existing local ink needs explicit review before first sharing to an empty PC', async () => {
     const server = inkServer(inkDocument('')), ui = canvasFixture(inkDocument('Local notes'), { api: server.api });
     await ui.runtime.DeskPen.syncNow();
+    assert.equal(writes(server).length, 0);assert.equal(ui.document.getElementById('pen-sync-state').textContent,'Two versions need your choice');
+    await ui.runtime.DeskPen.chooseLocal();
     assert.equal(writes(server).length, 1); assert.equal(writes(server)[0].body.expectedRevision, 'r1');
     assert.equal(server.snapshot().document.notes, 'Local notes'); assert.equal(notesIn(ui), 'Local notes');
+  });
+  await asyncCheck('a saved old-PC ink baseline never auto-posts its private notes to a different empty PC', async()=>{
+    const original=inkDocument('Private notes from previous PC'),server=inkServer(inkDocument(''),{workspaceId:'new-pc-workspace'});
+    const meta={workspaceId:'previous-pc-workspace',revision:'r1',hash:'0'.repeat(64),connectionContext:'old-pairing'};
+    const ui=canvasFixture(original,{api:server.api,storage:{'deskwing.pen.sync.v1':JSON.stringify(meta)}});
+    await ui.runtime.DeskPen.syncNow();assert.equal(writes(server).length,0);assert.equal(notesIn(ui),original.notes);assert.equal(ui.saved().notes,original.notes);
+    assert.equal(ui.document.getElementById('pen-sync-state').textContent,'Two versions need your choice');
+    await ui.runtime.DeskPen.chooseLocal();assert.equal(writes(server).length,1);assert.equal(server.snapshot().document.notes,original.notes);
+  });
+  await asyncCheck('legacy ink keeps its original pairing context from snapshot through a queued write',async()=>{
+    const server=inkServer(inkDocument('Shared baseline')),ui=canvasFixture(undefined,{api:server.api});let pairing='original-pairing',changeOnRead=false,postContext=null;
+    ui.runtime.captureWorkspaceContext=async()=>pairing;
+    ui.runtime.apiWithWorkspaceContext=async(route,body,expected)=>{if(body!==undefined){postContext=expected;if(expected!==pairing)throw Error('PC pairing changed before commit.');return server.api(route,body);}const value=await server.api(route);if(changeOnRead)pairing='different-pairing';return value;};
+    await ui.runtime.DeskPen.syncNow();editNotes(ui,'Private queued edit');changeOnRead=true;await ui.runtime.DeskPen.syncNow();
+    assert.equal(postContext,'original-pairing');assert.equal(writes(server).length,0);assert.equal(ui.saved().notes,'Private queued edit');
+  });
+  await asyncCheck('a pairing change invalidates a delayed legacy replace confirmation',async()=>{
+    const server=inkServer(inkDocument('PC version')),ui=canvasFixture(inkDocument('Local version'),{api:server.api});await ui.runtime.DeskPen.syncNow();let resolve;
+    ui.runtime.confirmAction=()=>new Promise(done=>{resolve=done;});const pending=ui.runtime.DeskPen.chooseLocal();await waitUntil(()=>!!resolve);ui.runtime.DeskPen.notebooks.unbind();resolve(true);await pending;
+    assert.equal(writes(server).length,0);assert.equal(notesIn(ui),'Local version');
   });
   await asyncCheck('offline local edits retry safely when the PC version is unchanged', async () => {
     const server = inkServer(inkDocument('Shared')), ui = canvasFixture(undefined, { api: server.api });
@@ -366,7 +388,7 @@ async function syncChecks() {
   await asyncCheck('an in-flight read cannot replace a stroke that has begun', async () => {
     let resolveRead; const server = inkServer(inkDocument('Remote content'));
     const ui = canvasFixture(undefined, { api: (route, body) => body === undefined ? new Promise(resolve => { resolveRead = resolve; }) : server.api(route, body) });
-    const pending = ui.runtime.DeskPen.syncNow();
+    const pending = ui.runtime.DeskPen.syncNow();await waitUntil(()=>!!resolveRead);
     ui.dispatch('pointerdown'); ui.dispatch('pointermove', 'pen', 1, 120, 140);
     resolveRead(server.snapshot()); await pending;
     assert.equal(notesIn(ui), ''); ui.dispatch('pointerup', 'pen', 1, 180, 200);
@@ -375,7 +397,7 @@ async function syncChecks() {
   await asyncCheck('suspending during a read prevents its queued PC write', async () => {
     let resolveRead; const server = inkServer(inkDocument(''));
     const ui = canvasFixture(inkDocument('Unshared local'), { api: (route, body) => body === undefined ? new Promise(resolve => { resolveRead = resolve; }) : server.api(route, body) });
-    const pending = ui.runtime.DeskPen.syncNow(); ui.runtime.DeskPen.suspend(); resolveRead(server.snapshot()); await pending;
+    const pending = ui.runtime.DeskPen.syncNow();await waitUntil(()=>!!resolveRead);ui.runtime.DeskPen.suspend(); resolveRead(server.snapshot()); await pending;
     assert.equal(writes(server).length, 0); assert.equal(ui.saved().notes, 'Unshared local');
     await ui.runtime.DeskPen.syncNow(); assert.equal(writes(server).length, 0);
   });
@@ -392,11 +414,11 @@ async function syncChecks() {
   });
   await asyncCheck('a late save acknowledgment keeps edits made while the save was pending', async () => {
     const server = inkServer(inkDocument('')); let resolveWrite, outgoing;
-    const ui = canvasFixture(inkDocument('First local edit'), { api: async (route, body) => {
+    const ui = canvasFixture(undefined, { api: async (route, body) => {
       if (body === undefined) return server.api(route, body);
       outgoing = plain(body); return new Promise(resolve => { resolveWrite = async () => resolve(await server.api(route, outgoing)); });
     } });
-    const pending = ui.runtime.DeskPen.syncNow(); await waitUntil(() => !!resolveWrite);
+    await ui.runtime.DeskPen.syncNow();editNotes(ui,'First local edit');const pending = ui.runtime.DeskPen.syncNow(); await waitUntil(() => !!resolveWrite);
     editNotes(ui, 'Newer edit while saving'); await resolveWrite(); await pending;
     assert.equal(outgoing.document.notes, 'First local edit'); assert.equal(server.snapshot().document.notes, 'First local edit');
     assert.equal(notesIn(ui), 'Newer edit while saving'); assert.equal(ui.saved().notes, 'Newer edit while saving');

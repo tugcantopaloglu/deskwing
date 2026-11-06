@@ -47,9 +47,35 @@ const preview=new URLSearchParams(location.search).get('preview')==='1'&&!native
 let adminToken=new URLSearchParams(location.hash.slice(1)).get('admin')||sessionStorage.getItem('deckAdmin')||'';
 if(adminToken){sessionStorage.setItem('deckAdmin',adminToken);history.replaceState(null,'',location.pathname+location.search);}
 let nextRequest=0;const pending=new Map();
-window.nativeResult=(id,result)=>{const p=pending.get(id);if(!p)return;clearTimeout(p.timer);pending.delete(id);result.error?p.reject(new Error(result.error)):p.resolve(result);};
-function nativeRequest(path,body,method='POST',timeoutMs=65000){
-  return new Promise((resolve,reject)=>{const id=++nextRequest;const timer=timeoutMs>0?setTimeout(()=>{pending.delete(id);reject(new Error('The PC did not respond. Check the connection before trying again.'));},timeoutMs):null;pending.set(id,{resolve,reject,timer});window.DeckNative.dispatch(JSON.stringify({id,path,body,method}));});
+let observedPairingId=null,workspaceConnectionEpoch=0;
+function workspaceDocumentApiPath(path){return typeof path==='string'&&/^(?:\/api\/notebooks(?:\/|\?|$)|\/api\/ink(?:\?|$))/.test(path);}
+function validPairingId(value){return typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);}
+function workspaceContextEvent(contextId,reason){
+  workspaceContext=null;
+  workspaceConnectionEpoch++;
+  if(typeof CustomEvent==='function'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent('deskwing-workspace-contextchange',{detail:{contextId,reason}}));
+}
+function observeNativeConnection(next,reason='connection'){
+  if(!next||typeof next.paired!=='boolean')return;
+  const identity=next.paired&&validPairingId(next.pairingId)?next.pairingId:'';
+  if(observedPairingId!==null&&observedPairingId!==identity)workspaceContextEvent(identity,reason);
+  observedPairingId=identity;
+}
+window.addEventListener('deskwing-connection-changed',()=>{
+  // Native changes may commit before this event reaches JavaScript. The envelope
+  // binding below is the authority; this notification only retires old UI work.
+  observedPairingId=null;workspaceConnectionEpoch++;
+  workspaceContext=null;
+});
+window.nativeResult=(id,result)=>{
+  const p=pending.get(id);if(!p)return;clearTimeout(p.timer);pending.delete(id);
+  if(p.expectedPairingId&&(p.contextEpoch!==workspaceConnectionEpoch||observedPairingId!==null&&observedPairingId!==p.expectedPairingId)){p.reject(new Error('The PC connection changed. Reopen this document before continuing.'));return;}
+  if(!result.error&&/^\/native\/(?:connection|pair|transport|forget)$/.test(p.path))observeNativeConnection(result,p.path.slice(8));
+  result.error?p.reject(new Error(result.error)):p.resolve(result);
+};
+function nativeRequest(path,body,method='POST',timeoutMs=65000,expectedPairingId){
+  if(workspaceDocumentApiPath(path)&&!validPairingId(expectedPairingId))return Promise.reject(new Error('Open this document from its original PC before continuing.'));
+  return new Promise((resolve,reject)=>{const id=++nextRequest;const timer=timeoutMs>0?setTimeout(()=>{pending.delete(id);reject(new Error('The PC did not respond. Check the connection before trying again.'));},timeoutMs):null;pending.set(id,{resolve,reject,timer,path,expectedPairingId,contextEpoch:workspaceConnectionEpoch});const request={id,path,body,method};if(expectedPairingId!==undefined)request.expectedPairingId=expectedPairingId;window.DeckNative.dispatch(JSON.stringify(request));});
 }
 async function api(path,body,timeoutMs=65000){
   if(native)return nativeRequest(path,body,body===undefined?'GET':'POST',timeoutMs);
@@ -57,8 +83,59 @@ async function api(path,body,timeoutMs=65000){
   let data;try{data=await response.json();}catch{throw new Error(`Request failed (${response.status}). Reopen the companion to unlock the PC editor.`);}
   if(!response.ok)throw new Error(data.error||`Request failed (${response.status}).`);return data;
 }
+async function captureWorkspaceContext(){
+  if(!native)return 'web:'+String(location.origin||'local');
+  const epoch=workspaceConnectionEpoch,next=await nativeRequest('/native/connection',{});
+  if(epoch!==workspaceConnectionEpoch||!next.paired||!validPairingId(next.pairingId))throw new Error('The PC connection changed. Reopen this document before continuing.');
+  return next.pairingId;
+}
+async function apiWithWorkspaceContext(path,body,expectedPairingId,timeoutMs=65000){
+  if(!workspaceDocumentApiPath(path))throw new Error('This context is only for ink and notebook requests.');
+  if(native){
+    if(!validPairingId(expectedPairingId)||observedPairingId!==null&&observedPairingId!==expectedPairingId)throw new Error('The PC connection changed. Reopen this document before continuing.');
+    // Never replace the caller's retained identity with the newest connection.
+    // Native code verifies this envelope before any HTTP headers or body bytes.
+    return nativeRequest(path,body,body===undefined?'GET':'POST',timeoutMs,expectedPairingId);
+  }
+  if(expectedPairingId!=='web:'+String(location.origin||'local'))throw new Error('Reopen this document in this workspace before continuing.');
+  return api(path,body,timeoutMs);
+}
 let boardSignature='',boardRevision=0,lastGrid='',pages=[],pageId='',slice=0,state={},connection={},busy=false,refreshing=false,lastBoard=0,editing=false,dirty=false,toastTimer;
 let activeProfileId='',activeProfileName='Default';
+let workspaceContext=null;
+function workspaceSoundRoute(page){return ({speakers:'Speakers',mic:'Microphone',both:'Speakers and microphone'})[page?.liveSoundpadOutput]||'Output unavailable';}
+function acceptWorkspaceContext(board){
+  const value=board?.workspace;
+  const next=value&&typeof value.computerName==='string'&&typeof value.connectionCode==='string'?{computerName:value.computerName.slice(0,64),connectionCode:value.connectionCode.slice(0,16),version:String(value.version||'').slice(0,32)}:null;
+  if(workspaceContext&&next&&workspaceContext.connectionCode!==next.connectionCode)workspaceContextEvent(observedPairingId||'','pc-identity');
+  workspaceContext=next;
+}
+function renderWorkspaceStatus(){
+  if(desktopConsole||preview||typeof document.createElement!=='function')return;
+  const header=document.querySelector('.topbar');if(!header||typeof header.insertBefore!=='function')return;
+  let button=document.getElementById('workspace-status');
+  if(!button){button=document.createElement('button');button.type='button';button.id='workspace-status';button.className='quiet workspace-identity';button.onclick=showWorkspaceCheck;const name=document.createElement('strong');name.id='workspace-status-name';const detail=document.createElement('span');detail.id='workspace-status-detail';button.append(name,detail);header.insertBefore(button,document.getElementById('transport'));}
+  const connected=state.pcConnected===true;
+  document.getElementById('workspace-status-name').textContent=connected?(workspaceContext?.computerName||'Connected PC'):'PC disconnected';
+  document.getElementById('workspace-status-detail').textContent='Board · '+activeProfileName+(activeProfileId?' · '+activeProfileId.slice(0,6):'');
+  button.setAttribute('aria-label',(connected?'Connected to '+(workspaceContext?.computerName||'PC'):'PC disconnected')+' · Board '+activeProfileName+'. Check workspace and sound output');
+  button.title='Check this PC, board, and Soundpad output';button.classList.toggle('is-offline',!connected);
+}
+async function showWorkspaceCheck(){
+  if(preview)return;
+  openPanel('Check this workspace','<p id="workspace-check-loading" role="status">Checking this PC, board and sound output…</p>');
+  const generation=panelGeneration,owns=()=>panel.open&&panelGeneration===generation;
+  try{
+    const [board,next,link]=await Promise.all([api('/api/board',undefined,10000),api('/api/state',undefined,10000),native?nativeRequest('/native/connection',{}):Promise.resolve(null)]);
+    if(!owns())return;
+    acceptWorkspaceContext(board);if(link)connection=link;
+    const identity=workspaceContext,profile=String(board.profileName||'Current board'),live=board.pages.filter(page=>page.liveSoundpad);
+    openPanel('Check this workspace',`<section class="workspace-check"><p class="help">These checks read status. They do not run board buttons, play sounds, or change your board.</p><dl><dt>PC</dt><dd>${esc(identity?.computerName||'Connected companion')}${identity?.connectionCode?' · '+esc(identity.connectionCode):''}</dd><dt>Board</dt><dd>${esc(profile)} · ${board.pages.length} pages</dd><dt>Connection</dt><dd>${esc(native?(connection.mode==='usb'?'USB':'Wi-Fi')+(connection.fastConnected?' · fast control connected':' · HTTPS fallback'):'Local Windows companion')}</dd><dt>OBS</dt><dd>${next.obsConnected?'Connected':'Not connected. Open OBS setup on the PC if this board uses OBS.'}</dd><dt>Soundpad</dt><dd>${live.length?live.map(page=>esc(page.name)+' · '+page.buttons.length+' sounds · '+esc(workspaceSoundRoute(page))+(page.soundpadWarning?' · '+esc(page.soundpadWarning):'')).join('<br>'):'No live Soundpad page in this board. Add one through the PC board editor if you need it.'}</dd></dl><p>If a page is missing, check the board name first. Use Profiles to review another board; your current pages stay saved.</p><div class="row"><button id="workspace-check-again" class="quiet">Check again</button><button id="workspace-check-privacy" class="quiet">Privacy &amp; support</button>${native?'<button id="workspace-check-connect" class="quiet">Connection settings</button>':''}</div>${live.length?'<p>Microphone-only playback is sent to calls or recordings and may be silent on your speakers. Choose the intended output in the PC page settings.</p>':''}</section>`);
+    $('#workspace-check-again').onclick=showWorkspaceCheck;if($('#workspace-check-connect'))$('#workspace-check-connect').onclick=connectionForm;
+    const privacy=$('#workspace-check-privacy');if(privacy){privacy.hidden=typeof showPrivacySupport!=='function';if(!privacy.hidden)privacy.onclick=showPrivacySupport;}
+    renderWorkspaceStatus();
+  }catch(error){if(owns())$('#workspace-check-loading').textContent=error.message+' Open connection settings to reconnect, then check again.';}
+}
 let executionStatus=null,executionPending='',executionReachable=true,cancelPending=false;
 function acceptExecution(next,fresh=false){
   if(!next||typeof next.session!=='string'||!Number.isFinite(next.revision))return;
@@ -160,6 +237,7 @@ function buildMixer(){
   }
 }
 function updateState(){
+  renderWorkspaceStatus();
   if(typeof syncSceneCatalog==='function')syncSceneCatalog();
   if(state.profileId&&activeProfileId!==state.profileId)lastBoard=0;
   if(state.execution)acceptExecution(state.execution);
@@ -190,7 +268,7 @@ function updateState(){
 async function refresh(force=false){
   if(refreshing||preview||(!force&&(document.hidden||panel.open)))return;refreshing=true;
   try{
-    if((typeof arranging==='undefined'||!arranging)&&(force||Date.now()-lastBoard>(pages.some(p=>p.liveSoundpad)?5000:10000))){const board=await api('/api/board');if(typeof board.sceneCatalogRevision==='string')liveCatalogRevision=board.sceneCatalogRevision;const signature=JSON.stringify([board.profileId,board.profileName,board.pages]);if(signature!==boardSignature){if(activeProfileId!==board.profileId){pageId='';slice=0;}activeProfileId=board.profileId||'';activeProfileName=board.profileName||'Default';pages=board.pages;boardSignature=signature;boardRevision++;if(typeof hasActiveHold!=='function'||!hasActiveHold())renderBoard();}lastBoard=Date.now();}
+    if((typeof arranging==='undefined'||!arranging)&&(force||Date.now()-lastBoard>(pages.some(p=>p.liveSoundpad)?5000:10000))){const board=await api('/api/board');acceptWorkspaceContext(board);if(typeof board.sceneCatalogRevision==='string')liveCatalogRevision=board.sceneCatalogRevision;const signature=JSON.stringify([board.profileId,board.profileName,board.pages]);if(signature!==boardSignature){if(activeProfileId!==board.profileId){pageId='';slice=0;}activeProfileId=board.profileId||'';activeProfileName=board.profileName||'Default';pages=board.pages;boardSignature=signature;boardRevision++;if(typeof hasActiveHold!=='function'||!hasActiveHold())renderBoard();}lastBoard=Date.now();}
     if(force||typeof hasLiveState!=='function'||!hasLiveState()){const next=await api('/api/state');if(typeof acceptDeckState==='function')acceptDeckState(next);else state=next;}state.pcConnected=true;updateState();
   }catch(error){state={pcConnected:false,obsConnected:false,inputs:{},error:error.message};updateState();if(force)notice(error.message,true);}
   finally{refreshing=false;}
@@ -198,7 +276,7 @@ async function refresh(force=false){
 async function connectionForm(){
   window.deckPairPorts=null;
   if(native){try{connection=await nativeRequest('/native/connection',{});}catch{}}
-  openPanel('Connect your tablet',`<section class="setup"><h3>Your studio, one tap away.</h3><p class="help">${connection.fastConnected?'Persistent encrypted control link connected'+(connection.roundTripMs>=0?' · last network round-trip '+Number(connection.roundTripMs).toFixed(1)+' ms':''):'HTTPS fallback · fast control uses TCP 8744; USB needs both tunnel ports'}</p><p>Run TabletDeck-Companion.exe on your Windows PC, then choose <strong>Pair tablet</strong>. Enter the address, certificate code, and pairing PIN shown there.</p><div class="form-grid"><label>Connection<select id="pair-mode"><option value="wifi">Wi-Fi — same local network</option><option value="usb">USB — connected with USB-Connect.cmd</option></select></label><label>PC Wi-Fi address<input id="pair-host" placeholder="192.168.1.100" inputmode="decimal" value="${esc(connection.host||'')}"></label><label class="wide">Certificate code from your PC<input id="pair-cert" placeholder="6 groups of 4 letters and numbers" autocomplete="off" autocapitalize="characters" spellcheck="false"></label><label>Six-digit pairing PIN<input id="pair-code" placeholder="123456" inputmode="numeric" maxlength="6" autocomplete="off"></label></div><p class="help">Wi-Fi uses encrypted local-network control. For USB, enable USB debugging on the tablet and run USB-Connect.cmd in the Windows package. Keep the companion running.</p><div class="row"><button id="pair-submit" class="primary">Pair and connect</button>${connection.paired?'<button id="forget-pc" class="danger">Forget this PC</button>':''}</div>${connection.paired?'<div class="row"><button id="switch-transport" class="quiet">Switch to '+(connection.mode==='usb'?'Wi-Fi':'USB')+'</button></div>':''}<p id="pair-error" role="alert" class="help"></p></section>`);
+  openPanel('Connect your tablet',`<section class="setup"><h3>Your studio, one tap away.</h3><p class="help">${connection.fastConnected?'Persistent encrypted control link connected'+(connection.roundTripMs>=0?' · last network round-trip '+Number(connection.roundTripMs).toFixed(1)+' ms':''):'HTTPS fallback · fast control uses TCP 8744; USB needs both tunnel ports'}</p><p>Run DeskWing-Companion.exe on your Windows PC, then choose <strong>Pair tablet</strong>. Enter the address, certificate code, and pairing PIN shown there.</p><div class="form-grid"><label>Connection<select id="pair-mode"><option value="wifi">Wi-Fi — same local network</option><option value="usb">USB — connected with USB-Connect.cmd</option></select></label><label>PC Wi-Fi address<input id="pair-host" placeholder="192.168.1.100" inputmode="decimal" value="${esc(connection.host||'')}"></label><label class="wide">Certificate code from your PC<input id="pair-cert" placeholder="6 groups of 4 letters and numbers" autocomplete="off" autocapitalize="characters" spellcheck="false"></label><label>Six-digit pairing PIN<input id="pair-code" placeholder="123456" inputmode="numeric" maxlength="6" autocomplete="off"></label></div><p class="help">Wi-Fi uses encrypted local-network control. For USB, enable USB debugging on the tablet and run USB-Connect.cmd in the Windows package. Keep the companion running.</p><div class="row"><button id="pair-submit" class="primary">Pair and connect</button>${connection.paired?'<button id="forget-pc" class="danger">Forget this PC</button>':''}</div>${connection.paired?'<div class="row"><button id="switch-transport" class="quiet">Switch to '+(connection.mode==='usb'?'Wi-Fi':'USB')+'</button></div>':''}<p id="pair-error" role="alert" class="help"></p></section>`);
   $('#pair-mode').value=connection.mode||'wifi';$('#pair-mode').onchange=()=>$('#pair-host').disabled=$('#pair-mode').value==='usb'&&!connection.paired;$('#pair-mode').onchange();
   $('#pair-submit').onclick=async()=>{const button=$('#pair-submit');button.disabled=true;$('#pair-error').textContent='Connecting securely…';try{connection=await nativeRequest('/native/pair',{host:$('#pair-host').value.trim(),mode:$('#pair-mode').value,certificate:$('#pair-cert').value.trim(),code:$('#pair-code').value.trim(),...(window.deckPairPorts||{})});panel.close();await refresh(true);notice('Tablet paired. Your board is ready.');}catch(error){$('#pair-error').textContent=error.message;}finally{button.disabled=false;}};
   if($('#forget-pc'))$('#forget-pc').onclick=async()=>{if(!await confirmAction('Forget this PC?','You will need a new pairing code to reconnect.'))return;connection=await nativeRequest('/native/forget',{});connectionForm();};
@@ -240,7 +318,7 @@ async function showPairing(){
   openPanel('Pair an Android tablet','<p role="status">Preparing tablet pairing…</p><p id="pairing-load-error" role="alert"></p>');let generation=panelGeneration;
   const owns=()=>panel.open&&panelGeneration===generation;
   try{const info=await api('/api/admin/info');if(!owns())return;const pairing=await api('/api/admin/pairing',{});if(!owns())return;const grouped=pairing.certificateCode.match(/.{1,4}/g).join('-');
-    openPanel('Pair an Android tablet',`<section class="setup"><h3>Connect to this PC</h3><p>Install TabletDeck-Studio.apk on the tablet. Open it and enter these details. This PIN works once and expires in five minutes.</p><div class="pair-details"><p>PC Wi-Fi address</p><strong class="cert-code">${info.addresses.map(esc).join(' · ')||'No network address found. Use USB.'}</strong><p>Certificate code</p><strong class="cert-code">${esc(grouped)}</strong><p>Pairing PIN</p><strong class="pair-code">${esc(pairing.code)}</strong></div><h3>USB connection</h3><p>Connect a data cable, enable USB debugging on the tablet, approve this PC, and run <strong>USB-Connect.cmd</strong> in the Windows package. Select USB in the tablet pairing screen. After pairing, you can switch between Wi-Fi and USB without pairing again.</p><p class="help">For Wi-Fi, allow the companion through Windows Firewall on your private network. Keep port ${info.httpsPort} on the local network; internet access is not needed.</p><h3>Paired tablets</h3><div id="devices">${info.devices.length?info.devices.map(d=>`<div class="device-row"><span>${esc(d.name)}</span><button class="danger" data-revoke="${esc(d.id)}">Revoke</button></div>`).join(''):'<p>No tablets paired yet.</p>'}</div><div class="row"><button id="new-code" class="quiet">Generate a new PIN</button></div></section>`);
+    openPanel('Pair an Android tablet',`<section class="setup"><h3>Connect to this PC</h3><p>Install DeskWing.apk on the tablet. Open it and enter these details. This PIN works once and expires in five minutes.</p><div class="pair-details"><p>PC Wi-Fi address</p><strong class="cert-code">${info.addresses.map(esc).join(' · ')||'No network address found. Use USB.'}</strong><p>Certificate code</p><strong class="cert-code">${esc(grouped)}</strong><p>Pairing PIN</p><strong class="pair-code">${esc(pairing.code)}</strong></div><h3>USB connection</h3><p>Connect a data cable, enable USB debugging on the tablet, approve this PC, and run <strong>USB-Connect.cmd</strong> in the Windows package. Select USB in the tablet pairing screen. After pairing, you can switch between Wi-Fi and USB without pairing again.</p><p class="help">For Wi-Fi, allow the companion through Windows Firewall on your private network. Keep port ${info.httpsPort} on the local network; internet access is not needed.</p><h3>Paired tablets</h3><div id="devices">${info.devices.length?info.devices.map(d=>`<div class="device-row"><span>${esc(d.name)}</span><button class="danger" data-revoke="${esc(d.id)}">Revoke</button></div>`).join(''):'<p>No tablets paired yet.</p>'}</div><div class="row"><button id="new-code" class="quiet">Generate a new PIN</button></div></section>`);
     generation=panelGeneration;
     if(typeof attachPairingQr==='function')attachPairingQr(info);
     $('#new-code').onclick=showPairing;document.querySelectorAll('[data-revoke]').forEach(b=>b.onclick=async()=>{if(!owns()||!await confirmAction('Revoke this tablet?','It will lose access to this PC immediately.')||!owns())return;try{await api('/api/admin/revoke',{id:b.dataset.revoke});if(owns())await showPairing();}catch(error){if(owns())notice(error.message,true);}});

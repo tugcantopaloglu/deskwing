@@ -8,6 +8,8 @@ final class NativeDisplaySession {
     private let control: PinnedClient
     private let requestedRefresh: Int
     private let measuredRefresh: Int
+    private let qualityPreset: String
+    private let adaptiveQuality: Bool
     private let closed: (String, String) -> Void
     private var lease: String?
     private var viewer: DisplayVideoController?
@@ -16,15 +18,16 @@ final class NativeDisplaySession {
     private var beginning = false
     private var retiringControl = false
 
-    init(id: String, pc: PairedPC, refresh: Int, measuredRefresh: Int, closed: @escaping (String, String) -> Void) {
+    init(id: String, pc: PairedPC, refresh: Int, measuredRefresh: Int, qualityPreset: String = "balanced", adaptiveQuality: Bool = true, closed: @escaping (String, String) -> Void) {
         self.id = id; self.pc = pc; requestedRefresh = refresh; self.measuredRefresh = measuredRefresh; self.closed = closed
+        self.qualityPreset=qualityPreset; self.adaptiveQuality=adaptiveQuality
         control = PinnedClient(host: pc.host, port: pc.port, pin: pc.fingerprint, token: pc.token, displayControlOnly: true)
     }
     func start(presenter: UIViewController, ready: @escaping (Result<[String: Any], Error>) -> Void) {
         guard !stopped, !beginning, lease == nil else { ready(.failure(DeskError.message("This display session has already been used."))); return }
         beginning = true
         do {
-            try control.send(path: "/api/computer/display/stream/start", method: "POST", body: ["refreshRate":requestedRefresh]) { [self, weak presenter] result in
+            try control.send(path: "/api/computer/display/stream/start", method: "POST", body: ["refreshRate":requestedRefresh,"qualityPreset":qualityPreset,"adaptiveQuality":adaptiveQuality]) { [self, weak presenter] result in
                 beginning = false
                 defer { if stopped { retireControl() } }
                 do {
@@ -37,6 +40,7 @@ final class NativeDisplaySession {
                         stop(reason: "Display start stopped when the app or session changed."); return
                     }
                     let screen = DisplayVideoController(format: format, sourceRefresh: source) { [weak self] reason in self?.stop(reason: reason) }
+                    screen.configureInput(pc:pc,videoLease:newLease)
                     viewer = screen
                     let inbox = screen.inbox
                     let stream = DisplayVideoConnection(pc: pc, lease: newLease, format: format,

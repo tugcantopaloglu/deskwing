@@ -1,6 +1,6 @@
 # Soundpad, Discord, and other streaming tools
 
-Tablet Deck Studio 1.1 adds direct Soundpad playback controls. Other applications can use configured keyboard shortcuts, app/shortcut launches, or macros. OBS has its own direct integration.
+DeskWing includes direct Soundpad playback controls introduced in version 1.1. Other applications can use configured keyboard shortcuts, app/shortcut launches, or macros. OBS has its own direct integration.
 
 ## Compatibility at a glance
 
@@ -67,7 +67,7 @@ Yes: you can operate the board while using Discord Go Live, screen sharing, or v
 3. Add a keybind for **Toggle Mute**, **Toggle Deafen**, **Toggle Streamer Mode**, or **Toggle Screen Share**, as available in your client.
 4. Choose an unused combination. For example, configure `CTRL+ALT+F10` for Toggle Mute, `CTRL+ALT+F11` for Toggle Deafen, and `CTRL+ALT+F12` for Toggle Screen Share. These are examples, not Discord defaults.
 5. Leave Discord's Keybinds settings page; its keybinds are disabled while editing them.
-6. Add a Tablet Deck **Send keyboard shortcut** button with exactly the same combination.
+6. Add a DeskWing **Send keyboard shortcut** button with exactly the same combination.
 7. Test while connected to a Discord voice channel. Check whether the configured keybind works globally in your client; foreground-only shortcuts need the intended app focused.
 
 Discord documents desktop [custom keybinds](https://discord.com/blog/how-to-use-keyboard-shortcuts-on-discord-create-custom-keybinds) and [Toggle Screen Share](https://discord.com/blog/discord-patch-notes-november-1-2024). Keybind controls do not read Discord's current mute, deafen, or share state back into the board.

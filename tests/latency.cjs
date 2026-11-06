@@ -1,7 +1,7 @@
 // Synthetic local benchmark. Does not open OBS, a browser, or any GUI.
 const fs=require('node:fs'),path=require('node:path'),https=require('node:https'),tls=require('node:tls'),{performance}=require('node:perf_hooks'),{spawn}=require('node:child_process'),{WebSocketServer}=require('ws');
 const root=path.resolve(__dirname,'..'),folder=path.join(root,'.test-output','latency');fs.mkdirSync(folder,{recursive:true});
-const executable=process.env.TABLETDECK_COMPANION||path.resolve(root,'../../outputs/TabletDeck-Studio-1.3/Windows/TabletDeck-Companion.exe');
+const executable=process.env.TABLETDECK_COMPANION||path.resolve(root,'../../outputs/TabletDeck-Studio-1.3/Windows/DeskWing-Companion.exe');
 const label=process.env.TABLETDECK_BENCH_LABEL||'baseline';
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));let server,service,extraDelay=0,scene='Gameplay';
 const summary=values=>{values.sort((a,b)=>a-b);return {samples:values.length,p50ms:+values[Math.floor(values.length*.5)].toFixed(3),p95ms:+values[Math.floor(values.length*.95)].toFixed(3),maxms:+values.at(-1).toFixed(3)};};

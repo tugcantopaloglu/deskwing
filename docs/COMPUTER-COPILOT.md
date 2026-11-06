@@ -67,15 +67,15 @@ Limits: 1–16 presets, 1–40 controls per preset, 0–20 unique executable nam
 
 ## Extended display boundary
 
-Screen mirroring sends pixels from an existing display. A genuine additional Windows desktop must first exist in Windows' display topology, usually through a supported indirect/virtual display driver plus a frame transport and tablet presentation path. These are distinct capabilities. The backend reports `extendedDisplay=false` and `displayCapture=false`; its controller view must not describe itself as a working second display. A future optional driver integration should report installed/available/configured separately, preserve normal tablet controller operation, and never auto-install a driver as a side effect of opening Computer mode.
+Screen mirroring sends pixels from an existing display. A genuine additional Windows desktop must first exist in Windows' display topology through a supported indirect/virtual display driver plus a frame transport and tablet presentation path. These are distinct capabilities. The shortcut-controller backend's own flags remain `extendedDisplay=false` and `displayCapture=false`; the separate [Second display service](EXTENDED-DISPLAY.md) reports its actual driver, owned-display and viewing state. Opening contextual controls does not create a monitor or install a driver. Native viewing and explicitly enabled pen input have their own permissions and leases.
 
 ## Verification
 
 Run `dotnet run --project tests/copilot-backend/CopilotBackendTests.csproj --configuration Release`. The suite links the production controller and shortcut parser with minimal host data contracts. Its foreground reader and executor are fakes. The checks cover stale-window/settings tokens, mismatched focus, browser ambiguity, custom saved bindings, global media allowlisting, concurrent taps, persistence, corrupt settings, unsupported keys, no chat Enter shortcut, opt-in behavior, and truthful display capabilities. Tests never inject keys, open apps/windows, contact real OBS, or read/write user settings.
 
-For a full source compile while the live companion executable is running, use an isolated output directory, for example `dotnet build companion/TabletDeck.csproj --configuration Release --no-restore -o .test-output/copilot-backend-build`. Do not stop or overwrite the live executable for a compile check.
+For a full source compile while the live companion executable is running, use an isolated output directory, for example `dotnet build companion/DeskWing.csproj --configuration Release --no-restore -o .test-output/copilot-backend-build`. Do not stop or overwrite the live executable for a compile check.
 
-Required Snyk review applies to the new first-party C# files. `snyk_code_scan` was unavailable in the agent's enabled tool inventory; the integrating agent must run it once the tool is available and resolve/rescan any new findings. A successful local compile and these isolated tests are not a replacement for that scan.
+Required Snyk review applies to first-party changes. Run the actual `snyk_code_scan`, resolve new findings and rescan the final source before distribution; record the exact candidate and result in its security report. A successful local compile and these isolated tests are not a replacement for that scan.
 
 ## Primary references
 

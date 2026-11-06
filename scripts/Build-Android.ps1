@@ -75,6 +75,23 @@ Copy-Item -Path (Join-Path $taskRoot 'companion\Licenses\*') -Destination (Join-
 $taskUiSource=Get-Content -LiteralPath (Join-Path $taskAndroid 'src\app\tabletdeck\MainActivity.java') -Raw
 $taskAllowedBlock=[regex]::Match($taskUiSource,'UI_ASSETS=new HashSet<>\(Arrays\.asList\((.*?)\)\)',[Text.RegularExpressions.RegexOptions]::Singleline).Groups[1].Value
 $taskAllowedPaths=@([regex]::Matches($taskAllowedBlock,'"([^"]+)"') | ForEach-Object {$_.Groups[1].Value})
+$taskNotebookSource=Get-Content -LiteralPath (Join-Path $taskAndroid 'src\app\tabletdeck\NotebookUiAssets.java') -Raw
+$taskNotebookBlock=[regex]::Match($taskNotebookSource,'PATHS=new HashSet<>\(Arrays\.asList\((.*?)\)\)',[Text.RegularExpressions.RegexOptions]::Singleline).Groups[1].Value
+$taskNotebookPaths=@([regex]::Matches($taskNotebookBlock,'"([^"]+)"') | ForEach-Object {$_.Groups[1].Value})
+if($taskNotebookPaths.Count -lt 3){throw 'The notebook asset allowlist is missing. Run scripts/sync-notebook-assets.py.'}
+$taskAllowedPaths=@($taskAllowedPaths+$taskNotebookPaths | Sort-Object -Unique)
+$taskPdfManifest=Get-Content -LiteralPath (Join-Path $taskRoot 'scripts\notebook-pdf-vendor.json') -Raw | ConvertFrom-Json
+$taskPdfBytes=0L
+if(@($taskPdfManifest.assets).Count -lt 1 -or @($taskPdfManifest.assets).Count -gt 512){throw 'Invalid offline PDF asset count.'}
+foreach($taskAssetEntry in $taskPdfManifest.assets){
+ $taskAssetName=[string]$taskAssetEntry.path
+ if($taskAssetName -notmatch '^vendor/(pdfjs|pdf-lib)/' -or $taskAssetName.Contains('\') -or $taskAssetName.Split('/') -contains '..' -or $taskAssetName -match '[:?#]' -or $taskAllowedPaths -notcontains ('/'+$taskAssetName)){throw 'Unsafe or unregistered offline PDF asset.'}
+ $taskVendorFile=Join-Path (Join-Path $taskRoot 'companion\wwwroot') $taskAssetName
+ $taskVendorInfo=Get-Item -LiteralPath $taskVendorFile
+ if($taskVendorInfo.Length -ne $taskAssetEntry.bytes -or $taskVendorInfo.Length -gt 12MB -or (Get-FileHash -LiteralPath $taskVendorFile -Algorithm SHA256).Hash -ne $taskAssetEntry.sha256){throw 'Offline PDF dependency checksum or size mismatch.'}
+ $taskPdfBytes+=$taskVendorInfo.Length
+ if($taskPdfBytes -gt 64MB){throw 'Offline PDF dependencies exceed the bundle budget.'}
+}
 $taskEntry=Get-Content -LiteralPath (Join-Path $taskRoot 'companion\wwwroot\index.html') -Raw
 $taskReferencedAssets=@([regex]::Matches($taskEntry,'(?:src|href)="([^"]+\.(?:js|css))"') | ForEach-Object {$_.Groups[1].Value})
 foreach($taskAsset in $taskReferencedAssets){
@@ -99,6 +116,7 @@ try {
  }
  foreach($taskAsset in $taskReferencedAssets){if($taskEntries -notcontains ('assets/www/'+$taskAsset)){throw "Referenced APK asset is missing: $taskAsset"}}
  foreach($taskLicense in @('ZXING-LICENSE.txt','QRCODER-LICENSE.txt')){if($taskEntries -notcontains ('assets/licenses/'+$taskLicense)){throw "APK license is missing: $taskLicense"}}
+ foreach($taskAsset in $taskNotebookPaths){if($taskEntries -notcontains ('assets/www'+$taskAsset)){throw "APK notebook asset is missing: $taskAsset"}}
 } finally {$taskArchive.Dispose()}
 $taskSources=@(Get-ChildItem -LiteralPath (Join-Path $taskAndroid 'src') -Filter '*.java' -Recurse | ForEach-Object FullName)
 $taskQr=Join-Path $taskAndroid 'vendor\zxing-core-3.5.3.jar'
@@ -123,7 +141,7 @@ if($Unsigned){
  $taskApk=Join-Path $OutputDirectory 'DeskWing-unsigned.apk'
  Copy-Item -LiteralPath (Join-Path $taskBuild 'aligned.apk') -Destination $taskApk -Force
 }else{
- $taskApk=Join-Path $OutputDirectory $(if($Development){'DeskWing-development.apk'}else{'TabletDeck-Studio.apk'})
+ $taskApk=Join-Path $OutputDirectory $(if($Development){'DeskWing-development.apk'}else{'DeskWing.apk'})
  Invoke-Checked (Join-Path $taskJdk 'bin\java.exe') @('-jar',(Join-Path $taskBuildTools 'lib\apksigner.jar'),'sign','--ks',$SigningKey,'--ks-key-alias',$SigningAlias,'--ks-pass',('file:'+$SigningPasswordFile),'--out',$taskApk,(Join-Path $taskBuild 'aligned.apk'))
  $taskVerification=& (Join-Path $taskJdk 'bin\java.exe') '-jar' (Join-Path $taskBuildTools 'lib\apksigner.jar') 'verify' '--verbose' '--print-certs' $taskApk
  if($LASTEXITCODE -ne 0){throw 'APK signature verification failed.'}

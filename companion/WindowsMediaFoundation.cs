@@ -10,6 +10,7 @@ internal static class MfNative
     internal const int Version=0x00020070,NeedMoreInput=unchecked((int)0xc00d6d72),StreamChange=unchecked((int)0xc00d6d61),NotAccepting=unchecked((int)0xc00d36b0);
     internal const int OutputProvidesSamples=0x100,OutputCanProvideSamples=0x200;
     internal const int CommandFlush=0,CommandDrain=1,NotifyBeginStreaming=0x10000000,NotifyEndStreaming=0x10000001,NotifyEndOfStream=0x10000002,NotifyStartOfStream=0x10000003;
+    internal const int NoEventsAvailable=unchecked((int)0xc00d3e80),EventNoWait=1,TransformNeedInput=601,TransformHaveOutput=602;
     internal static Guid H264Encoder=new("6ca50344-051a-4ded-9779-a43305165e35");
     internal static Guid Video=new("73646976-0000-0010-8000-00aa00389b71"),H264=new("34363248-0000-0010-8000-00aa00389b71"),NV12=new("3231564e-0000-0010-8000-00aa00389b71"),IYUV=new("56555949-0000-0010-8000-00aa00389b71");
     internal static Guid MajorType=new("48eba18e-f8c9-4687-bf11-0a74c9f96a8f"),Subtype=new("f7e34c9a-42e8-4714-b74b-cb29d72c35e5");
@@ -18,12 +19,15 @@ internal static class MfNative
     internal static Guid SequenceHeader=new("3c036de7-3ad0-4c9e-9216-ee6d6ac21cb3"),CleanPoint=new("9cdf01d8-a0f0-43ba-b077-eaa06cbd728a");
     internal static Guid LowLatency=new("9c27891a-ed7a-40e1-88e8-b22727a024ee"),RateControlMode=new("1c0608e9-370c-4710-8a58-cb6181c42423"),QualityVsSpeed=new("98332df8-03cd-476b-89fa-3f9e442dec9f");
     internal static Guid MeanBitrate=new("f7222374-2144-4815-b550-a37f8e12ee52"),GopSize=new("95f31b26-95a4-41aa-9303-246a7fc6eef1"),BPictureCount=new("8d390aac-dc5c-4200-b57f-814d04babab2"),ForceKeyFrame=new("398c1b98-8353-475a-9ef2-8f265d260345");
+    internal static Guid VideoEncoderCategory=new("f79eac7d-e545-4387-bdee-d647d7bde42a"),TransformAsync=new("f81a699a-649a-497d-8c73-29f8fed6ad7a"),TransformAsyncUnlock=new("e5666d6b-3422-4eb6-a421-da7db1f8e207");
+    internal static Guid FriendlyName=new("314ffbae-5b41-4c95-9c19-4e7d586face3"),TransformInterface=typeof(IMFTransform).GUID;
 
     [DllImport("mfplat.dll",ExactSpelling=true)] internal static extern int MFStartup(int version,int flags);
     [DllImport("mfplat.dll",ExactSpelling=true)] internal static extern int MFShutdown();
     [DllImport("mfplat.dll",ExactSpelling=true)] internal static extern int MFCreateMediaType(out IMFMediaType mediaType);
     [DllImport("mfplat.dll",ExactSpelling=true)] internal static extern int MFCreateSample(out IMFSample sample);
     [DllImport("mfplat.dll",ExactSpelling=true)] internal static extern int MFCreateMemoryBuffer(int maximumLength,out IMFMediaBuffer buffer);
+    [DllImport("mfplat.dll",ExactSpelling=true)] internal static extern int MFTEnumEx(Guid category,int flags,ref RegisterTypeInfo inputType,ref RegisterTypeInfo outputType,out IntPtr activations,out int count);
     [DllImport("ole32.dll",ExactSpelling=true)] internal static extern int CoInitializeEx(IntPtr reserved,int flags);
     [DllImport("ole32.dll",ExactSpelling=true)] internal static extern void CoUninitialize();
 
@@ -32,6 +36,7 @@ internal static class MfNative
 
     [StructLayout(LayoutKind.Sequential)] internal struct InputStreamInfo{internal long MaximumLatency;internal int Flags,Size,MaximumLookahead,Alignment;}
     [StructLayout(LayoutKind.Sequential)] internal struct OutputStreamInfo{internal int Flags,Size,Alignment;}
+    [StructLayout(LayoutKind.Sequential)] internal struct RegisterTypeInfo{internal Guid MajorType,Subtype;}
     // Raw pointers preserve the two distinct output ownership cases. The caller releases Events,
     // and releases Sample only when the transform supplied a new COM reference.
     [StructLayout(LayoutKind.Sequential)] internal struct OutputDataBuffer{internal int StreamId;internal IntPtr Sample;internal int Status;internal IntPtr Events;}
@@ -70,6 +75,97 @@ internal static class MfNative
         [PreserveSig] int GetItemByIndex(int index,out Guid key,IntPtr value);
         [PreserveSig] int CopyAllItems(IMFAttributes destination);
     }
+
+    [ComImport,Guid("7fee9e9a-4a89-47a6-899c-b6a53a70fb67"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IMFActivate : IMFAttributes
+    {
+        [PreserveSig] new int GetItem(ref Guid key,IntPtr value);
+        [PreserveSig] new int GetItemType(ref Guid key,out int type);
+        [PreserveSig] new int CompareItem(ref Guid key,IntPtr value,[MarshalAs(UnmanagedType.Bool)] out bool result);
+        [PreserveSig] new int Compare(IMFAttributes other,int matchType,[MarshalAs(UnmanagedType.Bool)] out bool result);
+        [PreserveSig] new int GetUINT32(ref Guid key,out int value);
+        [PreserveSig] new int GetUINT64(ref Guid key,out long value);
+        [PreserveSig] new int GetDouble(ref Guid key,out double value);
+        [PreserveSig] new int GetGUID(ref Guid key,out Guid value);
+        [PreserveSig] new int GetStringLength(ref Guid key,out int length);
+        [PreserveSig] new int GetString(ref Guid key,[Out,MarshalAs(UnmanagedType.LPWStr)] StringBuilder value,int size,out int length);
+        [PreserveSig] new int GetAllocatedString(ref Guid key,out IntPtr value,out int length);
+        [PreserveSig] new int GetBlobSize(ref Guid key,out int size);
+        [PreserveSig] new int GetBlob(ref Guid key,[Out,MarshalAs(UnmanagedType.LPArray,SizeParamIndex=2)] byte[] value,int size,out int actual);
+        [PreserveSig] new int GetAllocatedBlob(ref Guid key,out IntPtr value,out int size);
+        [PreserveSig] new int GetUnknown(ref Guid key,ref Guid iid,out IntPtr value);
+        [PreserveSig] new int SetItem(ref Guid key,IntPtr value);
+        [PreserveSig] new int DeleteItem(ref Guid key);
+        [PreserveSig] new int DeleteAllItems();
+        [PreserveSig] new int SetUINT32(ref Guid key,int value);
+        [PreserveSig] new int SetUINT64(ref Guid key,long value);
+        [PreserveSig] new int SetDouble(ref Guid key,double value);
+        [PreserveSig] new int SetGUID(ref Guid key,ref Guid value);
+        [PreserveSig] new int SetString(ref Guid key,[MarshalAs(UnmanagedType.LPWStr)] string value);
+        [PreserveSig] new int SetBlob(ref Guid key,[In,MarshalAs(UnmanagedType.LPArray,SizeParamIndex=2)] byte[] value,int size);
+        [PreserveSig] new int SetUnknown(ref Guid key,[MarshalAs(UnmanagedType.IUnknown)] object value);
+        [PreserveSig] new int LockStore();
+        [PreserveSig] new int UnlockStore();
+        [PreserveSig] new int GetCount(out int count);
+        [PreserveSig] new int GetItemByIndex(int index,out Guid key,IntPtr value);
+        [PreserveSig] new int CopyAllItems(IMFAttributes destination);
+        [PreserveSig] int ActivateObject(ref Guid iid,out IntPtr value);
+        [PreserveSig] int ShutdownObject();
+        [PreserveSig] int DetachObject();
+    }
+    [ComImport,Guid("df598932-f10c-4e39-bba2-c308f101daa3"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IMFMediaEvent : IMFAttributes
+    {
+        [PreserveSig] new int GetItem(ref Guid key,IntPtr value);
+        [PreserveSig] new int GetItemType(ref Guid key,out int type);
+        [PreserveSig] new int CompareItem(ref Guid key,IntPtr value,[MarshalAs(UnmanagedType.Bool)] out bool result);
+        [PreserveSig] new int Compare(IMFAttributes other,int matchType,[MarshalAs(UnmanagedType.Bool)] out bool result);
+        [PreserveSig] new int GetUINT32(ref Guid key,out int value);
+        [PreserveSig] new int GetUINT64(ref Guid key,out long value);
+        [PreserveSig] new int GetDouble(ref Guid key,out double value);
+        [PreserveSig] new int GetGUID(ref Guid key,out Guid value);
+        [PreserveSig] new int GetStringLength(ref Guid key,out int length);
+        [PreserveSig] new int GetString(ref Guid key,[Out,MarshalAs(UnmanagedType.LPWStr)] StringBuilder value,int size,out int length);
+        [PreserveSig] new int GetAllocatedString(ref Guid key,out IntPtr value,out int length);
+        [PreserveSig] new int GetBlobSize(ref Guid key,out int size);
+        [PreserveSig] new int GetBlob(ref Guid key,[Out,MarshalAs(UnmanagedType.LPArray,SizeParamIndex=2)] byte[] value,int size,out int actual);
+        [PreserveSig] new int GetAllocatedBlob(ref Guid key,out IntPtr value,out int size);
+        [PreserveSig] new int GetUnknown(ref Guid key,ref Guid iid,out IntPtr value);
+        [PreserveSig] new int SetItem(ref Guid key,IntPtr value);
+        [PreserveSig] new int DeleteItem(ref Guid key);
+        [PreserveSig] new int DeleteAllItems();
+        [PreserveSig] new int SetUINT32(ref Guid key,int value);
+        [PreserveSig] new int SetUINT64(ref Guid key,long value);
+        [PreserveSig] new int SetDouble(ref Guid key,double value);
+        [PreserveSig] new int SetGUID(ref Guid key,ref Guid value);
+        [PreserveSig] new int SetString(ref Guid key,[MarshalAs(UnmanagedType.LPWStr)] string value);
+        [PreserveSig] new int SetBlob(ref Guid key,[In,MarshalAs(UnmanagedType.LPArray,SizeParamIndex=2)] byte[] value,int size);
+        [PreserveSig] new int SetUnknown(ref Guid key,[MarshalAs(UnmanagedType.IUnknown)] object value);
+        [PreserveSig] new int LockStore();
+        [PreserveSig] new int UnlockStore();
+        [PreserveSig] new int GetCount(out int count);
+        [PreserveSig] new int GetItemByIndex(int index,out Guid key,IntPtr value);
+        [PreserveSig] new int CopyAllItems(IMFAttributes destination);
+        [PreserveSig] int GetType(out int eventType);
+        [PreserveSig] int GetExtendedType(out Guid extendedType);
+        [PreserveSig] int GetStatus(out int status);
+        [PreserveSig] int GetValue(IntPtr value);
+    }
+    [ComImport,Guid("2cd0bd52-bcd5-4b89-b62c-eadc0c031e7d"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IMFMediaEventGenerator
+    {
+        [PreserveSig] int GetEvent(int flags,out IMFMediaEvent mediaEvent);
+        [PreserveSig] int BeginGetEvent(IntPtr callback,IntPtr state);
+        [PreserveSig] int EndGetEvent(IntPtr result,out IMFMediaEvent mediaEvent);
+        [PreserveSig] int QueueEvent(int eventType,ref Guid extendedType,int status,IntPtr value);
+    }
+    [ComImport,Guid("97ec2ea4-0e42-4937-97ac-9d6d328824e1"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    internal interface IMFShutdown
+    {
+        [PreserveSig] int Shutdown();
+        [PreserveSig] int GetShutdownStatus(out int status);
+    }
+
     [ComImport,Guid("44ae0fa8-ea31-4109-8d2e-4cae4997c555"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IMFMediaType : IMFAttributes
     {

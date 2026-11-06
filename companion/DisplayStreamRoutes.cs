@@ -9,8 +9,9 @@ internal static class DisplayStreamRoutes
     internal const string StreamPath="/api/computer/display/stream";
     private sealed record LeaseRequest(string Lease="");
 
-    public static void MapDisplayStream(this WebApplication app,DisplayStream video,Func<HttpContext,string> principal,Func<HttpContext,bool> authorized,Func<bool> available)
+    public static void MapDisplayStream(this WebApplication app,DisplayStream video,Func<HttpContext,string> principal,Func<HttpContext,bool> authorized,Func<bool> available,Func<HttpContext,bool>? administrator=null)
     {
+        app.MapGet(StreamPath+"/status",(HttpContext ctx)=>Results.Ok(video.Status(principal(ctx),administrator?.Invoke(ctx)??false)));
         app.MapPost(StreamPath+"/start",(Func<HttpContext,Task<IResult>>)(async ctx=>{
             var request=await Read<DisplayVideoStart>(ctx);
             RequireAvailable(available);

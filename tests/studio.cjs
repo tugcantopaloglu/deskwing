@@ -1,7 +1,7 @@
 // New studio API and controller checks against a synthetic OBS service. No browser or GUI.
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),vm=require('node:vm'),acorn=require('acorn'),{spawn,spawnSync}=require('node:child_process'),{WebSocketServer}=require('ws');
 const root=path.resolve(__dirname,'..'),output=fs.mkdtempSync(path.join(os.tmpdir(),'tabletdeck-suite-')),data=path.join(output,'data');fs.mkdirSync(data);
-const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/TabletDeck-Companion.exe');
+const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/DeskWing-Companion.exe');
 let server,mock,passed=0,nativeChecks=0;const calls=[],check=(value,label)=>{assert.ok(value,label);passed++;console.log('PASS '+label);},sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function run(){
  const rejectedData=path.join(output,'must-not-initialize');const rejected=spawnSync(executable,['--invalid-studio-option','--no-browser','--no-tray','--data-dir',rejectedData],{windowsHide:true,encoding:'utf8',timeout:5000});check(rejected.status===2&&!fs.existsSync(rejectedData),'unknown CLI option is rejected before user data, server or GUI initialization');

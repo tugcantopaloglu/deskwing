@@ -1,0 +1,86 @@
+name: Prepare Android beta artifacts
+
+on:
+  push:
+    branches:
+      - codex/workspace-expansion
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Validate unsigned packages or prepare a signed beta (no Play upload)
+        required: true
+        default: unsigned-validation
+        type: choice
+        options:
+          - unsigned-validation
+          - signed-beta
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-android-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  reject-signed-feature-branch:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'signed-beta' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Signed beta packaging is available only from main after review.' >&2; exit 1
+
+  unsigned-validation:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/codex/workspace-expansion') || (github.event_name == 'workflow_dispatch' && inputs.mode == 'unsigned-validation')
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Check beta packaging policy
+        shell: pwsh
+        run: ./tests/beta-android-policy.ps1
+      - name: Build and validate unsigned APK and AAB
+        shell: pwsh
+        run: ./scripts/beta-android.ps1 -Mode unsigned-validation -WorkDirectory "$env:RUNNER_TEMP/deskwing-android-beta"
+      - name: Retain explicit validation artifacts only
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: android-unsigned-validation-${{ github.sha }}
+          path: ${{ runner.temp }}/deskwing-android-beta/approved/
+          if-no-files-found: error
+          retention-days: 7
+
+  signed-beta:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'signed-beta' && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    environment: android-beta
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Check beta packaging policy before loading signing secrets
+        shell: pwsh
+        run: ./tests/beta-android-policy.ps1
+      - name: Prepare signed artifacts with the enrolled upload key
+        shell: pwsh
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_CERT_SHA256: ${{ vars.ANDROID_UPLOAD_CERT_SHA256 }}
+          ANDROID_LAST_PUBLISHED_VERSION_CODE: ${{ vars.ANDROID_LAST_PUBLISHED_VERSION_CODE }}
+        run: ./scripts/beta-android.ps1 -Mode signed-beta -WorkDirectory "$env:RUNNER_TEMP/deskwing-android-beta"
+      - name: Remove temporary signing material
+        if: always()
+        shell: pwsh
+        run: ./scripts/beta-android.ps1 -Mode cleanup -WorkDirectory "$env:RUNNER_TEMP/deskwing-android-beta"
+      - name: Retain approved signed packages only
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: android-signed-beta-${{ github.sha }}
+          path: ${{ runner.temp }}/deskwing-android-beta/approved/
+          if-no-files-found: error
+          retention-days: 7
+          # No key, password, tool download, intermediate, or full build log is uploaded.

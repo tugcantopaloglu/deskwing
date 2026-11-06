@@ -8,7 +8,7 @@ const {spawn}=require('node:child_process');
 const acorn=require('acorn');
 const root=path.resolve(__dirname,'..');
 const output=path.join(process.env.TABLETDECK_TEST_OUTPUT||path.join(root,'.test-output'),'v13-headless');fs.mkdirSync(output,{recursive:true});
-const companion=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/TabletDeck-Companion.exe');
+const companion=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/DeskWing-Companion.exe');
 let passed=0;const check=(value,label)=>{assert.ok(value,label);passed++;console.log('PASS '+label);};
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let server;

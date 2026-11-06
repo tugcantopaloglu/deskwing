@@ -11,6 +11,9 @@ using Microsoft.AspNetCore.Http.Features;
 
 var flagOptions=new HashSet<string>(StringComparer.Ordinal){"--self-test","--ink-self-test","--pen-self-test","--pen-integration-self-test","--reliability-self-test","--aux-recovery-self-test","--boards-self-test","--studio-self-test","--monitor-self-test","--extended-display-self-test","--live-soundpad-self-test","--update-self-test","--desktop-window-self-test","--audio-smoke-test","--hardening-self-test","--no-browser","--no-tray","--tray","--after-update"};
 var valueOptions=new HashSet<string>(StringComparer.Ordinal){"--data-dir","--http-port","--https-port","--control-port"};
+string? explicitDataDirectory;
+try {explicitDataDirectory=WorkspaceIdentity.ExplicitDataDirectory(args);}
+catch(ArgumentException ex){Console.Error.WriteLine(ex.Message);Environment.ExitCode=2;return;}
 for(var i=0;i<args.Length;i++){
     if(flagOptions.Contains(args[i]))continue;
     if(valueOptions.Contains(args[i])&&i+1<args.Length&&!args[i+1].StartsWith("--",StringComparison.Ordinal)){i++;continue;}
@@ -28,11 +31,13 @@ if(args.Contains("--monitor-self-test")) {await MonitorTests.Run();return;}
 if(args.Contains("--extended-display-self-test")) {await ExtendedDisplayTests.Run();return;}
 if(args.Contains("--live-soundpad-self-test")) {await LiveSoundpadTests.Run();return;}
 if(args.Contains("--update-self-test")){await UpdateTests.Run();return;}
-if(args.Contains("--desktop-window-self-test")){var testDir=Array.IndexOf(args,"--data-dir");if(testDir<0)throw new ArgumentException("An isolated test data directory is required.");await DesktopWindowTests.Run(args[testDir+1]);return;}
+if(args.Contains("--desktop-window-self-test")){if(explicitDataDirectory is null)throw new ArgumentException("An isolated test data directory is required.");await DesktopWindowTests.Run(explicitDataDirectory);return;}
 if(args.Contains("--audio-smoke-test")) {await SelfTests.AudioSmokeTest();return;}
 if(args.Contains("--hardening-self-test")) {await HardeningTests.Run();return;}
 string Option(string name,string fallback) {var i=Array.IndexOf(args,name);return i>=0&&i+1<args.Length?args[i+1]:fallback;}
-var dataDir=Option("--data-dir",Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"TabletDeck"));
+var dataDir=explicitDataDirectory??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"TabletDeck");
+var startupError=WorkspaceIdentity.StartupError(explicitDataDirectory is not null);
+if(startupError is not null){Console.Error.WriteLine(startupError);Environment.ExitCode=2;return;}
 var store=new DataStore(dataDir);
 var httpPort=int.Parse(Option("--http-port","8740"),CultureInfo.InvariantCulture);
 var httpsPort=int.Parse(Option("--https-port","8743"),CultureInfo.InvariantCulture);
@@ -42,7 +47,7 @@ X509Certificate2 cert;
 if(File.Exists(certPath)) cert=X509CertificateLoader.LoadPkcs12FromFile(certPath,null,X509KeyStorageFlags.UserKeySet);
 else {
     using var rsa=RSA.Create(3072);
-    var request=new CertificateRequest("CN=Tablet Deck local companion",rsa,HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1);
+    var request=new CertificateRequest("CN=DeskWing local companion",rsa,HashAlgorithmName.SHA256,RSASignaturePadding.Pkcs1);
     request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false,false,0,true));
     request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature|X509KeyUsageFlags.KeyEncipherment,true));
     var usages=new System.Security.Cryptography.OidCollection {new Oid("1.3.6.1.5.5.7.3.1")};request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(usages,true));
@@ -56,7 +61,7 @@ var pairing=new Pairing();
 using var singleton=AcquireLock(Path.Combine(store.DirectoryPath,"runtime.lock"));
 if(singleton is null) {
     if(!args.Contains("--no-browser"))try{using var current=JsonDocument.Parse(File.ReadAllText(Path.Combine(store.DirectoryPath,"admin-session.json")));var port=current.RootElement.GetProperty("httpPort").GetInt32();var token=current.RootElement.GetProperty("token").GetString()??"";if(port is <1 or >65535||token.Length!=64||!token.All(Uri.IsHexDigit))throw new ArgumentException("Invalid local console session.");using var client=new HttpClient{Timeout=TimeSpan.FromSeconds(5)};client.DefaultRequestHeaders.Add("X-Deck-Admin",token);using var response=await client.PostAsync($"http://127.0.0.1:{port}/api/admin/window",new StringContent("{}",System.Text.Encoding.UTF8,"application/json"));response.EnsureSuccessStatusCode();}catch(Exception ex) when(ex is not OutOfMemoryException){Console.Error.WriteLine("The companion is running, but its desktop window could not be opened. Stop the headless companion and start it normally to enable the tray and window.");}
-    else Console.Error.WriteLine("Tablet Deck is already running. No second service was started.");
+    else Console.Error.WriteLine("DeskWing is already running. No second service was started.");
     return;
 }
 var builder=WebApplication.CreateBuilder(new WebApplicationOptions {Args=[],ContentRootPath=AppContext.BaseDirectory,WebRootPath=Path.Combine(AppContext.BaseDirectory,"wwwroot")});
@@ -77,6 +82,7 @@ var computer=new ComputerCopilot(store.DirectoryPath,fastCommands.ExecuteConfigu
 using var mediaSessions=new MediaSessions();
 using var extendedDisplay=new ExtendedDisplay();
 using var displayStream=new DisplayStream(extendedDisplay);
+using var displayInput=new DisplayInput(displayStream,extendedDisplay);fastCommands.ConfigureDisplayInput(displayInput);
 await using var stateUpdates=new StateUpdates(engine);
 await using var fastControl=new FastControlServer(store,fastCommands,stateUpdates,cert,controlPort);
 var desktop=new DesktopPreferences(store.DirectoryPath);
@@ -108,7 +114,7 @@ app.Use(async (ctx,next)=>{
             if(ctx.Request.ContentLength>FastCommands.PenRequestBytes){ctx.Response.StatusCode=413;await ctx.Response.WriteAsJsonAsync(new{error="Keep pen packets below 16 KB."});return;}
             var size=ctx.Features.Get<IHttpMaxRequestBodySizeFeature>();if(size is not null&&!size.IsReadOnly)size.MaxRequestBodySize=FastCommands.PenRequestBytes;
         }
-        if(fastCommands.Maintenance&&ctx.Request.Method!="GET"&&ctx.Request.Path!="/api/hold"&&ctx.Request.Path!="/api/cancel"&&ctx.Request.Path!="/api/pen"&&ctx.Request.Path!=DisplayStreamRoutes.StreamPath+"/stop"){ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{error="The companion is restarting for an update."});return;}
+        if(fastCommands.Maintenance&&ctx.Request.Method!="GET"&&ctx.Request.Path!="/api/hold"&&ctx.Request.Path!="/api/cancel"&&ctx.Request.Path!="/api/pen"&&ctx.Request.Path!="/api/computer/display/input"&&ctx.Request.Path!=DisplayStreamRoutes.StreamPath+"/stop"){ctx.Response.StatusCode=409;await ctx.Response.WriteAsJsonAsync(new{error="The companion is restarting for an update."});return;}
         try {await next(ctx);} catch(Exception ex) when(ex is not OutOfMemoryException) {
             ctx.Response.StatusCode=ex is BadHttpRequestException bad?bad.StatusCode:ex is JsonException or ArgumentException ? 400 : 409;
             await ctx.Response.WriteAsJsonAsync(new {error=ex is OperationCanceledException?"The action timed out. Check OBS and try again.":ex.Message});
@@ -119,8 +125,9 @@ app.Use(async (ctx,next)=>{
         await next(ctx);
     }
 });
-app.UseDefaultFiles();app.UseStaticFiles();
+app.UseDefaultFiles();app.UseStaticFiles(NotebookStaticFiles.Options);
 app.MapInk(inkWorkspace);
+app.MapNotebooks(()=>new NotebookWorkspace(store.DirectoryPath,inkWorkspace));
 app.MapGet("/api/pen",()=>windowsPen.Status);
 app.MapPost("/api/pen",(PenRequest req,HttpContext ctx)=>fastCommands.Pen(req,Principal(ctx)));
 app.MapPost("/api/pen/frame",async(PenPreviewRequest req,HttpContext ctx)=>Results.Ok(await penPreview.Frame(req,Principal(ctx),ctx.RequestAborted)));
@@ -153,16 +160,17 @@ app.MapPost("/api/admin/computer/display",async (JsonElement req,CancellationTok
     throw new ArgumentException("Choose create, remove, or share.");
 });
 app.MapPost("/api/computer/display/frame",(ExtendedDisplayFrameRequest req,CancellationToken ct)=>extendedDisplay.FrameAsync(req,ct));
-app.MapDisplayStream(displayStream,Principal,IsAuthorized,()=>!fastCommands.Maintenance&&!app.Lifetime.ApplicationStopping.IsCancellationRequested);
+app.MapDisplayStream(displayStream,Principal,IsAuthorized,()=>!fastCommands.Maintenance&&!app.Lifetime.ApplicationStopping.IsCancellationRequested,IsAdmin);
+app.MapDisplayInput(displayInput,fastCommands,Principal,()=>!fastCommands.Maintenance&&!app.Lifetime.ApplicationStopping.IsCancellationRequested);
 app.MapGet("/api/board",async(CancellationToken ct)=>{
     var config=store.Config;var live=config.Pages.Any(p=>p.LiveScenes)?await engine.State():null;
     SoundpadLibraryResult? library=null;string? soundpadWarning=null;
     if(config.Pages.Any(p=>p.LiveSoundpad))try{library=await SoundpadLibrary.Get(false,ct);soundpadWarning=library.Warning;}catch(Exception ex) when(ex is IOException or InvalidOperationException){soundpadWarning=ex.Message;}
     var sounds=library?.Sounds.ToDictionary(s=>s.Index)??[];
     var identities=library?.Sounds.GroupBy(s=>s.Key).ToDictionary(g=>g.Key,g=>g.Count())??[];
-    return new {profileId=config.ProfileId,profileName=config.ProfileName,sceneCatalogRevision=live?["sceneCatalogRevision"]?.GetValue<string>(),pages=config.Pages.Select(p=>{
+    return new {workspace=new {computerName=Environment.MachineName,connectionCode=WorkspaceIdentity.ConnectionCode(fingerprint),version=typeof(ReleaseUpdates).Assembly.GetName().Version?.ToString(3)??""},profileId=config.ProfileId,profileName=config.ProfileName,sceneCatalogRevision=live?["sceneCatalogRevision"]?.GetValue<string>(),pages=config.Pages.Select(p=>{
         var actions=p.LiveSoundpad?LiveSoundpad.Buttons(p,library):p.LiveScenes?LiveScenes.Buttons(live?["scenes"]):(IEnumerable<DeckAction>)p.Buttons;
-        return new {p.Id,p.Name,p.Icon,p.LiveScenes,p.LiveSoundpad,soundpadWarning=p.LiveSoundpad?soundpadWarning:null,buttons=actions.Select(a=>{
+        return new {p.Id,p.Name,p.Icon,p.LiveScenes,p.LiveSoundpad,liveSoundpadOutput=p.LiveSoundpad?p.LiveSoundpadOutput:null,soundpadWarning=p.LiveSoundpad?soundpadWarning:null,buttons=actions.Select(a=>{
             LibrarySound? sound=null;if(p.LiveSoundpad&&int.TryParse(a.Target,out var index))sounds.TryGetValue(index,out sound);
             return new{a.Id,a.Label,a.Kind,a.Icon,a.IconImage,a.Color,confirm=DeckEngine.NeedsConfirm(a),target=a.Kind is "scene" or "preview"?a.Target:"",categories=sound?.Categories??[],searchText=sound is null?"":sound.Name+" "+sound.Artist,configured=p.LiveSoundpad?sound is {Key.Length:64}&&identities[sound.Key]==1:!(a.Kind is "app" or "sound" or "url" or "hotkey" or "soundpadPlay")||a.Target.Length>0};
         })};
@@ -218,7 +226,7 @@ app.MapPost("/api/pair",(PairRequest req)=>{
 });
 app.MapGet("/api/admin/info",()=>new {httpPort,httpsPort,controlPort,fingerprint,certificateCode=fingerprint[..24],addresses=NetworkAddresses(),lanAddresses=NetworkLanAddresses(),connectedTablets=fastControl.ConnectedDevices,dataDirectory=store.DirectoryPath,deviceRecoveryWarning=store.DeviceRecoveryWarning,devices=store.Devices.Select(d=>new{d.Id,d.Name,d.Added,lastSeen=store.LastSeen(d),fastConnected=fastControl.Connected(d.TokenHash)})});
 app.MapPost("/api/admin/pairing",()=>new{code=pairing.Open(),expiresIn=300,certificateCode=fingerprint[..24]});
-app.MapPost("/api/admin/revoke",(RevokeRequest req)=>{var owner=store.Devices.FirstOrDefault(device=>device.Id==req.Id)?.TokenHash;store.Revoke(req.Id);if(owner is not null){holds.ReleaseOwner(owner);fastCommands.RevokePen(owner);fastControl.Revoke(owner);displayStream.Revoke(owner);}return Results.Ok(new{ok=true});});
+app.MapPost("/api/admin/revoke",(RevokeRequest req)=>{var owner=store.Devices.FirstOrDefault(device=>device.Id==req.Id)?.TokenHash;store.Revoke(req.Id);if(owner is not null){holds.ReleaseOwner(owner);fastCommands.RevokePen(owner);fastControl.Revoke(owner);displayStream.Revoke(owner);displayInput.Revoke(owner);}return Results.Ok(new{ok=true});});
 app.MapGet("/api/admin/desktop",()=>new{settings=desktop.Get(),recoveryWarning=desktop.RecoveryWarning,startWithWindows=DesktopPreferences.StartsWithWindows(),usbStatus=usb.Status,update=updates.Status,installation=selfUpdate.Status,tabletUpdate=usbApkUpdate.Status});
 app.MapPost("/api/admin/desktop",(DesktopRequest req)=>{DesktopPreferences.Validate(req.Settings);if(req.StartWithWindows is not null)DesktopPreferences.SetStartup(req.StartWithWindows.Value);desktop.Save(req.Settings);return Results.Ok(new{ok=true});});
 app.MapPost("/api/admin/updates",async (CancellationToken ct)=>await updates.Check(true,ct));
@@ -278,7 +286,7 @@ app.Lifetime.ApplicationStopping.Register(fastCommands.BeginShutdown);
 app.Lifetime.ApplicationStopping.Register(displayStream.Shutdown);
 app.Lifetime.ApplicationStarted.Register(()=>{
     try{fastControl.Start();}catch(SocketException){Console.Error.WriteLine("Fast control port is unavailable. HTTPS fallback remains active.");}
-    Console.WriteLine($"Tablet Deck Studio is running. PC editor: http://127.0.0.1:{httpPort}");
+    Console.WriteLine($"DeskWing is running. PC editor: http://127.0.0.1:{httpPort}");
     Console.WriteLine($"Tablet encrypted port: {httpsPort}. Tray menu > Exit, or Ctrl+C, closes the companion.");
     if(!args.Contains("--no-tray")&&(args.Contains("--tray")||!args.Contains("--no-browser")))tray=new DesktopTray(panel,store.DirectoryPath,desktop,updates,()=>app.Lifetime.StopApplication(),!args.Contains("--no-browser"));
     usb.Start();

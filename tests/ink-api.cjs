@@ -10,7 +10,7 @@ const {randomBytes,X509Certificate}=require('node:crypto');
 const {spawn,spawnSync}=require('node:child_process');
 
 const root=path.resolve(__dirname,'..');
-const exe=process.env.TABLETDECK_COMPANION||path.join(root,'.test-output/ink-integration-build/Release/net10.0-windows10.0.19041.0/win-x64/TabletDeck-Companion.exe');
+const exe=process.env.TABLETDECK_COMPANION||path.join(root,'.test-output/ink-integration-build/Release/net10.0-windows10.0.19041.0/win-x64/DeskWing-Companion.exe');
 const output=fs.mkdtempSync(path.join(os.tmpdir(),'deskwing-ink-api-'));
 const data=path.join(output,'data');
 const base='http://127.0.0.1:19740';

@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),tls=require('node:tls'),https=require('node:https'),crypto=require('node:crypto'),vm=require('node:vm'),{spawn,spawnSync}=require('node:child_process'),{WebSocketServer}=require('ws');
 const root=path.resolve(__dirname,'..'),folder=path.join(process.env.TABLETDECK_TEST_OUTPUT||path.join(root,'.test-output'),'v14-fast');fs.mkdirSync(folder,{recursive:true});
-const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/TabletDeck-Companion.exe');
+const executable=process.env.TABLETDECK_COMPANION||path.join(root,'companion/bin/Release/net10.0-windows/win-x64/DeskWing-Companion.exe');
 let passed=0,server,mock,scene='Gameplay',streaming=false,actions=0,subscriptions=0;const sockets=new Set(),links=[];let sseAbort;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));const check=(value,label)=>{assert.ok(value,label);passed++;console.log('PASS '+label);};
 async function run(){

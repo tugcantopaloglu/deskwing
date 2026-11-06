@@ -11,7 +11,7 @@ const {spawn}=require('node:child_process');
 const root=path.resolve(__dirname,'..');
 const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'tabletdeck-computer-api-'));
 const data=path.join(fixture,'data');fs.mkdirSync(data);
-const executable=process.env.TABLETDECK_COMPANION||path.join(root,'.test-output/computer-api-build/publish/TabletDeck-Companion.exe');
+const executable=process.env.TABLETDECK_COMPANION||path.join(root,'.test-output/computer-api-build/publish/DeskWing-Companion.exe');
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let server,session,httpPort,httpsPort,controlPort,checks=0;
 const check=(condition,label)=>{assert.ok(condition,label);checks++;console.log('PASS '+label);};

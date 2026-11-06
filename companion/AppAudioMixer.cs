@@ -22,7 +22,7 @@ public sealed class AppAudioMixer : IDisposable
     internal AppAudioMixer(IAppAudioBackend backend)
     {
         this.backend=backend;
-        worker=new Thread(()=>{foreach(var job in queue.GetConsumingEnumerable())job();}) {IsBackground=true,Name="Tablet Deck audio mixer"};
+        worker=new Thread(()=>{foreach(var job in queue.GetConsumingEnumerable())job();}) {IsBackground=true,Name="DeskWing audio mixer"};
         worker.SetApartmentState(ApartmentState.MTA);worker.Start();
     }
     private Task<T> Dispatch<T>(Func<T> operation)

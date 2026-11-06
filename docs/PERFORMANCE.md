@@ -67,7 +67,7 @@ Held keys release when their owning connection ends or their lease expires. Clos
 ## Reproduce without opening apps
 
 ```powershell
-$env:TABLETDECK_COMPANION = (Resolve-Path .\dist\Windows\TabletDeck-Companion.exe).Path
+$env:TABLETDECK_COMPANION = (Resolve-Path .\dist\Windows\DeskWing-Companion.exe).Path
 npm run test:fast --prefix .\tests
 $env:TABLETDECK_BENCH_LABEL = 'local-optimized'
 $env:TABLETDECK_BENCH_FAST = '1'

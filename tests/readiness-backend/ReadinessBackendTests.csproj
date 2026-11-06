@@ -10,7 +10,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../companion/TabletDeck.csproj" />
+    <ProjectReference Include="../../companion/DeskWing.csproj" />
   </ItemGroup>
   <Target Name="RemoveUnusedWebViewWpf" BeforeTargets="ResolveAssemblyReferences">
     <ItemGroup><Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" /></ItemGroup>

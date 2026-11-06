@@ -12,9 +12,11 @@ internal static class RunningUpdate
         var expected=Path.GetFullPath(Option("--expected-exe"));var version=Assembly.GetExecutingAssembly().GetName().Version!;
         if(!Version.TryParse(Option("--expected-version"),out var requested)||new Version(version.Major,version.Minor,version.Build)!=requested)throw new IOException("The updater version differs from the requested release.");
         using var process=Process.GetProcessById(pid);var actual=Path.GetFullPath(process.MainModule?.FileName??throw new IOException("Cannot identify the running companion."));
-        if(!actual.Equals(expected,StringComparison.OrdinalIgnoreCase)||Path.GetFileName(actual)!="TabletDeck-Companion.exe"||FileVersionInfo.GetVersionInfo(actual).ProductName!="TabletDeck-Companion")throw new IOException("The selected process is not the expected DeskWing companion.");
+        var identity=FileVersionInfo.GetVersionInfo(actual).ProductName;
+        var known=Path.GetFileName(actual)=="DeskWing-Companion.exe"&&identity=="DeskWing"||Path.GetFileName(actual)=="TabletDeck-Companion.exe"&&identity=="TabletDeck-Companion";
+        if(!actual.Equals(expected,StringComparison.OrdinalIgnoreCase)||!known)throw new IOException("The selected process is not the expected DeskWing companion.");
         var installed=FileVersionInfo.GetVersionInfo(actual);if(!testMode&&requested<=new Version(installed.FileMajorPart,installed.FileMinorPart,installed.FileBuildPart))throw new IOException("This updater is not newer than the installed companion.");
-        var target=Path.GetDirectoryName(actual)!;
+        var target=Path.GetDirectoryName(actual)!;var replacement=inside(target,"DeskWing-Companion.exe");
         var testRoot=Path.Combine(Path.GetTempPath(),"TabletDeckStudioSetupTests");
         if(testMode&&!target.StartsWith(testRoot+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new IOException("Test updater target is outside its isolated folder.");
         if(Directory.GetParent(target) is null||target.Equals(Environment.GetFolderPath(Environment.SpecialFolder.Windows),StringComparison.OrdinalIgnoreCase))throw new IOException("Unsupported update location.");
@@ -50,7 +52,8 @@ internal static class RunningUpdate
             try{InstalledShortcuts.Update(Directory.GetParent(target)!.FullName,true,new[]{Environment.GetFolderPath(Environment.SpecialFolder.Programs),Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)},existingOnly:true);}
             catch(Exception ex) when(ex is IOException or System.Runtime.InteropServices.COMException or UnauthorizedAccessException){Console.Error.WriteLine("DeskWing was updated, but an existing shortcut could not be renamed: "+ex.Message);}
         }
-        if(args.Contains("--restart")&&!testMode)Restart(actual,target);
+        if(!testMode){try{InstalledStartup.Update(actual,replacement);}catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.Security.SecurityException){Console.Error.WriteLine("DeskWing was updated, but its existing Windows startup option needs review: "+ex.Message);}}
+        if(args.Contains("--restart")&&!testMode)Restart(replacement,target);
         Console.WriteLine("PASS running companion updated; board data and pairing are outside the update target.");
     }
     private static void Restart(string executable,string directory){var start=new ProcessStartInfo(executable){WorkingDirectory=directory,UseShellExecute=false,CreateNoWindow=true};start.ArgumentList.Add("--tray");start.ArgumentList.Add("--after-update");using var process=Process.Start(start)??throw new IOException("Update installed; open DeskWing from its shortcut to restart.");}

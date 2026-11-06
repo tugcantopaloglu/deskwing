@@ -19,28 +19,37 @@ public sealed class ReleaseUpdates : IDisposable
     internal ReleaseUpdates(HttpClient client,string version){this.client=client;this.version=version;status=new(version,null,false,ReleasesUrl);client.Timeout=TimeSpan.FromSeconds(8);client.DefaultRequestHeaders.UserAgent.ParseAdd("DeskWing/"+version);client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));}
     public ReleaseStatus Status=>Volatile.Read(ref status);
     internal static InstallerRelease ParseInstaller(string json,string current)
-        =>ParseAsset(json,current,"TabletDeck-Setup.exe",250L*1024*1024);
+        =>ParseCompatibleAsset(json,current,"DeskWing-Setup.exe","TabletDeck-Setup.exe",250L*1024*1024);
+    internal static InstallerRelease ParseApk(string json,string current)
+        =>ParseCompatibleAsset(json,current,"DeskWing.apk","TabletDeck-Studio.apk",64L*1024*1024);
+    private static InstallerRelease ParseCompatibleAsset(string json,string current,string preferred,string legacy,long limit)
+    {
+        using var document=JsonDocument.Parse(json);
+        // A present but invalid current asset must fail verification rather than fall back.
+        var present=document.RootElement.GetProperty("assets").EnumerateArray().Any(asset=>asset.GetProperty("name").GetString()==preferred);
+        return ParseAsset(json,current,present?preferred:legacy,limit);
+    }
     internal static InstallerRelease ParseAsset(string json,string current,string name,long limit)
     {
         var status=Parse(json,current);if(!status.Available)throw new IOException("The installed version is already current.");
         using var document=JsonDocument.Parse(json);var release=document.RootElement;var tag=release.GetProperty("tag_name").GetString()??"";
         var stable=Version.Parse(status.LatestVersion!);if(tag!="v"+status.LatestVersion||stable.Build<0||stable.Revision>=0)throw new IOException("Unsupported release tag.");
-        if(name is not ("TabletDeck-Setup.exe" or "TabletDeck-Studio.apk"))throw new IOException("Unsupported update asset.");
+        if(name is not ("DeskWing-Setup.exe" or "DeskWing.apk" or "TabletDeck-Setup.exe" or "TabletDeck-Studio.apk"))throw new IOException("Unsupported update asset.");
         var assets=release.GetProperty("assets").EnumerateArray().Where(a=>a.GetProperty("name").GetString()==name).ToArray();
-        if(assets.Length!=1)throw new IOException("This release does not include a Windows updater.");var asset=assets[0];
+        if(assets.Length!=1)throw new IOException("This release does not include exactly one supported update asset.");var asset=assets[0];
         var expected=$"{ReleasesUrl}/download/{tag}/{name}";
         var size=asset.GetProperty("size").GetInt64();var digest=asset.GetProperty("digest").GetString()??"";
         if(asset.GetProperty("browser_download_url").GetString()!=expected||size<1024||size>limit||!digest.StartsWith("sha256:",StringComparison.Ordinal)||digest.Length!=71||!digest[7..].All(Uri.IsHexDigit))throw new IOException("The release asset has invalid download or checksum metadata.");
         return new(status.LatestVersion!,expected,size,digest[7..].ToUpperInvariant());
     }
-    public Task<InstallerRelease> Installer(CancellationToken ct=default)=>Asset("TabletDeck-Setup.exe",version,250L*1024*1024,ct);
-    public Task<InstallerRelease> Apk(CancellationToken ct=default)=>Asset("TabletDeck-Studio.apk","0.0.0",64L*1024*1024,ct);
-    private async Task<InstallerRelease> Asset(string name,string current,long limit,CancellationToken ct)
+    public Task<InstallerRelease> Installer(CancellationToken ct=default)=>Asset("DeskWing-Setup.exe","TabletDeck-Setup.exe",version,250L*1024*1024,ct);
+    public Task<InstallerRelease> Apk(CancellationToken ct=default)=>Asset("DeskWing.apk","TabletDeck-Studio.apk","0.0.0",64L*1024*1024,ct);
+    private async Task<InstallerRelease> Asset(string preferred,string legacy,string current,long limit,CancellationToken ct)
     {
         using var response=await client.GetAsync(LatestReleaseApi,HttpCompletionOption.ResponseHeadersRead,ct);response.EnsureSuccessStatusCode();
         await using var stream=await response.Content.ReadAsStreamAsync(ct);using var bytes=new MemoryStream();var buffer=new byte[8192];int count;
         while((count=await stream.ReadAsync(buffer,ct))>0){bytes.Write(buffer,0,count);if(bytes.Length>256*1024)throw new IOException("Release response exceeds the size limit.");}
-        return ParseAsset(System.Text.Encoding.UTF8.GetString(bytes.ToArray()),current,name,limit);
+        return ParseCompatibleAsset(System.Text.Encoding.UTF8.GetString(bytes.ToArray()),current,preferred,legacy,limit);
     }
     internal static ReleaseStatus Parse(string json,string current)
     {

@@ -39,14 +39,19 @@ internal static class Program
     {
         if(args.SequenceEqual(new[]{"--native-capture"})){await NativeCaptureProbe.Run();return;}
         if(args.Length>0)throw new ArgumentException("The only optional mode is --native-capture; executable paths are not accepted.");
+        checks+=QualityChecks.Run();
         await ExtendedDisplayTests.Run();
         using(var scene=new Scene())
         {
             foreach(var rate in new[]{0,30,59,241,int.MaxValue})Reject(()=>scene.Stream.Start(new(rate),"owner"),"unsupported target rate rejected: "+rate);
+            Reject(()=>scene.Stream.Start(new(60,"unknown"),"owner"),"unsupported quality preset rejected before opening capture");
             Check(scene.FactoryCalls==0&&scene.Producer.Calls==0,"invalid start cannot construct an encoder or capture pixels");
             var lease=scene.Start();
             Check(lease.Lease.Length==48&&lease.Lease.All(char.IsAsciiHexDigit),"server creates a bounded unpredictable lease");
             Check(lease.Width==1280&&lease.Height==800&&lease.RefreshRate==60&&lease.SourceRefreshRate==120&&lease.Codec=="h264","begin distinguishes stream target from actual source refresh");
+            Check(lease.QualityPreset=="balanced"&&lease.AdaptiveQuality&&lease.InitialBitrate>=1_000_000,"legacy starts receive a bounded default quality profile");
+            Check(scene.Stream.Status("other").Active==false&&scene.Stream.Status("owner").Active&&scene.Stream.Status("admin",true).Active,"quality status is limited to the owner or PC admin");
+            Reject(()=>scene.Stream.CaptureInputTarget("owner",lease.Lease),"input cannot use an unclaimed video lease");
             Reject(()=>scene.Stream.Start(new(60),"other"),"second owner cannot replace a live stream lease");
             Reject(()=>scene.Stream.Start(new(60),"owner"),"same owner cannot queue a second stream lease");
             using var output=new MemoryStream();
@@ -114,9 +119,14 @@ internal static class Program
         await StopDuringCapture();
         await BackpressureIsBounded();
         await PendingRawWriteRetainsSlot();
+        await PendingWriteTimeoutRevokesInputAuthority();
+        await NativeCleanupDoesNotRetainAuthority();
         await PairingRevokedDuringCapture();
         await IdleHeartbeats();
         await RevokeIdleHeartbeats();
+        await CancelProducerInitialization();
+        await QualityTelemetry();
+        await FirstFrameFallbackTelemetry();
         Console.WriteLine($"Display stream: {checks} fake authority, framing, refresh and backpressure checks passed. No real capture or driver writes.");
     }
 
@@ -128,6 +138,67 @@ internal static class Program
         await Ended(stream);
         Check(output.Length>=32+16+AccessUnit.Length,"an authorized stream produces a complete access unit");
         return output.ToArray();
+    }
+    private static async Task QualityTelemetry()
+    {
+        using var scene=new Scene();
+        scene.Producer.DuringNext=()=>Thread.Sleep(15);
+        var lease=scene.Stream.Start(new(120,"battery-saver",true),"owner");
+        using var cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var output=new MemoryStream();
+        var stream=scene.Stream.StreamAsync(lease.Lease,"owner",output,()=>true,cancellation.Token);
+        try
+        {
+            await Until(()=>scene.Stream.Status("owner").EncodedFrames>2,"quality telemetry follows actual produced pictures");
+            Check(scene.LastQuality?.Preset=="battery-saver"&&scene.LastQuality.InitialBitrate==lease.InitialBitrate,"selected profile reaches the producer factory");
+            Check(scene.Stream.CaptureInputTarget("owner",lease.Lease)==scene.Target,"input uses the current attached video target snapshot");
+            Reject(()=>scene.Stream.CaptureInputTarget("other",lease.Lease),"another paired device cannot obtain the current input target");
+            Reject(()=>scene.Stream.CaptureInputTarget("owner","wrong"),"input cannot attach using a different video lease");
+            await Until(()=>scene.Stream.Status("owner").CaptureRate<120,"measured processing pressure adapts the live capture cadence");
+            var status=scene.Stream.Status("owner");
+            Check(status.TargetRefreshRate==120&&status.CaptureRate>=60&&status.Bitrate==scene.Producer.AppliedBitrate&&status.AdaptiveBitrateSupported==true,"telemetry distinguishes the requested rate, adaptive cadence and actually applied bitrate");
+            Check(!scene.Stream.Status("other").Active&&scene.Stream.Status("admin",true).EncodedFrames>0,"live counters stay private to the owner and local admin");
+            Check(output.ToArray().AsSpan(16,4).SequenceEqual(new byte[]{0,0,0,120}),"adaptive pacing retains the explicitly requested header rate");
+        }
+        finally {scene.Stream.Stop(lease.Lease,"owner");await Ended(stream);}
+        Check(!scene.Stream.Status("owner").Active,"completed sessions no longer expose active quality state");
+        Reject(()=>scene.Stream.CaptureInputTarget("owner",lease.Lease),"stopped session loses its input authority");
+    }
+    private static async Task CancelProducerInitialization()
+    {
+        using var scene=new Scene();using var entered=new ManualResetEventSlim();
+        scene.DuringCreate=quality=>{
+            Check(quality.InitializationCancellation.CanBeCanceled,"producer initialization receives the owning session cancellation");
+            entered.Set();
+            if(!quality.InitializationCancellation.WaitHandle.WaitOne(TimeSpan.FromSeconds(2)))throw new Exception("Fixture initialization was not cancelled.");
+            quality.InitializationCancellation.ThrowIfCancellationRequested();
+        };
+        var lease=scene.Start();using var output=new MemoryStream();
+        var stream=scene.Stream.StreamAsync(lease.Lease,"owner",output,()=>true,CancellationToken.None);
+        Check(entered.Wait(TimeSpan.FromSeconds(2)),"producer initialization entered");
+        scene.Stream.Revoke("owner");await Ended(stream);
+        Check(output.Length==0&&scene.Producer.Calls==0,"revocation interrupts initialization before any header or pixels are produced");
+    }
+    private static async Task FirstFrameFallbackTelemetry()
+    {
+        using var scene=new Scene();
+        scene.Producer.ActiveEncoderName="Fixture hardware encoder";scene.Producer.ActiveHardwareAcceleration=true;
+        scene.Producer.DuringNext=()=>{
+            scene.Producer.ActiveEncoderName="Fixture software encoder";
+            scene.Producer.ActiveHardwareAcceleration=false;
+            scene.Producer.ActiveFallback="Fixture hardware rejected the first frame; software is active.";
+        };
+        var lease=scene.Start();using var cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var output=new MemoryStream();
+        var stream=scene.Stream.StreamAsync(lease.Lease,"owner",output,()=>true,cancellation.Token);
+        try
+        {
+            await Until(()=>scene.Stream.Status("owner").EncodedFrames>0,"fallback fixture publishes an actual first frame");
+            var status=scene.Stream.Status("owner");
+            Check(status.Encoder=="Fixture software encoder"&&!status.HardwareAccelerated,"first-frame fallback replaces the provisional hardware encoder status");
+            Check(status.EncoderFallback==scene.Producer.ActiveFallback,"status exposes the current software fallback reason after encoding begins");
+        }
+        finally {scene.Stream.Stop(lease.Lease,"owner");await Ended(stream);}
     }
     private static async Task StopDuringCapture()
     {
@@ -188,6 +259,52 @@ internal static class Program
         finally{output.Release();}
         await Until(()=>scene.Producer.DisposeCalls==1,"pending network cancellation eventually disposes its sole producer");
     }
+    private static async Task PendingWriteTimeoutRevokesInputAuthority()
+    {
+        using var scene=new Scene();var lease=scene.Start();using var output=new UncooperativeOutputStream();
+        var stream=scene.Stream.StreamAsync(lease.Lease,"owner",output,()=>true,CancellationToken.None);
+        try
+        {
+            await Until(()=>output.Blocked,"timeout fixture retains one noncooperative raw write");
+            try{await stream.WaitAsync(TimeSpan.FromSeconds(5));throw new Exception("The blocked observer did not time out.");}
+            catch(TimeoutException) when(stream.IsCompleted){}
+            Check(stream.IsFaulted,"write deadline ends the HTTP observer independently of raw-write completion");
+            Check(!scene.Stream.Status("owner").Active,"timed-out video immediately retires its capture and input authority");
+            Reject(()=>scene.Stream.CaptureInputTarget("owner",lease.Lease),"old video lease cannot authorize input while its failed raw write is retained");
+            Reject(()=>scene.Start(),"timeout still reserves the sole worker until the raw write settles");
+        }
+        finally{scene.Stream.Stop(lease.Lease,"owner");output.Release();}
+        await Until(()=>scene.Producer.DisposeCalls==1,"timed-out raw write eventually releases its producer");
+    }
+    private static async Task NativeCleanupDoesNotRetainAuthority()
+    {
+        foreach(var reason in new[]{"capture failure","request cancellation","write timeout","write timeout with cleanup failure"})
+        {
+            using var scene=new Scene();using var entered=new ManualResetEventSlim();using var release=new ManualResetEventSlim();
+            using var requestCancellation=new CancellationTokenSource();
+            scene.Producer.DuringDispose=()=>{entered.Set();if(!release.Wait(TimeSpan.FromSeconds(5)))throw new Exception("Fixture native cleanup was not released.");if(reason.EndsWith("cleanup failure",StringComparison.Ordinal))throw new InvalidOperationException("Fixture native cleanup failed.");};
+            if(reason=="capture failure")scene.Producer.DuringNext=()=>throw new InvalidOperationException("Fixture producer failed.");
+            var raw=reason.StartsWith("write timeout",StringComparison.Ordinal)?new UncooperativeOutputStream():null;
+            using Stream output=raw is not null?raw:reason=="request cancellation"?new CallbackStream(length=>{if(length>=48)requestCancellation.Cancel();}):new MemoryStream();
+            var lease=scene.Start();
+            var stream=scene.Stream.StreamAsync(lease.Lease,"owner",output,()=>true,requestCancellation.Token);
+            try
+            {
+                await Until(()=>entered.IsSet,reason+" reaches blocked native cleanup");
+                Check(stream.IsCompleted,reason+" ends the HTTP observer before native cleanup settles");
+                Check(!scene.Stream.Status("owner").Active,reason+" retires video authority before native cleanup settles");
+                Reject(()=>scene.Stream.CaptureInputTarget("owner",lease.Lease),reason+" cannot authorize input while native cleanup is blocked");
+                Reject(()=>scene.Start(),reason+" retains the worker slot during native cleanup");
+                release.Set();
+                if(raw is not null)Reject(()=>scene.Start(),"pending raw write retains the slot after native cleanup is released");
+            }
+            finally{release.Set();raw?.Release();}
+            try{await stream;}catch(Exception ex) when(ex is InvalidOperationException or OperationCanceledException or TimeoutException){}
+            DisplayVideoLease? next=null;
+            await Until(()=>{if(next is not null)return true;try{next=scene.Start();return true;}catch(InvalidOperationException){return false;}},reason+" eventually releases its worker after cleanup and pending writes settle");
+            scene.Stream.Stop(next!.Lease,"owner");
+        }
+    }
     private static async Task IdleHeartbeats()
     {
         const ulong timestamp=987654321;
@@ -223,6 +340,8 @@ internal static class Program
         internal long Clock=1000;
         internal bool Shared=true;
         internal int FactoryCalls;
+        internal DisplayVideoQuality? LastQuality;
+        internal Action<DisplayVideoQuality>? DuringCreate;
         internal DisplayVideoTarget Target=new(Guid.NewGuid(),1,9,9,"9:0",@"\\.\DISPLAY9",3840,0,1280,800,120,CancellationToken.None);
         internal readonly FakeProducer Producer=new();
         internal readonly DisplayStream Stream;
@@ -230,25 +349,31 @@ internal static class Program
         {
             Stream=new(()=>{if(!Shared)throw new InvalidOperationException("Fixture sharing is off.");return Target;},target=>{
                 if(!Shared||target!=Target||target.Invalidated.IsCancellationRequested)throw new InvalidOperationException("Fixture display authority changed.");
-            },(target,rate)=>{Interlocked.Increment(ref FactoryCalls);return Producer;},()=>Clock);
+            },(target,rate,quality)=>{LastQuality=quality;Interlocked.Increment(ref FactoryCalls);DuringCreate?.Invoke(quality);return Producer;},()=>Clock);
         }
         internal DisplayVideoLease Start()=>Stream.Start(new(60),"owner");
         public void Dispose()=>Stream.Dispose();
     }
     private sealed class FakeProducer : IDisplayVideoProducer
     {
-        internal int Calls,DisposeCalls;
+        internal int Calls,DisposeCalls,AppliedBitrate;
         internal long LastTimestamp;
         internal bool ReturnNull;
         internal Action? DuringNext;
-        public string EncoderName=>"Isolated fake encoder";
-        public bool HardwareAccelerated=>false;
+        internal Action? DuringDispose;
+        internal string ActiveEncoderName="Isolated fake encoder";
+        internal bool ActiveHardwareAcceleration;
+        internal string? ActiveFallback;
+        public string EncoderName=>ActiveEncoderName;
+        public bool HardwareAccelerated=>ActiveHardwareAcceleration;
+        public string? EncoderFallback=>ActiveFallback;
+        public bool TrySetBitrate(int bitrate){AppliedBitrate=bitrate;return true;}
         public EncodedVideoFrame? Next(long timestamp100ns,CancellationToken cancellation)
         {
             cancellation.ThrowIfCancellationRequested();Interlocked.Increment(ref Calls);LastTimestamp=timestamp100ns;DuringNext?.Invoke();
             return ReturnNull?null:new(AccessUnit,true,timestamp100ns);
         }
-        public void Dispose()=>Interlocked.Increment(ref DisposeCalls);
+        public void Dispose(){Interlocked.Increment(ref DisposeCalls);DuringDispose?.Invoke();}
     }
     private sealed class AutoStopStream(CancellationTokenSource stop,int limit) : MemoryStream
     {

@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../companion/DisplayStream.cs" Link="DisplayStream.cs" />
+    <Compile Include="../../companion/DisplayVideoQuality.cs" Link="DisplayVideoQuality.cs" />
     <Compile Include="../../companion/ExtendedDisplay.cs" Link="ExtendedDisplay.cs" />
     <Compile Include="../../companion/ExtendedDisplayTests.cs" Link="ExtendedDisplayTests.cs" />
     <Compile Include="../../companion/WindowsDisplayEncoder.cs" Link="WindowsDisplayEncoder.cs" />

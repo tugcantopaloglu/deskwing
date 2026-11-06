@@ -74,7 +74,7 @@ final class NativeDisplayVideo {
     NativeDisplayVideo(Activity activity,FrameLayout root,Connections connections,BooleanSupplier foreground,LongSupplier lifecycle,Events events,Runnable enterFullscreen,Runnable exitFullscreen){
         this.activity=activity;this.root=root;this.connections=connections;this.foreground=foreground;this.lifecycle=lifecycle;this.events=events;this.enterFullscreen=enterFullscreen;this.exitFullscreen=exitFullscreen;
     }
-    static boolean allowedPath(String path){return START.equals(path)||STREAM.equals(path)||STOP.equals(path);}
+    static boolean allowedPath(String path){return START.equals(path)||STREAM.equals(path)||STOP.equals(path)||NativeDisplayInput.PATH.equals(path);}
     boolean isOpen(){return active!=null;}
     JSONObject capabilities() throws Exception {
         Display display=display();float current=display==null?0:display.getRefreshRate();TreeSet<Integer> rates=new TreeSet<>();
@@ -86,13 +86,17 @@ final class NativeDisplayVideo {
     void start(JSONObject body,Reply reply){
         Session created=null;
         try{
-            exact(body,"session","refreshMode");String id=DisplayVideoProtocol.session(body.opt("session"));String mode=body.optString("refreshMode","");
+            exact(body,"session","refreshMode","qualityPreset","adaptiveQuality");String id=DisplayVideoProtocol.session(body.opt("session"));String mode=body.optString("refreshMode","");
+            String quality=body.has("qualityPreset")?body.getString("qualityPreset"):"balanced";
+            if(!quality.equals("balanced")&&!quality.equals("quality")&&!quality.equals("battery-saver"))throw new IllegalArgumentException("Choose a supported display quality preset.");
+            if(body.has("adaptiveQuality")&&!(body.opt("adaptiveQuality") instanceof Boolean))throw new IllegalArgumentException("Choose whether adaptive quality is enabled.");
+            boolean adaptive=body.optBoolean("adaptiveQuality",true);
             if(closed||!foreground.getAsBoolean())throw new IllegalStateException("Open DeskWing before starting the display.");
             if(active!=null||workerBusy.get())throw new IllegalStateException("The previous display is still open or closing. Close it before starting again.");
             Display display=display();float current=display==null?0:display.getRefreshRate();int target=DisplayVideoProtocol.targetRate(mode,current);
             long epoch=lifecycle.getAsLong();Connection connection=connections.create();if(epoch!=lifecycle.getAsLong())throw new IllegalStateException("The PC connection changed. Start the display again.");
             NetworkCloseQueue.Reservation cleanup=networkCleanup.reserve();
-            Session session=new Session(id,mode,target,current,connection,reply,epoch,cleanup);created=session;active=session;
+            Session session=new Session(id,mode,target,current,quality,adaptive,connection,reply,epoch,cleanup);created=session;active=session;
             attach(session);enterFullscreen.run();
         }catch(Exception ex){if(created!=null&&active==created){created.complete(error(ex));stop("The display could not open.");}else reply.complete(error(ex));}
     }
@@ -104,7 +108,7 @@ final class NativeDisplayVideo {
     }
     void stop(String reason){
         Session session=active;if(session==null)return;
-        active=null;session.cancelled=true;
+        active=null;session.cancelled=true;if(session.input!=null)session.input.close();
         if(session.firstPictureDeadline!=null)session.firstPictureDeadline.close();
         if(session.playbackDeadline!=null)session.playbackDeadline.close();
         HttpsURLConnection pending=session.pending;session.pending=null;
@@ -120,12 +124,14 @@ final class NativeDisplayVideo {
     private Display display(){return Build.VERSION.SDK_INT>=30?activity.getDisplay():activity.getWindowManager().getDefaultDisplay();}
     private int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
     private void attach(Session session){
-        FrameLayout overlay=new FrameLayout(activity);overlay.setBackgroundColor(Color.BLACK);session.overlay=overlay;
+        FrameLayout overlay=new FrameLayout(activity);overlay.setBackgroundColor(Color.BLACK);overlay.setClickable(true);overlay.setFocusableInTouchMode(true);session.overlay=overlay;
         SurfaceView surface=new SurfaceView(activity);surface.setSecure(true);session.view=surface;overlay.addView(surface,new FrameLayout.LayoutParams(-1,-1,Gravity.CENTER));
-        LinearLayout controls=new LinearLayout(activity);controls.setGravity(Gravity.CENTER_VERTICAL);controls.setPadding(dp(12),dp(4),dp(4),dp(4));controls.setBackgroundColor(0xdd101318);
+        LinearLayout controls=new LinearLayout(activity);controls.setOrientation(LinearLayout.VERTICAL);controls.setPadding(dp(12),dp(4),dp(4),dp(4));controls.setBackgroundColor(0xdd101318);
+        LinearLayout topRow=new LinearLayout(activity);topRow.setGravity(Gravity.CENTER_VERTICAL);controls.addView(topRow,new LinearLayout.LayoutParams(-1,-2));
         TextView statistics=new TextView(activity);statistics.setTextColor(Color.WHITE);statistics.setTextSize(13);statistics.setText("Connecting · target "+session.requestedRate+" Hz");statistics.setMaxLines(2);session.status=statistics;
-        LinearLayout.LayoutParams textLayout=new LinearLayout.LayoutParams(0,-2,1);textLayout.setMarginEnd(dp(12));controls.addView(statistics,textLayout);
-        Button exit=new Button(activity);exit.setText("Exit display");exit.setMinHeight(dp(48));exit.setMinWidth(dp(112));exit.setOnClickListener(view->stop("closed"));controls.addView(exit,new LinearLayout.LayoutParams(-2,dp(48)));
+        LinearLayout.LayoutParams textLayout=new LinearLayout.LayoutParams(0,-2,1);textLayout.setMarginEnd(dp(12));topRow.addView(statistics,textLayout);
+        Button exit=new Button(activity);exit.setText("Exit display");exit.setMinHeight(dp(48));exit.setMinWidth(dp(112));exit.setOnClickListener(view->stop("closed"));topRow.addView(exit,new LinearLayout.LayoutParams(-2,dp(48)));
+        session.input=new NativeDisplayInput(surface,controls,session.connection,()->valid(session),()->session.lease,()->session.width,()->session.height);
         FrameLayout.LayoutParams controlLayout=new FrameLayout.LayoutParams(-1,-2,Gravity.TOP);controlLayout.setMargins(dp(12),dp(12),dp(12),0);overlay.addView(controls,controlLayout);
         overlay.setOnApplyWindowInsetsListener((view,insets)->{int left=0,right=0,top=0;if(Build.VERSION.SDK_INT>=28&&insets.getDisplayCutout()!=null){left=insets.getDisplayCutout().getSafeInsetLeft();right=insets.getDisplayCutout().getSafeInsetRight();top=insets.getDisplayCutout().getSafeInsetTop();}FrameLayout.LayoutParams layout=(FrameLayout.LayoutParams)controls.getLayoutParams();layout.setMargins(Math.max(dp(12),left),Math.max(dp(12),top),Math.max(dp(12),right),0);controls.setLayoutParams(layout);return insets;});
         overlay.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->fit(session));
@@ -138,7 +144,7 @@ final class NativeDisplayVideo {
             public void surfaceChanged(SurfaceHolder holder,int format,int width,int height){}
             public void surfaceDestroyed(SurfaceHolder holder){if(active==session)stop("The display surface closed. Start again when ready.");}
         });
-        root.addView(overlay,new FrameLayout.LayoutParams(-1,-1));overlay.bringToFront();
+        root.addView(overlay,new FrameLayout.LayoutParams(-1,-1));overlay.bringToFront();overlay.requestFocus();
         session.statistics=()->statistics(session);ui.postDelayed(session.statistics,1000);
         session.manager=(DisplayManager)activity.getSystemService(Activity.DISPLAY_SERVICE);
         session.listener=new DisplayManager.DisplayListener(){public void onDisplayAdded(int id){}public void onDisplayRemoved(int id){}public void onDisplayChanged(int id){if(!valid(session)||!session.mode.equals("match")||session.width==0)return;Display current=display();if(current!=null&&id==current.getDisplayId()&&Math.abs(current.getRefreshRate()-session.initialRefresh)>1.5f)stop("The tablet refresh rate changed. Start again to match its current rate.");}};
@@ -154,7 +160,7 @@ final class NativeDisplayVideo {
     private void run(Session session,Surface surface){
         MediaCodec codec=null;Thread output=null;HandlerThread callbacks=null;
         try{
-            JSONObject started=json(session,START,new JSONObject().put("refreshRate",session.requestedRate),false);
+            JSONObject started=json(session,START,new JSONObject().put("refreshRate",session.requestedRate).put("qualityPreset",session.qualityPreset).put("adaptiveQuality",session.adaptiveQuality),false);
             String lease=started.optString("lease","");if(!lease.matches("[A-F0-9]{48}"))throw new IOException("The PC did not provide a valid display session.");session.lease=lease;
             guard(session);
             int width=started.getInt("width"),height=started.getInt("height"),rate=started.getInt("refreshRate");
@@ -189,7 +195,7 @@ final class NativeDisplayVideo {
                 codec.setOnFrameRenderedListener((ignored,presentation,nanoTime)->{
                     if(!valid(session)||!session.renderMetrics.record(nanoTime,System.nanoTime())||!playbackDeadline.acceptPicture())return;
                     session.rendered.incrementAndGet();
-                    if(session.playbackReady.compareAndSet(false,true))ui.post(()->{if(valid(session)){fit(session);try{Display current=display();session.complete(new JSONObject().put("started",true).put("targetRefreshRate",rate).put("currentRefreshRate",current==null?session.initialRefresh:current.getRefreshRate()).put("session",session.id));}catch(Exception ex){fail(session,ex);}}});
+                    if(session.playbackReady.compareAndSet(false,true))ui.post(()->{if(valid(session)){fit(session);if(session.input!=null)session.input.ready();try{Display current=display();session.complete(new JSONObject().put("started",true).put("targetRefreshRate",rate).put("currentRefreshRate",current==null?session.initialRefresh:current.getRefreshRate()).put("session",session.id));}catch(Exception ex){fail(session,ex);}}});
                 },new Handler(callbacks.getLooper()));
                 codec.configure(format,surface,null,0);codec.setVideoScalingMode(MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT);codec.start();
                 guard(session);if(Build.VERSION.SDK_INT>=31)surface.setFrameRate(rate,Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);else if(Build.VERSION.SDK_INT>=30)surface.setFrameRate(rate,Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE);
@@ -275,12 +281,12 @@ final class NativeDisplayVideo {
     private static JSONObject error(Exception ex){JSONObject result=new JSONObject();try{result.put("error",ex.getMessage()==null?"The display connection failed.":ex.getMessage());}catch(Exception ignored){}return result;}
     private static void exact(JSONObject object,String... names){if(object==null)throw new IllegalArgumentException("The display request is empty.");for(Iterator<String> keys=object.keys();keys.hasNext();){String key=keys.next();boolean valid=false;for(String name:names)if(name.equals(key))valid=true;if(!valid)throw new IllegalArgumentException("Unsupported display option.");}}
     private final class Session {
-        final String id,mode;final int requestedRate;final float initialRefresh;final Connection connection;final Reply reply;final long epoch;final NetworkCloseQueue.Reservation cleanup;
+        final String id,mode,qualityPreset;final boolean adaptiveQuality;final int requestedRate;final float initialRefresh;final Connection connection;final Reply reply;final long epoch;final NetworkCloseQueue.Reservation cleanup;
         final AtomicBoolean started=new AtomicBoolean(),replied=new AtomicBoolean(),playbackReady=new AtomicBoolean();final AtomicLong received=new AtomicLong(),rendered=new AtomicLong(),dropped=new AtomicLong();final RenderedFrameMetrics renderMetrics=new RenderedFrameMetrics();
         volatile boolean cancelled;volatile HttpsURLConnection pending;volatile String lease="";volatile int width,height;volatile Exception decoderError;volatile DisplayVideoProtocol.StreamState streamState;volatile DisplayReadDeadline firstPictureDeadline,playbackDeadline;
-        FrameLayout overlay;SurfaceView view;TextView status;Runnable statistics;DisplayManager manager;DisplayManager.DisplayListener listener;
+        FrameLayout overlay;SurfaceView view;TextView status;Runnable statistics;DisplayManager manager;DisplayManager.DisplayListener listener;NativeDisplayInput input;
         long statAt=System.nanoTime(),lastReceived,lastRendered;int statisticsTicks;
-        Session(String id,String mode,int rate,float refresh,Connection connection,Reply reply,long epoch,NetworkCloseQueue.Reservation cleanup){this.id=id;this.mode=mode;requestedRate=rate;initialRefresh=refresh;this.connection=connection;this.reply=reply;this.epoch=epoch;this.cleanup=cleanup;}
+        Session(String id,String mode,int rate,float refresh,String qualityPreset,boolean adaptiveQuality,Connection connection,Reply reply,long epoch,NetworkCloseQueue.Reservation cleanup){this.id=id;this.mode=mode;requestedRate=rate;initialRefresh=refresh;this.qualityPreset=qualityPreset;this.adaptiveQuality=adaptiveQuality;this.connection=connection;this.reply=reply;this.epoch=epoch;this.cleanup=cleanup;}
         void complete(JSONObject result){if(replied.compareAndSet(false,true))reply.complete(result);}
     }
 }

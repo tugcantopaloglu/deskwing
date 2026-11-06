@@ -10,6 +10,7 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
     private let token: String
     private let waitsForConnectivity: Bool
     private let displayControlOnly: Bool
+    private let displayInputOnly: Bool
     private let penPreviewOnly: Bool
     private let lock = NSLock()
     private var receivedPin = ""
@@ -24,41 +25,49 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
         var bodyStarted = false
         var failure: Error?
     }
-    private var maximumReply: Int { (penPreviewOnly ? 3 : 6) * 1024 * 1024 }
+    private func maximumReply(_ path: String) -> Int {
+        displayInputOnly ? 64 * 1024 : penPreviewOnly ? 3 * 1024 * 1024 : HostPolicy.maximumResponseBytes(path)
+    }
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil; configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil
         configuration.httpShouldSetCookies = false; configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = penPreviewOnly ? 4 : 65
-        configuration.timeoutIntervalForResource = penPreviewOnly ? 4 : 70
+        configuration.timeoutIntervalForRequest = displayInputOnly ? 2 : penPreviewOnly ? 4 : 65
+        configuration.timeoutIntervalForResource = displayInputOnly ? 3 : penPreviewOnly ? 4 : 70
         configuration.waitsForConnectivity = waitsForConnectivity; configuration.allowsCellularAccess = false
-        configuration.httpMaximumConnectionsPerHost = penPreviewOnly ? 1 : 4; configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
+        configuration.httpMaximumConnectionsPerHost = displayInputOnly ? 2 : penPreviewOnly ? 1 : 4; configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
         let callbacks = OperationQueue(); callbacks.maxConcurrentOperationCount = 1
         return URLSession(configuration: configuration, delegate: self, delegateQueue: callbacks)
     }()
-    init(host: String, port: Int, pin: String, token: String = "", waitsForConnectivity: Bool = false, penPreviewOnly: Bool = false, displayControlOnly: Bool = false) {
+    init(host: String, port: Int, pin: String, token: String = "", waitsForConnectivity: Bool = false, penPreviewOnly: Bool = false, displayControlOnly: Bool = false, displayInputOnly: Bool = false) {
         self.host = host; self.port = port; self.pin = pin; self.token = token; self.waitsForConnectivity = waitsForConnectivity
         self.displayControlOnly = displayControlOnly
+        self.displayInputOnly = displayInputOnly
         self.penPreviewOnly = penPreviewOnly
         super.init()
     }
     var verifiedFingerprint: String { lock.lock(); defer { lock.unlock() }; return receivedPin }
 
     @discardableResult
-    func send(path: String, method: String, body: [String: Any], pairing: Bool = false, reply: @escaping Reply) throws -> URLSessionDataTask {
+    func send(path: String, method: String, body: [String: Any], pairing: Bool = false,
+              beforeCommit: (() throws -> Void)? = nil, reply: @escaping Reply) throws -> URLSessionDataTask {
+        try beforeCommit?()
         guard HostPolicy.validHost(host), (1...65535).contains(port), HostPolicy.normalizedPin(pin) == pin,
-              !(displayControlOnly && penPreviewOnly),
-              (!(displayControlOnly || penPreviewOnly) || !pairing),
+              [displayControlOnly,penPreviewOnly,displayInputOnly].filter({ $0 }).count <= 1,
+              (!(displayControlOnly || penPreviewOnly || displayInputOnly) || !pairing),
               penPreviewOnly == (path == "/api/pen/frame"),
               (pairing && path == "/api/pair" && method == "POST" && token.isEmpty) ||
                 (!pairing && pin.count == 64 && !token.isEmpty && (displayControlOnly
                     ? method == "POST" && ["/api/computer/display/stream/start", "/api/computer/display/stream/stop"].contains(path)
+                    : displayInputOnly ? DisplayInputPolicy.allowedRequest(path,method:method,body:body)
                     : HostPolicy.allowed(path, method: method))) else {
             throw DeskError.message("This PC request is not allowed.")
         }
         var parts = URLComponents(); parts.scheme = "https"; parts.host = host; parts.port = port; parts.path = path
         if method == "GET", let revision = HostPolicy.inkRevision(path) {
             parts.path = "/api/ink"; parts.queryItems = [URLQueryItem(name: "revision", value: revision)]
+        } else if method == "GET", let revision = HostPolicy.notebookRevision(path), let question = path.firstIndex(of: "?") {
+            parts.path = String(path[..<question]); parts.queryItems = [URLQueryItem(name: "revision", value: revision)]
         }
         guard let url = parts.url else { throw DeskError.message("Invalid PC address.") }
         var request = URLRequest(url: url); request.httpMethod = method
@@ -66,19 +75,27 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if !token.isEmpty { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
         if method == "POST" {
+            try beforeCommit?()
             let data = try JSONSerialization.data(withJSONObject: body)
             guard data.count <= HostPolicy.maximumBodyBytes(path) else { throw DeskError.message("This PC request is too large.") }
             request.httpBody = data
         }
         if pairing { request.timeoutInterval = 12 }
         if displayControlOnly { request.timeoutInterval = path.hasSuffix("/start") ? 12 : 3 }
+        if displayInputOnly { request.timeoutInterval = body["operation"] as? String == "begin" ? 2 : 0.7 }
         if path.hasSuffix("/frame") { request.timeoutInterval = penPreviewOnly ? 4 : 8 }
         let task = session.dataTask(with: request)
         lock.lock()
-        guard pending.count < (penPreviewOnly ? 1 : 16) else { lock.unlock(); throw DeskError.message("The PC is busy. Wait for the current request before trying again.") }
+        guard pending.count < (displayInputOnly ? 4 : penPreviewOnly ? 1 : 16) else { lock.unlock(); throw DeskError.message("The PC is busy. Wait for the current request before trying again.") }
         pending[task.taskIdentifier] = Pending(task: task, path: path,
-            release: HostPolicy.allowedInBackground(path, body: body) || (displayControlOnly && path.hasSuffix("/stop")), reply: reply)
+            release: HostPolicy.allowedInBackground(path, body: body) || (displayControlOnly && path.hasSuffix("/stop")) ||
+                (displayInputOnly && ["end","cancel"].contains(body["operation"] as? String ?? "")), reply: reply)
         lock.unlock()
+        do { try beforeCommit?() }
+        catch {
+            lock.lock(); pending.removeValue(forKey: task.taskIdentifier); lock.unlock()
+            task.cancel(); throw error
+        }
         task.resume()
         if !pairing && HostPolicy.needsDispatchDeadline(path, method: method, body: body) {
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + HostPolicy.dispatchDeadline(path)) { [weak self, weak task] in
@@ -130,7 +147,7 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         lock.lock()
         guard var item = pending[dataTask.taskIdentifier], let http = response as? HTTPURLResponse,
-              response.expectedContentLength <= Int64(maximumReply), http.url?.host == host else {
+              response.expectedContentLength <= Int64(maximumReply(item.path)), http.url?.host == host else {
             lock.unlock(); completionHandler(.cancel); return
         }
         item.status = http.statusCode; pending[dataTask.taskIdentifier] = item
@@ -139,7 +156,7 @@ final class PinnedClient: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         lock.lock()
         guard var item = pending[dataTask.taskIdentifier] else { lock.unlock(); return }
-        if data.count > maximumReply - item.data.count {
+        if data.count > maximumReply(item.path) - item.data.count {
             item.failure = DeskError.message("The PC response is too large. Reduce the board or library and retry.")
             pending[dataTask.taskIdentifier] = item; lock.unlock(); dataTask.cancel(); return
         }

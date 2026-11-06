@@ -82,7 +82,7 @@ public sealed class ExtendedDisplay : IDisposable
                 var own=monitorGuid is null?null:paths.FirstOrDefault(p=>p.Adapter==adapterLuid&&p.TargetId==targetId);
                 var independent=own is not null&&IsIndependent(own,paths);
                 var active=session is {IsInvalid:false,IsClosed:false}&&monitorGuid is not null;
-                var detail=sessionError??(active?(independent?(shared?"Independent tablet desktop is shared. Only this session's display can be captured.":"Independent desktop created. Enable tablet sharing on this PC to send frames."):"Monitor created; Windows has not exposed an independent desktop. In Windows Display settings choose Extend for TabletDeck. Physical displays are unchanged."):(installed?.Info.Detail??"Install a compatible, reviewed virtual display driver using its publisher's administrator setup. TouchBar controls work without it."));
+                var detail=sessionError??(active?(independent?(shared?"Independent tablet desktop is shared. Only this session's display can be captured.":"Independent desktop created. Enable tablet sharing on this PC to send frames."):"Monitor created; Windows has not exposed an independent desktop. In Windows Display settings choose Extend for DeskWing. Physical displays are unchanged."):(installed?.Info.Detail??"Install a compatible, reviewed virtual display driver using its publisher's administrator setup. TouchBar controls work without it."));
                 return new(installed?.Usable==true,active,active&&shared,active&&independent,own?.SourceName,own?.Width??0,own?.Height??0,driver,detail,
                     paths.Select(p=>new ExtendedDesktop(p.SourceName,p.Name,p.X,p.Y,p.Width,p.Height,p.IsClone,own==p)).ToArray(),own?.RefreshRate??0);
             }
@@ -110,11 +110,11 @@ public sealed class ExtendedDisplay : IDisposable
         lock(sync)
         {
             ObjectDisposedException.ThrowIf(disposed,this);
-            if(monitorGuid is not null)throw new InvalidOperationException("A TabletDeck display already exists. Stop it before creating another.");
+            if(monitorGuid is not null)throw new InvalidOperationException("A DeskWing display already exists. Stop it before creating another.");
             ct.ThrowIfCancellationRequested();
             var driver=platform.FindDriver()??throw new InvalidOperationException("No installed SudoVDA device interface was found. No driver was installed or changed.");
             if(!driver.Usable)throw new InvalidOperationException(driver.Info.Detail);
-            if(platform.ReadPaths().Any(p=>Native.SameDevice(p.AdapterPath,driver.Path)))throw new InvalidOperationException("SudoVDA already has an active display owned by another application. Stop that session before creating a TabletDeck display.");
+            if(platform.ReadPaths().Any(p=>Native.SameDevice(p.AdapterPath,driver.Path)))throw new InvalidOperationException("SudoVDA already has an active display owned by another application. Stop that session before creating a DeskWing display.");
             var handle=platform.Open(driver.Path);
             Guid created=Guid.NewGuid();
             var addAttempted=false;
@@ -127,7 +127,7 @@ public sealed class ExtendedDisplay : IDisposable
                 BitConverter.GetBytes(request.Height).CopyTo(input,4);
                 BitConverter.GetBytes(request.RefreshRate).CopyTo(input,8);
                 created.ToByteArray().CopyTo(input,12);
-                Encoding.ASCII.GetBytes("TabletDeck").CopyTo(input,28);
+                Encoding.ASCII.GetBytes("DeskWing").CopyTo(input,28);
                 Encoding.ASCII.GetBytes(created.ToString("N")[..12]).CopyTo(input,42);
                 addAttempted=true;
                 var output=platform.Ioctl(handle,AddMonitor,input,12);
@@ -176,7 +176,7 @@ public sealed class ExtendedDisplay : IDisposable
         lock(sync)
         {
             ObjectDisposedException.ThrowIf(disposed,this);
-            if(monitorGuid is null)throw new InvalidOperationException("Create a TabletDeck display on this PC first.");
+            if(monitorGuid is null)throw new InvalidOperationException("Create a DeskWing display on this PC first.");
             shared=enabled;cached=null;captureTicks=0;InvalidateVideo();
             return Status();
         }
@@ -193,7 +193,7 @@ public sealed class ExtendedDisplay : IDisposable
                 catch(Exception ex) when(ex is not OutOfMemoryException)
                 {
                     // Retain ownership so the PC can retry removing this exact GUID; never report a failed removal as stopped.
-                    sessionError="Removing the TabletDeck monitor failed. Sharing is off; retry Stop display: "+ex.Message;
+                    sessionError="Removing the DeskWing monitor failed. Sharing is off; retry Stop display: "+ex.Message;
                     return Status();
                 }
                 heartbeat?.Dispose();heartbeat=null;session.Dispose();session=null;monitorGuid=null;sessionDriver=null;sessionError=null;
@@ -228,7 +228,7 @@ public sealed class ExtendedDisplay : IDisposable
                 if(!shared||session is null||monitorGuid is null)throw new InvalidOperationException("Desktop sharing is off. Enable sharing on the PC after creating a display.");
                 var paths=platform.ReadPaths();
                 var own=paths.FirstOrDefault(p=>p.Adapter==adapterLuid&&p.TargetId==targetId);
-                if(own is null||!IsIndependent(own,paths))throw new InvalidOperationException("The TabletDeck monitor is not an independent extended desktop. Select Extend in Windows Display settings.");
+                if(own is null||!IsIndependent(own,paths))throw new InvalidOperationException("The DeskWing monitor is not an independent extended desktop. Select Extend in Windows Display settings.");
                 if(own.Width>3840||own.Height>2160)throw new InvalidOperationException("The virtual desktop exceeds the bounded capture size.");
                 var age=captureTicks==0?double.MaxValue:Stopwatch.GetElapsedTime(captureTicks).TotalMilliseconds;
                 if(cached is not null&&requestedWidth==request.Width&&age<250)return cached with{AgeMs=age};
@@ -335,7 +335,7 @@ public sealed class ExtendedDisplay : IDisposable
         internal static SafeFileHandle Open(string path)
         {
             var handle=CreateFile(path,0xc0000000,3,IntPtr.Zero,3,0,IntPtr.Zero);
-            if(handle.IsInvalid){var error=Marshal.GetLastWin32Error();handle.Dispose();throw new Win32Exception(error,error==5?"Windows denied access to the installed SudoVDA interface. Review its device permissions with its publisher; TabletDeck will not elevate or change permissions.":"Cannot open the installed SudoVDA device interface.");}
+            if(handle.IsInvalid){var error=Marshal.GetLastWin32Error();handle.Dispose();throw new Win32Exception(error,error==5?"Windows denied access to the installed SudoVDA interface. Review its device permissions with its publisher; DeskWing will not elevate or change permissions.":"Cannot open the installed SudoVDA device interface.");}
             return handle;
         }
         internal static byte[] Ioctl(SafeFileHandle handle,uint code,byte[]? input,int outputSize)

@@ -12,7 +12,7 @@ async function port(){const listener=net.createServer();listener.listen(0,'127.0
 function emit(type='SceneListChanged'){for(const socket of mock.clients)if(socket.readyState===1)socket.send(JSON.stringify({op:5,d:{eventType:type,eventIntent:4,eventData:{}}}));}
 async function run(){
  let executable=process.env.TABLETDECK_COMPANION;
- if(!executable){const compiled=spawnSync('dotnet',['build',path.join(root,'companion/TabletDeck.csproj'),'--configuration','Release','--no-restore','-o',build],{cwd:root,windowsHide:true,encoding:'utf8'});assert.equal(compiled.status,0,compiled.stdout+'\n'+compiled.stderr);executable=path.join(build,'TabletDeck-Companion.exe');}
+ if(!executable){const compiled=spawnSync('dotnet',['build',path.join(root,'companion/DeskWing.csproj'),'--configuration','Release','--no-restore','-o',build],{cwd:root,windowsHide:true,encoding:'utf8'});assert.equal(compiled.status,0,compiled.stdout+'\n'+compiled.stderr);executable=path.join(build,'DeskWing-Companion.exe');}
  assert.ok(path.resolve(executable).includes(path.sep+'.test-output'+path.sep),'Use an isolated compiled executable in .test-output, never the running default bin.');
  const [httpPort,httpsPort,controlPort,obsPort]=await Promise.all([port(),port(),port(),port()]);assert.equal(new Set([httpPort,httpsPort,controlPort,obsPort]).size,4);
  mock=new WebSocketServer({host:'127.0.0.1',port:obsPort});await once(mock,'listening');

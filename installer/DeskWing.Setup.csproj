@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <AssemblyName>DeskWing-Setup</AssemblyName><Product>DeskWing Installer</Product><Title>DeskWing Installer</Title><AssemblyTitle>DeskWing Installer</AssemblyTitle><Description>DeskWing installer</Description><Version>1.15.0</Version>
+    <ApplicationIcon>..\assets\app-icon.ico</ApplicationIcon>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier><SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile><EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+  <!-- Old direct-install clients verify this legacy product identity before launching an update.
+       Build this separate bridge artifact only for those clients; the primary installer is DeskWing. -->
+  <PropertyGroup Condition="'$(LegacyUpdateCompatibility)' == 'true'">
+    <AssemblyName>TabletDeck-Setup</AssemblyName><Product>TabletDeck-Setup</Product>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(PayloadArchive)' != ''">
+    <EmbeddedResource Include="$(PayloadArchive)" LogicalName="DeskWing.Payload.zip" />
+  </ItemGroup>
+</Project>
