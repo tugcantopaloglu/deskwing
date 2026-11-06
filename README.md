@@ -1,57 +1,55 @@
 # DeskWing
 
-**An extension of your PC.** Use your tablet for streaming controls, app shortcuts, media, pen input, handwriting, notebooks, PDF annotation, and an optional second display. Change OBS scenes, play sounds, control audio, open apps, and run macros over **Wi-Fi or USB**.
+**An extension of your PC.** Turn your tablet into a streaming control deck, writing workspace, pen tablet, and second display. Connect to your Windows PC over **Wi-Fi or USB**.
 
-**[Download the latest published release](https://github.com/tugcantopaloglu/deskwing/releases/latest)** · [Build from source](docs/BUILDING.md) · [Development checklist](TODO.md) · [Prepare a beta](docs/BETA-RELEASE.md)
+[**Download DeskWing 1.15.0**](https://github.com/tugcantopaloglu/deskwing/releases/latest) · [Google Play internal test](https://play.google.com/apps/internaltest/4701292919537220543) · [Build from source](docs/BUILDING.md)
 
-## 1.15.0 development
+## What you can do
 
-The current source expands the existing board editor, macros, shared ink and native display viewer:
+- **Stream and control:** operate OBS scenes, audio, Soundpad, apps, shortcuts and macros from large tablet buttons. See the connected PC, active board and Soundpad output route.
+- **Write and organize:** draw with a compatible stylus, use your keyboard's handwriting input, and organize notebooks with multiple pages, thumbnails, history and recovery. Import PDFs, annotate them, and export flattened PDFs.
+- **Draw into Windows apps:** use pressure/tilt pen input with explicit PC permission. The native Second display viewer offers View, Pen and single-finger Touch modes on the owned extra monitor.
+- **Extend your desktop:** choose 60 Hz or Match tablet, with picture-quality presets, adaptive bitrate/cadence and compatible hardware H.264 encoding with software fallback. Actual delivery depends on hardware and connection; video is silent.
+- **Keep your workspace:** existing boards, pairing, signing identity and saved ink are preserved. Play-installed apps update through Play.
 
-- A tablet status button identifies the connected PC and current board. **Check this workspace** reads connection, OBS and Soundpad status; each live pad shows its saved speaker/microphone route. **Test output** plays only a sound the user explicitly selects and starts.
-- The native **Second display** viewer combines **60 Hz / Match tablet** video with **View**, **Pen**, or single-finger **Touch** modes. Input starts only after separate PC permission for the exact extra monitor. Touch supplies taps and drags, not multitouch gestures.
-- **Ink & notes → Notebooks** adds named notebooks, pages and thumbnails, zoom/pan, page history, archive/restore and local recovery while preserving the original shared scratchpad. PDF import renders page images locally; export produces a flattened PDF with ink and text-note pages.
-- **Balanced**, **Sharper picture**, and **Save power and bandwidth** presets tune video bitrate. Optional adaptive quality responds to measured processing/write load; compatible hardware H.264 encoding is tried with a software fallback. These options do not guarantee a higher frame rate or measured battery savings.
-- Android internal-test bundle preparation, iOS archive preparation, and privacy/support materials keep build validation, signing, device rehearsal and store distribution as separate steps.
+## Screenshots
 
-**1.15.0 / Android code 18 is a development candidate.** Google Play internal testing is the current distribution priority. Follow the [implementation checklist](TODO.md) and [beta guide](docs/BETA-RELEASE.md) for exact build, device, signing and account gates. Prepared workflows do not upload to either store. This page does not claim a successful 1.15 device upgrade, Play upload, signed iOS beta or store approval. Handwriting remains a platform/keyboard feature. Published downloads and the older release history below can predate the current source.
+Screenshots show the DeskWing 1.15 interface rendered with demo data, rather than a private user board.
 
-**Prior 1.14 evidence:** bounded Xiaomi tests confirmed smooth 60 Hz and 120 Hz viewing, a working decoder FPS estimate, Home/reopen, sharing revocation and display removal. The [1.14 display record](docs/EXTENDED-DISPLAY.md#114-hardware-checkpoint--2026-11-06) preserves those measurements. They do not certify the new 1.15 display input, notebook/PDF, adaptive-quality or encoder paths.
+### Stream Studio on the tablet
 
-**Names and upgrade compatibility:** current builds use `DeskWing-Companion.exe`, `DeskWing-Setup.exe`, and `DeskWing.apk`, with projects `companion/DeskWing.csproj` and `installer/DeskWing.Setup.csproj`. The Android install ID `app.tabletdeck.studio`, existing `%LOCALAPPDATA%\TabletDeck` data, signing continuity, pairing and compatibility protocol identifiers are retained deliberately. This rebrand does not replace the user's app identity or board. Historical downloads can retain their original filenames; never copy a development board over user data. Play-managed installations use Play updates. Native display video remains silent; its separately enabled input is distinct from the view-only JPEG compatibility preview. See [display modes and limits](docs/EXTENDED-DISPLAY.md).
+Scene controls, action keys, audio faders and connected-workspace status.
 
-**Repository rename:** the project now lives at [tugcantopaloglu/deskwing](https://github.com/tugcantopaloglu/deskwing). Existing clones can update their remote with `git remote set-url origin https://github.com/tugcantopaloglu/deskwing.git`. Historical releases now appear under DeskWing, with their original tags and files intact. Older binaries use the former update endpoint and need manual downloads from [Releases](https://github.com/tugcantopaloglu/deskwing/releases); the current source uses the new endpoint.
+![DeskWing Stream Studio tablet interface with action keys and audio faders](docs/images/deskwing-stream-studio.png)
 
-![Studio layout with twelve action keys and two audio faders — illustrative design preview](docs/images/studio-preview.png)
+### Ink & notes
 
-The Studio layout has twelve large buttons beside two audio faders and five page tabs. Version **1.5.0 adds Full pad mode with 24 or 40 buttons per group**, plus icon sizing that fits short rows, long labels, and active-scene badges. **1.5.1 fixes empty Soundpad library responses in the Windows companion**, so installed sounds appear in the tablet browser. Tap **Full pad**, choose a density, and use **Exit full pad** to restore the mixer. See the [full-pad guide](docs/FULL-PAD.md). The screenshot above is an illustrative Studio preview.
+A pen canvas, typed or handwritten notes, fullscreen controls and access to notebooks.
 
-The low-latency transport and Android packaging fix from 1.4.1 are retained. Physical Android 16 tests verified USB/Wi-Fi connections, audible soundboard playback, real OBS scene changes and mic mute/unmute, and Discord playback-session mute with its original state restored. Sparse heartbeat samples were 3.9–10.5 ms over USB and 6.5 ms over Wi-Fi; these are not end-to-end latency guarantees. See the [performance guide](docs/PERFORMANCE.md) and [hardware test limits](docs/LIVE-TEST.md).
+![DeskWing Ink and notes interface with a drawing canvas and notes](docs/images/deskwing-ink-notes.png)
 
-**1.6.0 adds running-action progress and cancellation.** A ribbon shows the current macro step and a **Cancel action** button in Studio and full-pad layouts. Cancellation interrupts delays and skips later steps; completed steps stay applied. See [running and cancelling macros](docs/MACROS.md) and the [development roadmap](docs/ROADMAP.md).
+### Windows board editor
 
-**1.7.0 adds board profiles, automatic backups, and Soundpad favourites.** Use **Profiles** in the bottom navigation to switch boards. The PC panel can create, duplicate, rename, or delete profiles and preview/restore the latest 20 backups. Star a sound in the Soundpad library, then choose **Favourites**. See the [complete profiles, backups, and favourites guide](docs/PROFILES-AND-BACKUPS.md).
+Configure pages and buttons on the PC, then sync changes to the tablet.
 
-**1.8.0 makes desktop setup easier.** Choose **PC setup** in the Windows control panel for tablet pairing, OBS connection and audio-input checks, button editing, profiles, backups, Soundpad, and Windows options. First-time PCs with no paired tablet open this guide automatically once per browser tab. OBS connection settings can be saved separately from board buttons, and checks never start a stream or play a sound. See [the PC setup guide](docs/PC-SETUP.md).
+![DeskWing Windows companion board editor with page and button settings](docs/images/deskwing-board-editor.png)
 
-**1.9.0 adds all eight studio tools:** connection diagnostics, explicit OBS Start/Stop/Mute actions, recent Soundpad clips, an easier button editor with app/file selection and PNG icons, offline QR pairing, optional automatic profiles, an expanded OBS mixer, and portable board packs with selected audio. Choose **Tools** on the PC or tablet; local administration tools stay on the PC. Update both components. See [the complete Studio tools guide](docs/STUDIO-TOOLS.md).
+## Release and platform status
 
-**1.10.0 separates the Windows management console from the tablet board** and adds opt-in **OBS live preview and Twitch/Kick chat viewers**, with editable channel fields. The PC uses a sidebar and full-area editors; the tablet retains its action keys and optional monitor dock. Preview is a silent JPEG monitor at up to 4 fps, with independent OBS/control traffic. Android provider pages run in a separate view with no PC-control bridge. The update also fixes blocked Android script assets, improves LAN address selection and tablet/USB status, and includes a bounded Wi-Fi repair helper. See [monitoring and the desktop console](docs/MONITORING.md).
+**1.15.0 is published on [GitHub Releases](https://github.com/tugcantopaloglu/deskwing/releases/tag/v1.15.0).** Downloads use DeskWing names: `DeskWing-Setup.exe`, `DeskWing-Windows.zip`, `DeskWing.apk`, `DeskWing-universal.apk` and `DeskWing.aab`, with SHA-256 checksums.
+
+Android **1.15.0 / build 18** is also published to Google Play internal testing. Join with an authorized tester account using the link above. Google Play production distribution still requires its testing/review gates. The existing Android installation identity and original signing certificate are retained for updates without uninstalling.
+
+[Release CI](https://github.com/tugcantopaloglu/deskwing/actions/runs/42273712308) passed **80 Windows suites** and **70 iOS simulator tests**. The matching Windows companion was deployed with board, pairing and ink preservation checks. iOS unsigned archive validation passed; signed iPad installation and TestFlight distribution are not available yet. Physical 1.14 pen/display checks are recorded separately in the [display guide](docs/EXTENDED-DISPLAY.md); they do not certify every new 1.15 feature or device. See the [verification record](docs/VERIFICATION-1.15-2026-11-06.md) and [beta guide](docs/BETA-RELEASE.md).
+
+Independent Second display requires an already-installed compatible virtual-display driver and explicit PC sharing. Pen/touch requires separate input permission. Touch supplies single-finger taps/drags, not multitouch gestures. Handwriting depends on the tablet's OS, pen and installed keyboard. [Display modes and limits](docs/EXTENDED-DISPLAY.md).
 
 ## Features
 
-**1.13.0 correction:** Spotify and browser layouts now use a selected Windows media session with its real title, artwork when supplied, playback progress and supported transport/seek controls. Spotify commands target Spotify rather than the Windows global media player. Browser players need an explicit selection because Windows does not identify the website. Other app layouts use compact shortcut strips, with a relative frame jog for configured Resolve shortcuts. A **live Soundpad page** also brings the full library into the Memes pad itself, beyond the 24/40 keys visible in one group. See [targeted media controls](docs/MEDIA-CONTROLS.md), [Memes setup](#put-the-whole-soundpad-library-on-memes), and the [1.13 extension record](docs/UI-EXTENSION-1.13.md). The [v1.13.0 release](https://github.com/tugcantopaloglu/deskwing/releases/tag/v1.13.0) is published; the final PC and matching code-16 APK installation were verified, with the media-test limits recorded below.
-
-**1.12.0 introduced Computer Copilot**, a separate tablet mode for editable app shortcut layouts, plus optional viewing of an independent Windows display through an already-installed compatible SudoVDA driver. Choose **Computer Copilot** in the mode selector; use **Edit Copilot settings** in the Windows app to enable controls and edit layouts. Automatic following uses foreground executable names; browser tools use manual layouts. The initial shortcut-only media layouts are replaced by targeted media controls in the 1.13 correction above; other presets remain keyboard shortcuts, without deep application or AI integration. Display creation and tablet sharing require explicit PC consent; no driver is included or installed. Its original silent JPEG preview was capped at 4 fps with no touch forwarding; the current native viewer is described above. See [Computer Copilot](#computer-copilot), [controller details](docs/COMPUTER-COPILOT.md), [optional second display](docs/EXTENDED-DISPLAY.md), and the [1.12 UI extension record](docs/UI-EXTENSION-1.12.md).
-
-**Live libraries:** an OBS scene page can now follow additions, renames, removals and scene order continuously while retaining its saved manual buttons behind a toggle. Soundpad's full library has Previous/Next and page selection in groups of 80, with automatic refresh every five seconds while open. The isolated pagination check visited all 1,421 fixture sounds; no third-party sound collection is bundled.
-
-**1.11.0 adds a standalone Windows desktop window** with its own taskbar icon, resizing and close-to-tray behavior. Reopening the desktop shortcut or tray icon restores the same window. It also fixes the timer error that blocked desktop navigation, adds rendered click/native-window regression checks, and provides matching minimal application icons for Windows and Android (including adaptive/themed Android icons). The installer creates Desktop and Start menu shortcuts. The Windows app uses Microsoft's Evergreen WebView2 Runtime; if it is missing, the app shows an official download link. See [desktop setup](docs/PC-SETUP.md).
-
-**In-app updates:** Windows options can check at app startup, download a verified Windows update and install/restart on confirmation. Optional USB APK updates support manual installation, automatic checks and a separate reopen setting. Android may require approval and briefly stops the app. Both components keep existing pairing. See the [complete update guide](docs/UPDATES.md).
-
 | Area | Controls |
 | --- | --- |
+| Writing | Shared ink, notebooks/pages, thumbnails, zoom/pan, history/recovery, PDF import/annotation and flattened export |
+| Pen and display | Native 60 Hz / Match tablet viewing, separately authorized pen/single-finger input, quality presets and adaptive delivery |
 | Scenes | Live OBS scene page, switch program scene, set Studio Mode preview, take a transition |
 | Audio | Two configurable OBS faders, input mute, Windows per-app playback volume/mute, PC soundboard with two synthesized demo effects |
 | Broadcast | Streaming, recording, replay-buffer save, virtual camera, Studio Mode |
@@ -93,15 +91,15 @@ The low-latency transport and Android packaging fix from 1.4.1 are retained. Phy
 
 ## First run
 
-For a managed Windows installation, use the release's Windows installer; current source builds name it **DeskWing-Setup.exe**. Run it and type `INSTALL` after reviewing its destination. It creates Desktop and Start menu shortcuts without launching any apps. The ZIP remains available for portable use. See [installation and uninstalling](docs/DESKTOP-AND-HOLD.md#install-or-update-windows).
+For a managed Windows installation, download **DeskWing-Setup.exe** from the latest release. Run it and type `INSTALL` after reviewing its destination. It creates Desktop and Start menu shortcuts without launching any apps. The ZIP remains available for portable use. See [installation and uninstalling](docs/DESKTOP-AND-HOLD.md#install-or-update-windows).
 
-Choose a matching Windows package and Android installer from [published releases](https://github.com/tugcantopaloglu/deskwing/releases). Published releases can be older than this development branch; use their included filenames and instructions. Current source packages use **DeskWing.apk** and the layout below. Direct updates must retain the original signing certificate and existing data. Third-party meme collections are user content and are not included in the public release.
+Use the matching Windows and Android downloads from [the latest release](https://github.com/tugcantopaloglu/deskwing/releases/latest). For Google Play, join the internal test with an authorized account. For direct installation, use **DeskWing.apk**. Direct updates retain the original signing certificate and existing data. Third-party meme collections are user content and are not bundled.
 
 ```text
 DeskWing/
 ├── DeskWing.apk
 ├── SHA256SUMS.txt
-├── Verification.txt
+├── README.txt
 └── Windows/
     ├── DeskWing-Companion.exe
     ├── Install-APK.cmd
@@ -120,7 +118,7 @@ DeskWing/
 
 For Soundpad or Discord-only use, skip the OBS setup steps. An OBS disconnected indicator is expected while OBS is closed; Soundpad, app launches, and keyboard shortcuts remain available.
 
-Direct Android packages retain the original signing certificate; that certificate must not be assumed to match a future Play-delivered package's app-signing certificate. The beta guide records the separate Play identity checks. Windows binaries, including the installer, are unsigned and may trigger SmartScreen. Direct APKs use APK Signature Schemes v2 and v3. Verify the provided SHA256SUMS.txt if you transfer files.
+Direct Android packages retain the original signing certificate. Google Play App Signing was verified against that same certificate for the 1.15 internal release. Windows binaries, including the installer, are unsigned and may trigger SmartScreen. Direct APKs use APK Signature Schemes v2 and v3. Verify the provided SHA256SUMS.txt if you transfer files.
 
 Installing by file manager: copy the APK to the tablet, open it, and allow that file source to install apps if Android prompts. Installing from Windows: authorize USB debugging, then run `Install-APK.cmd` with exactly one Android device connected.
 
