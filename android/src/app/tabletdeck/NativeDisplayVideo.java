@@ -245,7 +245,7 @@ final class NativeDisplayVideo {
         boolean still=rendered>0&&session.streamState!=null&&session.streamState.stillImage(now);
         String below=rendered>0&&!still&&shown+2<session.requestedRate?" · below target":"";
         session.status.setText(still?String.format(Locale.ROOT,"Still image · target %d Hz · tablet %.0f Hz",session.requestedRate,current):rendered==0?"Waiting for video · target "+session.requestedRate+" Hz":String.format(Locale.ROOT,"≈%.0f fps shown · %.0f fps received\nTarget %d Hz · tablet %.0f Hz%s",shown,incoming,session.requestedRate,current,below));
-        if(++session.statisticsTicks%2==0)Log.i("DeskWingDisplay",String.format(Locale.ROOT,"requested_hz=%d screen_hz=%.2f received_count=%d rendered_count=%d sample_duration_ms=%.0f receive_fps=%.2f render_estimate_fps=%.2f dropped_count=%d still_image=%s",session.requestedRate,current,received,rendered,seconds*1000,incoming,shown,session.dropped.get(),still));
+        if(++session.statisticsTicks%2==0)Log.i("DeskWingDisplay",String.format(Locale.ROOT,"requested_hz=%d screen_hz=%.2f received_count=%d rendered_count=%d sample_duration_ms=%.0f receive_fps=%.2f render_estimate_fps=%.2f dropped_count=%d still_image=%s render_clock_offset_ms=%.3f render_window_ms=%.3f render_callback_age_ms=%.3f",session.requestedRate,current,received,rendered,seconds*1000,incoming,shown,session.dropped.get(),still,session.renderMetrics.renderClockOffsetMillis(),session.renderMetrics.renderWindowMillis(),session.renderMetrics.callbackAgeMillis(now)));
         ui.postDelayed(session.statistics,1000);
     }
     private static boolean hardwareAvc(MediaCodecInfo info){
