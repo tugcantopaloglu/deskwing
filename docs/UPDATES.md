@@ -2,6 +2,8 @@
 
 Open **Windows options** in the desktop app. Windows and tablet updates are separate, so connecting a USB cable does not install anything unless you start an update or enable the optional automation.
 
+The canonical repository is now [tugcantopaloglu/deskwing](https://github.com/tugcantopaloglu/deskwing). Current source checks that repository directly and verifies its exact release asset URLs. Binaries built before the rename use the former API endpoint with redirects disabled, so their in-app update checks no longer work; use [DeskWing releases](https://github.com/tugcantopaloglu/deskwing/releases) for manual downloads. Historical release tags, files, checksums, package IDs, and signing identities are unchanged.
+
 ## Update Windows from the app
 
 1. Save any editor changes and finish running actions or held shortcuts.

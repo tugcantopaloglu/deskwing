@@ -74,7 +74,7 @@ Project generation follows [XcodeGen's source/resource specification](https://gi
 
 ## Recorded validation
 
-- Hosted Mac validation passed on 2026-11-05 for commit `702d40b575133baf1160c285fcb0698599c9ff65`: Xcode 26.6, iPad Pro 13-inch (M5) simulator, iPadOS 26.4.1. The unsigned Debug app compiled and all nine `DeskWingTests` passed with zero failures. [iOS simulator job and logs](https://github.com/tugcantopaloglu/tablet-deck-studio/actions/runs/42086833842/job/127454109100).
+- Hosted Mac validation passed on 2026-11-05 for commit `702d40b575133baf1160c285fcb0698599c9ff65`: Xcode 26.6, iPad Pro 13-inch (M5) simulator, iPadOS 26.4.1. The unsigned Debug app compiled and all nine `DeskWingTests` passed with zero failures. [iOS simulator job and logs](https://github.com/tugcantopaloglu/deskwing/actions/runs/42086833842/job/127454109100).
 - Tests cover private-address and certificate-pin policy, bridge route/origin boundaries, background release rules, ink request limits, PNG validation, malformed certificates, stale callback isolation after a renderer restart, and strict full-screen requests with background-safe exit. They do not exercise live TLS pairing, visual full-screen behavior or hardware pen input.
 
 - `python ios/sync-assets.py`: shared assets copied with a manifest and path checks.

@@ -1,8 +1,8 @@
 # DeskWing
 
-Extend your Windows PC with a tablet workspace for streaming controls, app shortcuts, media, writing, and optional second-display viewing. Change OBS scenes, play sounds, control audio, open apps, and run macros over **Wi-Fi or USB**. DeskWing is the new name for Tablet Deck Studio.
+**An extension of your PC.** Use your tablet for streaming controls, app shortcuts, media, pen input, handwriting, shared ink, and optional second-display viewing. Change OBS scenes, play sounds, control audio, open apps, and run macros over **Wi-Fi or USB**. DeskWing is the new name for Tablet Deck Studio.
 
-**[Download the latest release](https://github.com/tugcantopaloglu/tablet-deck-studio/releases/latest)** · [Build from source](docs/BUILDING.md) · [Verification results](docs/VERIFICATION.txt)
+**[Download the latest release](https://github.com/tugcantopaloglu/deskwing/releases/latest)** · [Build from source](docs/BUILDING.md) · [Verification results](docs/VERIFICATION.txt)
 
 ## 1.14.0 development
 
@@ -17,6 +17,8 @@ The current development work brings the broader workspace together:
 **1.14.0 is a development build, not a published release.** Follow the [implementation checklist](TODO.md) for completion and verification status. The release history and hardware results below describe earlier versions; they do not certify the new pen or editing workflows. Handwriting recognition depends on the tablet, Android version, stylus, and installed keyboard. iOS support and store releases are being prepared; this repository does not yet provide a verified iOS release.
 
 **Upgrade compatibility:** the visible app name becomes **DeskWing**, while `TabletDeck-Companion.exe`, `TabletDeck-Studio.apk`, the Android package `app.tabletdeck.studio`, and existing configuration paths retain their names. Keeping these identities and the original signing key preserves the existing upgrade path, pairing, and settings. Published downloads may still display Tablet Deck Studio. The optional second display remains the documented silent preview, not full-motion video or touch forwarding.
+
+**Repository rename:** the project now lives at [tugcantopaloglu/deskwing](https://github.com/tugcantopaloglu/deskwing). Existing clones can update their remote with `git remote set-url origin https://github.com/tugcantopaloglu/deskwing.git`. Historical releases now appear under DeskWing, with their original tags and files intact. Older binaries use the former update endpoint and need manual downloads from [Releases](https://github.com/tugcantopaloglu/deskwing/releases); the current source uses the new endpoint.
 
 ![Studio layout with twelve action keys and two audio faders — illustrative design preview](docs/images/studio-preview.png)
 
@@ -36,7 +38,7 @@ The low-latency transport and Android packaging fix from 1.4.1 are retained. Phy
 
 ## Features
 
-**1.13.0 correction:** Spotify and browser layouts now use a selected Windows media session with its real title, artwork when supplied, playback progress and supported transport/seek controls. Spotify commands target Spotify rather than the Windows global media player. Browser players need an explicit selection because Windows does not identify the website. Other app layouts use compact shortcut strips, with a relative frame jog for configured Resolve shortcuts. A **live Soundpad page** also brings the full library into the Memes pad itself, beyond the 24/40 keys visible in one group. See [targeted media controls](docs/MEDIA-CONTROLS.md), [Memes setup](#put-the-whole-soundpad-library-on-memes), and the [1.13 extension record](docs/UI-EXTENSION-1.13.md). The [v1.13.0 release](https://github.com/tugcantopaloglu/tablet-deck-studio/releases/tag/v1.13.0) is published; the final PC and matching code-16 APK installation were verified, with the media-test limits recorded below.
+**1.13.0 correction:** Spotify and browser layouts now use a selected Windows media session with its real title, artwork when supplied, playback progress and supported transport/seek controls. Spotify commands target Spotify rather than the Windows global media player. Browser players need an explicit selection because Windows does not identify the website. Other app layouts use compact shortcut strips, with a relative frame jog for configured Resolve shortcuts. A **live Soundpad page** also brings the full library into the Memes pad itself, beyond the 24/40 keys visible in one group. See [targeted media controls](docs/MEDIA-CONTROLS.md), [Memes setup](#put-the-whole-soundpad-library-on-memes), and the [1.13 extension record](docs/UI-EXTENSION-1.13.md). The [v1.13.0 release](https://github.com/tugcantopaloglu/deskwing/releases/tag/v1.13.0) is published; the final PC and matching code-16 APK installation were verified, with the media-test limits recorded below.
 
 **1.12.0 introduced Computer Copilot**, a separate tablet mode for editable app shortcut layouts, plus optional viewing of an independent Windows display through an already-installed compatible SudoVDA driver. Choose **Computer Copilot** in the mode selector; use **Edit Copilot settings** in the Windows app to enable controls and edit layouts. Automatic following uses foreground executable names; browser tools use manual layouts. The initial shortcut-only media layouts are replaced by targeted media controls in the 1.13 correction above; other presets remain keyboard shortcuts, without deep application or AI integration. Display creation and tablet sharing require explicit PC consent; no driver is included or installed. The display view is a silent JPEG preview capped at 4 fps, with no touch forwarding. See [Computer Copilot](#computer-copilot), [controller details](docs/COMPUTER-COPILOT.md), [optional second display](docs/EXTENDED-DISPLAY.md), and the [1.12 UI extension record](docs/UI-EXTENSION-1.12.md).
 
@@ -91,7 +93,7 @@ The low-latency transport and Android packaging fix from 1.4.1 are retained. Phy
 
 For a managed Windows installation, download **TabletDeck-Setup.exe**, run it, and type `INSTALL` after reviewing its destination. It creates Desktop and Start menu shortcuts without launching any apps. The ZIP remains available for portable use. See [installation and uninstalling](docs/DESKTOP-AND-HOLD.md#install-or-update-windows).
 
-Download the versioned complete ZIP for **1.13.0** from [Releases](https://github.com/tugcantopaloglu/tablet-deck-studio/releases/tag/v1.13.0), or download `TabletDeck-Studio.apk` separately if you only need the Android installer. Update both components. The APK keeps the original signing certificate, so installing it over an older version preserves pairing. Third-party meme collections are user content and are not included in the public release.
+Download the versioned complete ZIP for **1.13.0** from [Releases](https://github.com/tugcantopaloglu/deskwing/releases/tag/v1.13.0), or download `TabletDeck-Studio.apk` separately if you only need the Android installer. Update both components. The APK keeps the original signing certificate, so installing it over an older version preserves pairing. Third-party meme collections are user content and are not included in the public release.
 
 ```text
 TabletDeck-Studio/

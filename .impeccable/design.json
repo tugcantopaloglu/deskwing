@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-05T20:19:31.878Z",
+  "generatedAt": "2026-11-06T15:50:06.995Z",
   "title": "Design System: DeskWing",
   "extensions": {
     "sourceTokens": {
@@ -975,7 +975,7 @@
             "stale",
             "error"
           ],
-          "clear": "Remove image src and hide it on stop/lifecycle change, invalid or hard-error capture, or freshness expiry. A brief busy/rate-limit retry may retain the recent same-session image until its 1.5-second deadline."
+          "clear": "Remove image src and hide it on stop/lifecycle change, invalid or hard-error capture, or freshness expiry. Brief busy/rate-limit retries may retain a recent same-session image until its 1.5-second deadline from request start."
         }
       },
       "desktopWindows": {
@@ -1290,7 +1290,7 @@
       "ios": "Requests hidden status bar, home-indicator auto-hide, and window-bounds layout. System Home/edge gestures remain; Split View/Stage Manager are not forced to fill the display. Exit/mode exit, resign-active/background, native tools, disconnect/re-pair, navigation/reload, or renderer termination restore safe-area layout.",
       "failure": "App-filling canvas remains with visible warning when system bars cannot be hidden.",
       "lifecycle": "Native deskwing-fullscreen event carries enabled/reason; disabled event restores the web layout and ends pen input where applicable.",
-      "verification": "Windows and unsigned iOS simulator CI passed at a9a85c93d01b6d03d79648644548431a53ee0efd. The user physically confirmed corrected Pen tablet image/fullscreen stability on the tested Xiaomi setup. Physical iPad behavior remains unverified. Later high-refresh display transport needs its own final checks."
+      "verification": "Stable main commit 66d20d88b37a6a65349fd3534e469c3706b89d23 passed 58 Windows suites and 11 unsigned iOS simulator tests. The user physically confirmed corrected Pen tablet image/fullscreen stability on the tested Xiaomi setup. Physical iPad behavior remains unverified. The resumed experimental H.264 display path is excluded from this checkpoint."
     },
     "penPreview": {
       "source": "companion/PenPreview.cs",
@@ -1307,15 +1307,15 @@
       "displayCapture": "Explicitly selected display, including visible windows.",
       "retention": "No disk frame storage or saved frame history.",
       "failure": "Unsupported/protected targets may fail or be blank. No guaranteed visual latency or full-motion playback.",
-      "verification": "The user physically confirmed 'pen tablet is good' and 'Yes, image and fullscreen are stable' after the correction, recorded at main checkpoint 3f1e050f99d502a4bbf61e5537984719b0837223. Exact latency, exhaustive edge calibration, and target-app compatibility remain separate.",
+      "verification": "The user physically confirmed 'pen tablet is good' and 'Yes, image and fullscreen are stable' after the correction, recorded at checkpoint 3f1e050f99d502a4bbf61e5537984719b0837223. Exact latency, exhaustive edge calibration, and target-app compatibility remain separate.",
+      "serverMinimumIntervalMs": 84,
+      "serverCaptureCapFps": 12,
       "clientMinimumIntervalMs": 96,
       "clientNominalMaximumFps": 10.416666666666666,
       "retryDelayMs": 120,
       "freshImageWindowMs": 1500,
       "transientBehavior": "Retain only a recent same-session image across known busy/rate-limit responses; do not reopen fullscreen tools.",
-      "hardErrorBehavior": "Clear the image and reveal fullscreen tools at most once per session.",
-      "serverMinimumIntervalMs": 84,
-      "serverCaptureCapFps": 12
+      "hardErrorBehavior": "Clear the image and reveal fullscreen tools at most once per session."
     },
     "nativeDisplayPresentation": {
       "android": {
@@ -1509,15 +1509,26 @@
           ],
           "cleanup": "Owned monitor removed; physical monitor topology unchanged.",
           "endToEndTabletMeasured": false
-        }
+        },
+        "androidCleanup": "Pending: build, lifecycle regression, and physical launch/playback validation after the Android cleanup fix."
+      },
+      "developmentStatus": {
+        "status": "resumed-in-progress",
+        "date": "2026-11-06",
+        "branch": "codex/display-high-refresh",
+        "androidBlocker": "Earlier candidate crashed on launch during UI-thread TLS cleanup. Checkpointed asynchronous cleanup remains unfinished and unverified.",
+        "physicalPlaybackVerified": false,
+        "stableMainTransport": "JPEG compatibility preview, at most four frames per second."
       }
     },
     "validationBaseline": {
-      "commit": "a9a85c93d01b6d03d79648644548431a53ee0efd",
-      "url": "https://github.com/tugcantopaloglu/tablet-deck-studio/actions/runs/42094855827",
+      "commit": "66d20d88b37a6a65349fd3534e469c3706b89d23",
+      "url": "https://github.com/tugcantopaloglu/deskwing/actions/runs/42108057065",
       "windowsRegression": "success",
+      "windowsSuites": 58,
       "iosSimulator": "success",
-      "scope": "Includes selected-target pen preview; predates native H.264 Second display."
+      "iosTests": 11,
+      "scope": "Stable main pen-preview corrections and canonical repository rename; excludes resumed native H.264 Second display."
     }
   },
   "components": [

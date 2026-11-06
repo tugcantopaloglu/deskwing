@@ -1,4 +1,4 @@
-# Tablet Deck application icon
+# DeskWing application icon
 
 The source is `app-icon.svg`: four rounded pads on the existing Studio charcoal background, three cyan and one ivory. It uses the application's existing colors, without lettering or gradients.
 

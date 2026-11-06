@@ -4,7 +4,7 @@ Version 1.3.0 introduced the following controls. Version 1.4 adds the [low-laten
 
 ## Install or update Windows
 
-Download **TabletDeck-Setup.exe** from the project's [releases](https://github.com/tugcantopaloglu/tablet-deck-studio/releases/latest). Run it, review the displayed destination, then type `INSTALL`. The console installer verifies the embedded package's paths and SHA-256 checksums before copying files. It installs for the current account, without administrator access, to:
+Download **TabletDeck-Setup.exe** from the project's [releases](https://github.com/tugcantopaloglu/deskwing/releases/latest). Run it, review the displayed destination, then type `INSTALL`. The console installer verifies the embedded package's paths and SHA-256 checksums before copying files. It installs for the current account, without administrator access, to:
 
 ```text
 %LOCALAPPDATA%\Programs\TabletDeckStudio

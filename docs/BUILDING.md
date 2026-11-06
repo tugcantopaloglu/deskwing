@@ -16,8 +16,8 @@ Native Second display prefers DXGI GPU duplication of the exact owned virtual-mo
 ## Clone and publish Windows
 
 ```powershell
-git clone https://github.com/tugcantopaloglu/tablet-deck-studio.git
-Set-Location tablet-deck-studio
+git clone https://github.com/tugcantopaloglu/deskwing.git
+Set-Location deskwing
 dotnet publish .\companion\TabletDeck.csproj -c Release -r win-x64 --self-contained true -o .\dist\Windows
 .\dist\Windows\TabletDeck-Companion.exe --self-test
 ```
